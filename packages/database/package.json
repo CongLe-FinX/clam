@@ -1,0 +1,26 @@
+{
+  "name": "@clam/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests",
+    "db:generate": "drizzle-kit generate"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.0",
+    "better-sqlite3": "^12.4.0",
+    "@clam/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
+    "@types/node": "^24.0.0",
+    "drizzle-kit": "^0.31.0",
+    "@types/better-sqlite3": "^7.6.13"
+  }
+}

@@ -1,0 +1,296 @@
+{
+ "generatedAt": 1793427205131,
+ "reports": [
+  {
+   "provider": "anthropic",
+   "fetchedAt": 1793427027323,
+   "limits": [
+    {
+     "id": "anthropic:5h",
+     "label": "Claude 5 Hour",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "5h",
+      "shared": true
+     },
+     "window": {
+      "id": "5h",
+      "label": "5 Hour",
+      "durationMs": 18000000,
+      "resetsAt": 1793430600194
+     },
+     "amount": {
+      "used": 26,
+      "limit": 100,
+      "remaining": 74,
+      "usedFraction": 0.26,
+      "remainingFraction": 0.74,
+      "unit": "percent"
+     },
+     "status": "ok"
+    },
+    {
+     "id": "anthropic:7d",
+     "label": "Claude 7 Day",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "7d",
+      "shared": true
+     },
+     "window": {
+      "id": "7d",
+      "label": "7 Day",
+      "durationMs": 604800000,
+      "resetsAt": 1793696400194
+     },
+     "amount": {
+      "used": 78,
+      "limit": 100,
+      "remaining": 22,
+      "usedFraction": 0.78,
+      "remainingFraction": 0.21999999999999997,
+      "unit": "percent"
+     },
+     "status": "ok"
+    },
+    {
+     "id": "anthropic:7d:fable",
+     "label": "Claude 7 Day (Fable)",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "7d",
+      "tier": "fable"
+     },
+     "window": {
+      "id": "7d",
+      "label": "7 Day",
+      "durationMs": 604800000,
+      "resetsAt": 1793696400000
+     },
+     "amount": {
+      "used": 0,
+      "limit": 100,
+      "remaining": 100,
+      "usedFraction": 0,
+      "remainingFraction": 1,
+      "unit": "percent"
+     },
+     "status": "ok"
+    }
+   ],
+   "metadata": {
+    "endpoint": "https://api.anthropic.com/api/oauth/usage",
+    "accountId": "ac*",
+    "email": "us*@*",
+    "orgId": "or*",
+    "orgName": "Or*"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "fetchedAt": 1793427027413,
+   "limits": [
+    {
+     "id": "anthropic:5h",
+     "label": "Claude 5 Hour",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "5h",
+      "shared": true
+     },
+     "window": {
+      "id": "5h",
+      "label": "5 Hour",
+      "durationMs": 18000000,
+      "resetsAt": 1793442600250
+     },
+     "amount": {
+      "used": 0,
+      "limit": 100,
+      "remaining": 100,
+      "usedFraction": 0,
+      "remainingFraction": 1,
+      "unit": "percent"
+     },
+     "status": "ok"
+    },
+    {
+     "id": "anthropic:7d",
+     "label": "Claude 7 Day",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "7d",
+      "shared": true
+     },
+     "window": {
+      "id": "7d",
+      "label": "7 Day",
+      "durationMs": 604800000,
+      "resetsAt": 1793440800250
+     },
+     "amount": {
+      "used": 99,
+      "limit": 100,
+      "remaining": 1,
+      "usedFraction": 0.99,
+      "remainingFraction": 0.010000000000000009,
+      "unit": "percent"
+     },
+     "status": "warning"
+    },
+    {
+     "id": "anthropic:7d:fable",
+     "label": "Claude 7 Day (Fable)",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "7d",
+      "tier": "fable"
+     },
+     "window": {
+      "id": "7d",
+      "label": "7 Day",
+      "durationMs": 604800000,
+      "resetsAt": 1793440800000
+     },
+     "amount": {
+      "used": 0,
+      "limit": 100,
+      "remaining": 100,
+      "usedFraction": 0,
+      "remainingFraction": 1,
+      "unit": "percent"
+     },
+     "status": "ok"
+    }
+   ],
+   "metadata": {
+    "endpoint": "https://api.anthropic.com/api/oauth/usage",
+    "accountId": "ac*",
+    "email": "us*@*",
+    "orgId": "or*",
+    "orgName": "Or*"
+   }
+  },
+  {
+   "provider": "anthropic",
+   "fetchedAt": 1793427027399,
+   "limits": [
+    {
+     "id": "anthropic:5h",
+     "label": "Claude 5 Hour",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "5h",
+      "shared": true
+     },
+     "window": {
+      "id": "5h",
+      "label": "5 Hour",
+      "durationMs": 18000000,
+      "resetsAt": 1793443800251
+     },
+     "amount": {
+      "used": 3,
+      "limit": 100,
+      "remaining": 97,
+      "usedFraction": 0.03,
+      "remainingFraction": 0.97,
+      "unit": "percent"
+     },
+     "status": "ok"
+    },
+    {
+     "id": "anthropic:7d",
+     "label": "Claude 7 Day",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "7d",
+      "shared": true
+     },
+     "window": {
+      "id": "7d",
+      "label": "7 Day",
+      "durationMs": 604800000,
+      "resetsAt": 1793628000251
+     },
+     "amount": {
+      "used": 84,
+      "limit": 100,
+      "remaining": 16,
+      "usedFraction": 0.84,
+      "remainingFraction": 0.16000000000000003,
+      "unit": "percent"
+     },
+     "status": "ok"
+    },
+    {
+     "id": "anthropic:7d:fable",
+     "label": "Claude 7 Day (Fable)",
+     "scope": {
+      "provider": "anthropic",
+      "windowId": "7d",
+      "tier": "fable"
+     },
+     "window": {
+      "id": "7d",
+      "label": "7 Day",
+      "durationMs": 604800000,
+      "resetsAt": 1793628000251
+     },
+     "amount": {
+      "used": 0,
+      "limit": 100,
+      "remaining": 100,
+      "usedFraction": 0,
+      "remainingFraction": 1,
+      "unit": "percent"
+     },
+     "status": "ok"
+    }
+   ],
+   "metadata": {
+    "endpoint": "https://api.anthropic.com/api/oauth/usage",
+    "accountId": "ac*",
+    "email": "us*@*",
+    "orgId": "or*",
+    "orgName": "Or*"
+   }
+  }
+ ],
+ "accountsWithoutUsage": [],
+ "disabledCredentials": [
+  {
+   "id": 3,
+   "provider": "mcp_oauth:profile:default:https://mcp.atlassian.com/v1/mcp",
+   "type": "oauth",
+   "cause": "oauth refresh failed",
+   "disabledAtMs": 1793192502000
+  }
+ ],
+ "capacity": {
+  "anthropic": [
+   {
+    "window": "5h",
+    "durationMs": 18000000,
+    "accounts": 3,
+    "usedAccounts": 0.29000000000000004,
+    "remainingAccounts": 2.71
+   },
+   {
+    "window": "7d",
+    "durationMs": 604800000,
+    "accounts": 3,
+    "usedAccounts": 2.61,
+    "remainingAccounts": 0.3900000000000001
+   },
+   {
+    "window": "7d",
+    "durationMs": 604800000,
+    "meter": "fable",
+    "accounts": 3,
+    "usedAccounts": 0,
+    "remainingAccounts": 3
+   }
+  ]
+ }
+}

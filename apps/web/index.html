@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en" class="dark" suppressHydrationWarning>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0b0c0f" />
+    <meta name="description" content="CL Agent Mesh — Distributed AI Agents. One Shared Workspace." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>CL Agent Mesh</title>
+    <script>
+      // Resolve the theme before first paint (no flash). Mirrors src/lib/theme.ts.
+      (function () {
+        try {
+          var pref = localStorage.getItem("clam.theme") || "system";
+          var dark = pref === "dark" || (pref === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+          var root = document.documentElement;
+          root.classList.toggle("dark", dark);
+          root.style.colorScheme = dark ? "dark" : "light";
+          var m = document.querySelector('meta[name="theme-color"]');
+          if (m) m.setAttribute("content", dark ? "#0b0c0f" : "#f6f6f4");
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      /* Pre-paint backdrop so the first frame already matches the theme. */
+      html { background: #f6f6f4; }
+      html.dark { background: #0b0c0f; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

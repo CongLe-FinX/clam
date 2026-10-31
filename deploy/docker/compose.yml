@@ -1,0 +1,45 @@
+# Two independent CL Agent Mesh "machines". Use deploy/docker/clam-nodes.sh (or `docker compose -f deploy/docker/compose.yml ...`).
+#
+# - No published ports: the only way in is each node's own Cloudflare quick tunnel (cloudflared runs inside the container).
+# - Plain default bridge network (no compose network, so no name resolution between the nodes): like real machines,
+#   they reach each other only through their public https://*.trycloudflare.com URLs.
+# - One named volume per node holds HOME: OMP profile + credentials, gh login, CLAM data/identity/secrets, project clones.
+#   `down -v` (clam-nodes.sh down) deletes them, and with them every credential.
+name: clam
+
+x-node: &node
+  image: clam-node:dev
+  build:
+    context: ../..
+    dockerfile: deploy/docker/Dockerfile
+  network_mode: bridge
+  restart: unless-stopped
+  environment:
+    CLAM_LOG_LEVEL: info
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:4317/api/local/health"]
+    interval: 15s
+    timeout: 5s
+    retries: 4
+    start_period: 30s
+
+services:
+  node-a:
+    <<: *node
+    container_name: clam-node-a
+    hostname: clam-node-a
+    volumes:
+      - clam-node-a-home:/home/clam
+
+  node-b:
+    <<: *node
+    container_name: clam-node-b
+    hostname: clam-node-b
+    volumes:
+      - clam-node-b-home:/home/clam
+
+volumes:
+  clam-node-a-home:
+    name: clam-node-a-home
+  clam-node-b-home:
+    name: clam-node-b-home

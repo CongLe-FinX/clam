@@ -1,0 +1,336 @@
+{
+ "overall": {
+  "totalRequests": 1859,
+  "successfulRequests": 1849,
+  "failedRequests": 10,
+  "errorRate": 0.0053792361484669175,
+  "totalInputTokens": 53666,
+  "totalOutputTokens": 1313622,
+  "totalCacheReadTokens": 416209750,
+  "totalCacheWriteTokens": 11306962,
+  "cacheRate": 0.9998710768279478,
+  "cacheSavings": 0.8982441354721098,
+  "totalCost": 189.2959356,
+  "unpricedRequests": 0,
+  "totalPremiumRequests": 0,
+  "avgDuration": 7952.545811737678,
+  "avgTtft": 2138.4304057898844,
+  "avgTokensPerSecond": 84.76323571733579,
+  "firstTimestamp": 1793341102236,
+  "lastTimestamp": 1793427201241
+ },
+ "byModel": [
+  {
+   "model": "claude-opus-5-5",
+   "provider": "anthropic",
+   "totalRequests": 1465,
+   "successfulRequests": 1455,
+   "failedRequests": 10,
+   "errorRate": 0.006825938566552901,
+   "totalInputTokens": 32259,
+   "totalOutputTokens": 1027313,
+   "totalCacheReadTokens": 377232206,
+   "totalCacheWriteTokens": 10285673,
+   "cacheRate": 0.9999144923442498,
+   "cacheSavings": 0.8981674590450023,
+   "totalCost": 178.4071212,
+   "unpricedRequests": 0,
+   "totalPremiumRequests": 0,
+   "avgDuration": 8360.212694537935,
+   "avgTtft": 2384.0327404787135,
+   "avgTokensPerSecond": 78.31437814200773,
+   "firstTimestamp": 1793341102242,
+   "lastTimestamp": 1793427142499
+  },
+  {
+   "model": "claude-sonnet-5-5",
+   "provider": "anthropic",
+   "totalRequests": 347,
+   "successfulRequests": 347,
+   "failedRequests": 0,
+   "errorRate": 0,
+   "totalInputTokens": 720,
+   "totalOutputTokens": 286139,
+   "totalCacheReadTokens": 38977544,
+   "totalCacheWriteTokens": 1021289,
+   "cacheRate": 0.9999815281665699,
+   "cacheSavings": 0.9001945046735897,
+   "totalCost": 10.8457404,
+   "unpricedRequests": 0,
+   "totalPremiumRequests": 0,
+   "avgDuration": 6264.311487288201,
+   "avgTtft": 1124.1706201729032,
+   "avgTokensPerSecond": 111.46931161285866,
+   "firstTimestamp": 1793344832252,
+   "lastTimestamp": 1793427201241
+  },
+  {
+   "model": "claude-sonnet-5",
+   "provider": "anthropic",
+   "totalRequests": 47,
+   "successfulRequests": 47,
+   "failedRequests": 0,
+   "errorRate": 0,
+   "totalInputTokens": 20687,
+   "totalOutputTokens": 170,
+   "totalCacheReadTokens": 0,
+   "totalCacheWriteTokens": 0,
+   "cacheRate": 0,
+   "cacheSavings": 0,
+   "totalCost": 0.043074,
+   "unpricedRequests": 0,
+   "totalPremiumRequests": 0,
+   "avgDuration": null,
+   "avgTtft": null,
+   "avgTokensPerSecond": null,
+   "firstTimestamp": 1793341102236,
+   "lastTimestamp": 1793427143597
+  }
+ ],
+ "byFolder": [
+  {
+   "folder": "-work-project-1",
+   "totalRequests": 1165,
+   "successfulRequests": 1155,
+   "failedRequests": 10,
+   "errorRate": 0.008583690987124463,
+   "totalInputTokens": 36106,
+   "totalOutputTokens": 784822,
+   "totalCacheReadTokens": 221140362,
+   "totalCacheWriteTokens": 6383913,
+   "cacheRate": 0.9998367547853237,
+   "cacheSavings": 0.89350509168501,
+   "totalCost": 102.9178142,
+   "unpricedRequests": 0,
+   "totalPremiumRequests": 0,
+   "avgDuration": 7867.65428466965,
+   "avgTtft": 2182.4918607122386,
+   "avgTokensPerSecond": 84.62460089940431,
+   "firstTimestamp": 1793341102236,
+   "lastTimestamp": 1793379371459
+  },
+  {
+   "folder": "-work-project-2",
+   "totalRequests": 585,
+   "successfulRequests": 585,
+   "failedRequests": 0,
+   "errorRate": 0,
+   "totalInputTokens": 13272,
+   "totalOutputTokens": 413992,
+   "totalCacheReadTokens": 189319259,
+   "totalCacheWriteTokens": 4459953,
+   "cacheRate": 0.9999299011113943,
+   "cacheSavings": 0.9053616267136881,
+   "totalCost": 81.2970337,
+   "unpricedRequests": 0,
+   "totalPremiumRequests": 0,
+   "avgDuration": 7765.748230971482,
+   "avgTtft": 2205.156673802138,
+   "avgTokensPerSecond": 82.70372676020665,
+   "firstTimestamp": 1793341374380,
+   "lastTimestamp": 1793410535111
+  },
+  {
+   "folder": "-work-project-3",
+   "totalRequests": 109,
+   "successfulRequests": 109,
+   "failedRequests": 0,
+   "errorRate": 0,
+   "totalInputTokens": 4288,
+   "totalOutputTokens": 114808,
+   "totalCacheReadTokens": 5750129,
+   "totalCacheWriteTokens": 463096,
+   "cacheRate": 0.9992548332871949,
+   "cacheSavings": 0.8100322629999703,
+   "totalCost": 5.0810877,
+   "unpricedRequests": 0,
+   "totalPremiumRequests": 0,
+   "avgDuration": 9953.812088809995,
+   "avgTtft": 1271.0483616599986,
+   "avgTokensPerSecond": 97.87394997220085,
+   "firstTimestamp": 1793425975166,
+   "lastTimestamp": 1793427201241
+  }
+ ],
+ "timeSeries": [
+  {
+   "timestamp": 1793340000000,
+   "requests": 148,
+   "errors": 0,
+   "tokens": 25365347,
+   "cost": 12.304293600000001
+  },
+  {
+   "timestamp": 1793343600000,
+   "requests": 316,
+   "errors": 0,
+   "tokens": 68390443,
+   "cost": 19.982022
+  },
+  {
+   "timestamp": 1793347200000,
+   "requests": 60,
+   "errors": 0,
+   "tokens": 26824819,
+   "cost": 13.933225
+  },
+  {
+   "timestamp": 1793350800000,
+   "requests": 345,
+   "errors": 3,
+   "tokens": 61555904,
+   "cost": 26.7235064
+  },
+  {
+   "timestamp": 1793354400000,
+   "requests": 269,
+   "errors": 3,
+   "tokens": 39731869,
+   "cost": 19.9622416
+  },
+  {
+   "timestamp": 1793358000000,
+   "requests": 4,
+   "errors": 1,
+   "tokens": 554469,
+   "cost": 0.1387098
+  },
+  {
+   "timestamp": 1793361600000,
+   "requests": 31,
+   "errors": 3,
+   "tokens": 5810526,
+   "cost": 3.6570412
+  },
+  {
+   "timestamp": 1793365200000,
+   "requests": 177,
+   "errors": 0,
+   "tokens": 32657720,
+   "cost": 17.978964
+  },
+  {
+   "timestamp": 1793368800000,
+   "requests": 195,
+   "errors": 0,
+   "tokens": 67324064,
+   "cost": 18.6715559
+  },
+  {
+   "timestamp": 1793372400000,
+   "requests": 81,
+   "errors": 0,
+   "tokens": 42671651,
+   "cost": 14.5637336
+  },
+  {
+   "timestamp": 1793376000000,
+   "requests": 79,
+   "errors": 0,
+   "tokens": 24461316,
+   "cost": 15.9226642
+  },
+  {
+   "timestamp": 1793379600000,
+   "requests": 24,
+   "errors": 0,
+   "tokens": 14308729,
+   "cost": 7.8909328
+  },
+  {
+   "timestamp": 1793408400000,
+   "requests": 21,
+   "errors": 0,
+   "tokens": 12894822,
+   "cost": 12.4859578
+  },
+  {
+   "timestamp": 1793422800000,
+   "requests": 17,
+   "errors": 0,
+   "tokens": 257520,
+   "cost": 0.42485059999999997
+  },
+  {
+   "timestamp": 1793426400000,
+   "requests": 92,
+   "errors": 0,
+   "tokens": 6074801,
+   "cost": 4.6562371
+  }
+ ],
+ "costSeries": [
+  {
+   "timestamp": 1793318400000,
+   "model": "claude-opus-5-5",
+   "provider": "anthropic",
+   "cost": 162.9270938,
+   "unpricedRequests": 0,
+   "costInput": 0.128476,
+   "costOutput": 18.937060000000002,
+   "costCacheRead": 72.66444580000001,
+   "costCacheWrite": 71.19711199999999,
+   "requests": 1405
+  },
+  {
+   "timestamp": 1793318400000,
+   "model": "claude-sonnet-5",
+   "provider": "anthropic",
+   "cost": 0.034622,
+   "unpricedRequests": 0,
+   "costInput": 0.033242,
+   "costOutput": 0.0013800000000000002,
+   "costCacheRead": 0,
+   "costCacheWrite": 0,
+   "requests": 38
+  },
+  {
+   "timestamp": 1793318400000,
+   "model": "claude-sonnet-5-5",
+   "provider": "anthropic",
+   "cost": 8.7671743,
+   "unpricedRequests": 0,
+   "costInput": 0.001176,
+   "costOutput": 2.36626,
+   "costCacheRead": 3.5489343,
+   "costCacheWrite": 2.8508039999999997,
+   "requests": 286
+  },
+  {
+   "timestamp": 1793404800000,
+   "model": "claude-opus-5-5",
+   "provider": "anthropic",
+   "cost": 15.480027399999999,
+   "unpricedRequests": 0,
+   "costInput": 0.00056,
+   "costOutput": 1.6092,
+   "costCacheRead": 2.7819954,
+   "costCacheWrite": 11.088272,
+   "requests": 60
+  },
+  {
+   "timestamp": 1793404800000,
+   "model": "claude-sonnet-5",
+   "provider": "anthropic",
+   "cost": 0.008452,
+   "unpricedRequests": 0,
+   "costInput": 0.008132,
+   "costOutput": 0.0003200000000000001,
+   "costCacheRead": 0,
+   "costCacheWrite": 0,
+   "requests": 9
+  },
+  {
+   "timestamp": 1793404800000,
+   "model": "claude-sonnet-5-5",
+   "provider": "anthropic",
+   "cost": 2.0785661,
+   "unpricedRequests": 0,
+   "costInput": 0.00026399999999999997,
+   "costOutput": 0.49513,
+   "costCacheRead": 0.3488201,
+   "costCacheWrite": 1.234352,
+   "requests": 61
+  }
+ ]
+}

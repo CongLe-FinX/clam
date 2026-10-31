@@ -1,0 +1,18 @@
+# Build context for deploy/docker/Dockerfile: sources + lockfile only.
+**/node_modules
+**/dist
+**/.data
+.git
+.gitignore
+.dockerignore
+deploy
+docs
+tmp
+**/tmp
+**/*.log
+**/coverage
+**/*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.DS_Store

@@ -1,0 +1,18 @@
+{
+  "name": "cl-agent-mesh",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CL Agent Mesh \u2014 Distributed AI Agents. One Shared Workspace.",
+  "packageManager": "pnpm@11.20.0",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @clam/server --filter @clam/web dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "start": "pnpm --filter @clam/server start"
+  }
+}

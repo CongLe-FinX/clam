@@ -1,0 +1,205 @@
+import { z } from "zod";
+import { IsoDate } from "./common.ts";
+
+/**
+ * Shared sessions: one piece of work driven by an agent session on one node, with agents on other nodes joined as
+ * participants. Design: docs/shared-sessions.md.
+ *
+ * - Exactly one DRIVER at a time (the node whose local OMP session does the work). `epoch` is the fencing token:
+ *   it increases on every driver change, and any driver action carrying an older epoch is refused.
+ * - Every participant node keeps a MIRROR session (read-only live copy of the driver's conversation, `AgentSession.kind
+ *   = "mirror"`) and, when its agent participates, its own local OMP "participant session" in its own clone.
+ * - The driver CHECKPOINTS after settled turns with changes: commit + push to the shared branch (never force) and an
+ *   OMP session snapshot (`omp session pack`) shipped to participants. Snapshots never enter Git.
+ * - TAKEOVER (manual, on a participant node — normally because the driver node is offline): check out the shared
+ *   branch at the last checkpoint, `omp session unpack` the last snapshot into a NEW local session, become driver with
+ *   epoch + 1. TRANSFER: the same, initiated by an online driver, which first takes a fresh checkpoint.
+ */
+
+export const SharedRole = z.enum(["driver", "participant"]);
+export type SharedRole = z.infer<typeof SharedRole>;
+
+export const Participant = z.object({
+	nodeId: z.string(),
+	nodeName: z.string(),
+	agentId: z.string().nullable(),
+	agentName: z.string().nullable(),
+	role: SharedRole,
+	state: z.enum(["invited", "active", "declined", "left", "removed"]),
+	/** Node reachability as seen from this node ("self" for this node). */
+	nodeStatus: z.enum(["self", "online", "degraded", "offline", "revoked"]),
+	/** The participant's OWN local OMP session on its node (its agent's session), when known. */
+	agentSessionId: z.string().nullable(),
+	/** Base URL of that node's web UI (its public URL), when known. */
+	uiUrl: z.string().nullable(),
+	joinedAt: IsoDate.nullable(),
+});
+export type Participant = z.infer<typeof Participant>;
+
+export const Checkpoint = z.object({
+	seq: z.number().int(),
+	epoch: z.number().int(),
+	nodeId: z.string(),
+	branch: z.string(),
+	commit: z.string().nullable(),
+	pushed: z.boolean(),
+	/** OMP session snapshot (archive v1) metadata; null when the snapshot could not be taken. */
+	snapshot: z.object({ sha256: z.string(), size: z.number().int(), messageCount: z.number().int() }).nullable(),
+	/** Which participants hold this snapshot locally. */
+	deliveredTo: z.array(z.string()),
+	note: z.string().nullable(),
+	at: IsoDate,
+});
+export type Checkpoint = z.infer<typeof Checkpoint>;
+
+/**
+ * Progress of a hand-over of the driver role, kept on the node that started it. Terminal phases (`continuing`, `failed`,
+ * `cancelled`) stay visible until `DELETE /shared/:id/transfer` dismisses them or a new transfer starts.
+ *   inviting → waiting_accept → stopping (only with `stopRunning` while a turn runs) → checkpointing (commit + push +
+ *   snapshot of everything) → delivering (target downloads the snapshot) → handing_over (target takes over) → continuing.
+ */
+export const TransferPhase = z.enum(["inviting", "waiting_accept", "stopping", "checkpointing", "delivering", "handing_over", "continuing", "failed", "cancelled"]);
+export type TransferPhase = z.infer<typeof TransferPhase>;
+
+export const SharedTransfer = z.object({
+	id: z.string(),
+	toNodeId: z.string(),
+	toNodeName: z.string(),
+	phase: TransferPhase,
+	/** One line describing the current phase, ready to show ("Waiting for node-b to accept the invitation…"). */
+	message: z.string(),
+	stopRunning: z.boolean(),
+	/** Set with `failed`. */
+	error: z.object({ code: z.string(), message: z.string() }).nullable(),
+	/** Set with `continuing`: the new driver's session on the target node, and its page (target UI URL + `/sessions/<id>`) when that node's UI URL is known. */
+	newSessionId: z.string().nullable(),
+	newSessionUrl: z.string().nullable(),
+	startedAt: IsoDate,
+	updatedAt: IsoDate,
+});
+export type SharedTransfer = z.infer<typeof SharedTransfer>;
+
+export const SharedSession = z.object({
+	id: z.string(),
+	workspaceId: z.string(),
+	title: z.string(),
+	repo: z.object({ url: z.string(), branch: z.string() }),
+	epoch: z.number().int(),
+	driverNodeId: z.string(),
+	/** This node's relation to it. */
+	localRole: z.enum(["driver", "participant", "former_driver"]),
+	/** The local session on THIS node that shows it: the driving session (driver), the mirror (participant), or the moved copy (former driver). */
+	localSessionId: z.string().nullable(),
+	/** The live mirror of the current driver's conversation on THIS node (null on the driver itself, or before the first sync). For a former driver `localSessionId` is the moved copy and this is the mirror of the new driver. */
+	mirrorSessionId: z.string().nullable(),
+	/** Local project (clone) on this node, when one is linked. */
+	localProjectId: z.string().nullable(),
+	participants: z.array(Participant),
+	lastCheckpoint: Checkpoint.nullable(),
+	/** Participant side: whether the driver looks offline and a takeover is possible right now. */
+	takeoverAvailable: z.boolean(),
+	/** Why takeover is not available (e.g. "no snapshot received yet", "no local clone"). */
+	takeoverBlockedReason: z.string().nullable(),
+	/** Rescue branch where this node's unpushed changes were saved after losing the driver role. */
+	rescueBranch: z.string().nullable(),
+	agentMessageBudget: z.number().int(),
+	unreadMessages: z.number().int(),
+	/** The hand-over this node started (null when none). */
+	transfer: SharedTransfer.nullable(),
+	createdAt: IsoDate,
+	updatedAt: IsoDate,
+});
+export type SharedSession = z.infer<typeof SharedSession>;
+
+export const SharedMessage = z.object({
+	id: z.string(),
+	sharedSessionId: z.string(),
+	author: z.object({
+		kind: z.enum(["human", "agent", "system"]),
+		nodeId: z.string(),
+		nodeName: z.string(),
+		agentId: z.string().nullable(),
+		agentName: z.string().nullable(),
+	}),
+	/** `chat` = a human talking to the group; `reply` = an agent's end-of-turn answer posted automatically; `system` = joins, hand-overs, checkpoints. */
+	kind: z.enum(["chat", "reply", "system", "instruction", "question", "answer", "note"]),
+	/** Who should act on it: `all`, the current `lead` (default without mentions), or explicit agents (from @mentions). */
+	to: z.object({ mode: z.enum(["all", "lead", "agents"]), agents: z.array(z.object({ nodeId: z.string(), agentId: z.string() })) }),
+	text: z.string(),
+	/** Node that accepted the message first (group log is replicated; any online member node can accept). */
+	originNodeId: z.string(),
+	/** Hybrid logical clock used for ordering: sort by (hlc, originNodeId). */
+	hlc: z.string(),
+	createdAt: IsoDate,
+	delivery: z.enum(["local", "pending", "delivered", "failed"]),
+	injectedIntoSession: z.boolean(),
+});
+export type SharedMessage = z.infer<typeof SharedMessage>;
+
+export const SharedSessionDetail = z.object({
+	shared: SharedSession,
+	checkpoints: z.array(Checkpoint),
+	messages: z.array(SharedMessage),
+});
+export type SharedSessionDetail = z.infer<typeof SharedSessionDetail>;
+
+/** Incoming invitation on a participant node. */
+export const SharedInvite = z.object({
+	id: z.string(),
+	sharedSessionId: z.string(),
+	from: z.object({ nodeId: z.string(), nodeName: z.string(), agentName: z.string().nullable() }),
+	title: z.string(),
+	repo: z.object({ url: z.string(), branch: z.string() }),
+	workspaceId: z.string(),
+	/** Requested local agent (null = this node picks). */
+	agentId: z.string().nullable(),
+	/** Local projects whose linked repo matches; empty = the user must clone first. */
+	candidateProjectIds: z.array(z.string()),
+	state: z.enum(["pending", "accepted", "declined", "expired"]),
+	createdAt: IsoDate,
+});
+export type SharedInvite = z.infer<typeof SharedInvite>;
+
+// ---------------------------------------------------------------- requests
+
+/** Turn a local session into a shared one (driver = this node) and invite a participant in one go. */
+export const AddParticipantBody = z.object({
+	nodeId: z.string().min(1),
+	/** Omit to let the participant node choose its agent. */
+	agentId: z.string().optional(),
+});
+export const DecideSharedInviteBody = z.discriminatedUnion("decision", [
+	z.object({ decision: z.literal("accept"), projectId: z.string().optional(), agentId: z.string().optional() }),
+	z.object({ decision: z.literal("decline"), reason: z.string().max(2000).optional() }),
+]);
+/** Humans post `chat` (default); @mentions in `text` are resolved server-side unless `to` is given explicitly. */
+export const PostSharedMessageBody = z.object({
+	text: z.string().trim().min(1).max(20_000),
+	kind: z.enum(["chat", "instruction", "answer", "note"]).default("chat"),
+	to: z.object({ mode: z.enum(["all", "lead", "agents"]), agents: z.array(z.object({ nodeId: z.string(), agentId: z.string() })).default([]) }).optional(),
+});
+export const CheckpointBody = z.object({ note: z.string().max(500).optional() });
+/** Participant side: continue the work here. */
+export const TakeoverBody = z.object({
+	/** Required when the driver is still reachable (prevents an accidental split brain). */
+	force: z.boolean().default(false),
+});
+/**
+ * Driver side: hand the driver role to another node. The target need not be a participant yet: it is invited first
+ * (like `AddParticipantBody`) and the transfer waits until it accepted. A running turn makes the request fail with
+ * `409 session_busy` unless `stopRunning` is true (the turn is then aborted before the final checkpoint).
+ */
+export const TransferBody = z.object({
+	toNodeId: z.string().min(1),
+	/** Agent on the target node; omit to let it choose (only used when the node still has to be invited). */
+	agentId: z.string().optional(),
+	stopRunning: z.boolean().optional(),
+});
+export type TransferBody = z.infer<typeof TransferBody>;
+
+/** Events on topic `shared` (list) and `shared:<id>` (detail). */
+export type SharedTopicEvent =
+	| { type: "shared"; shared: SharedSession }
+	| { type: "checkpoint"; sharedSessionId: string; checkpoint: Checkpoint }
+	| { type: "message"; sharedSessionId: string; message: SharedMessage }
+	| { type: "invite"; invite: SharedInvite };
