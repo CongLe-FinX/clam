@@ -12,7 +12,7 @@ export default function AboutPage() {
 		<>
 			<PageIntro title="About" description="CL Agent Mesh — Distributed AI Agents. One Shared Workspace." />
 			<PageBody>
-				<SettingsSection title="This node">
+				<SettingsSection title="This machine">
 					{node.isPending && <Skeleton className="h-40" />}
 					{node.isError && <InlineError error={node.error} onRetry={() => node.refetch()} />}
 					{n && (
@@ -21,7 +21,7 @@ export default function AboutPage() {
 							<KeyValue label="Version" mono>
 								{n.version}
 							</KeyValue>
-							<KeyValue label="Node id" mono>
+							<KeyValue label="Machine id" mono>
 								<span className="inline-flex flex-wrap items-center gap-2">
 									{n.id}
 									<CopyButton value={n.id} />

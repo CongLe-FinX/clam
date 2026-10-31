@@ -28,6 +28,14 @@ export const AccessStatus = z.object({
 	/** Remote session expiry (sliding), when signed in remotely. */
 	sessionExpiresAt: IsoDate.nullable(),
 	sessionTtlHours: z.number().int(),
+	/**
+	 * Machine tools over the node's domain. The Terminal and the Browser are always available on the loopback UI;
+	 * through the domain each must be switched on here (loopback only) and is off by default.
+	 */
+	remoteTerminalEnabled: z.boolean(),
+	remoteBrowserEnabled: z.boolean(),
+	/** Remote sessions: until when a recent password re-entry ("step-up") is valid; opening a terminal remotely needs it. Null for loopback / not elevated. */
+	elevatedUntil: IsoDate.nullable(),
 });
 export type AccessStatus = z.infer<typeof AccessStatus>;
 
@@ -38,8 +46,19 @@ export const SetPasswordBody = z.object({
 	currentPassword: z.string().max(256).optional(),
 });
 export const LoginBody = z.object({ password: z.string().min(1).max(256) });
-/** Enabling requires a password; loopback only. */
+/**
+ * `remoteUiEnabled` can only be switched on from the loopback UI. The Terminal/Browser toggles can be switched on from
+ * a signed-in remote session too, but only together with `password` (re-checked, rate-limited like login); switching
+ * anything OFF never needs it.
+ */
 export const UpdateAccessBody = z.object({
 	remoteUiEnabled: z.boolean().optional(),
 	sessionTtlHours: z.number().int().min(1).max(24 * 7).optional(),
+	remoteTerminalEnabled: z.boolean().optional(),
+	remoteBrowserEnabled: z.boolean().optional(),
+	/** Required on a remote session when turning `remoteTerminalEnabled` / `remoteBrowserEnabled` on. */
+	password: z.string().min(1).max(256).optional(),
 });
+/** Remote session: re-enter the owner password to unlock sensitive actions (remote terminal) for `ELEVATION_MINUTES`. */
+export const StepUpBody = z.object({ password: z.string().min(1).max(256) });
+export const ELEVATION_MINUTES = 10;

@@ -1,10 +1,10 @@
 import type { AgentSession, Project, SharedSession, Workspace } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, ArrowRightLeft, ChevronRight, MessagesSquare, PanelBottom, PanelLeft, PanelRight, Square, UserPlus, Users, WifiOff } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, ChevronRight, FolderOpen, MessagesSquare, PanelBottom, PanelLeft, PanelRight, Square, Terminal, UserPlus, WifiOff } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
 import { runtimeDot, SessionKindBadge } from "@/components/session-status";
-import { driverOf, NODE_STATUS_LABEL, nodeDot, teamOf } from "@/features/shared/format";
+import { driverOf, NODE_STATUS_LABEL, nodeDot } from "@/features/shared/format";
 import { errorMessage } from "@/lib/api";
 import { useWsStatus } from "@/lib/ws";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,7 @@ import { Tip } from "@/ui/tooltip";
 import { ModelPicker } from "./model-pickers.tsx";
 import { useUpdateSession } from "./session-actions.ts";
 import { isBusy, type SessionStream, useStreamMeta } from "./stream-store.ts";
+import { SessionMenu } from "./session-menu.tsx";
 
 const iconBtn =
 	"grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:bg-surface-2 aria-pressed:bg-surface-3 aria-pressed:text-foreground coarse:size-11 [&_svg]:size-4";
@@ -123,18 +124,24 @@ export function SessionHeader({
 	const stateLabel = runtime ? runtime.state : liveStatus === "error" ? "unavailable" : "starting";
 	const dot = runtime ? runtimeDot(runtime.state) : liveStatus === "error" ? "crashed" : "starting";
 	const driver = shared ? driverOf(shared) : undefined;
-	const team = shared ? teamOf(shared) : [];
 	const teamUnread = shared?.unreadMessages ?? 0;
 	/** Only the driving session (or one not shared yet) can bring more agents in. */
+	const isChat = project?.origin === "chat";
 	const canAdd = !readOnly && session.kind === "local" && (!shared || shared.localRole === "driver");
 
 	return (
-		<header className="flex h-12 shrink-0 items-center gap-1.5 border-b bg-surface-1/80 px-2 pt-safe backdrop-blur coarse:h-14 sm:px-3">
-			<Tip label="Back to project">
-				<Button asChild variant="ghost" size="icon" aria-label="Back to project">
-					<Link to="/projects/$projectId" params={{ projectId: session.projectId }}>
-						<ArrowLeft />
-					</Link>
+		<header className="flex h-[calc(3rem+env(safe-area-inset-top))] shrink-0 items-center gap-1.5 border-b bg-surface-1/80 px-2 pt-safe backdrop-blur coarse:h-[calc(3.5rem+env(safe-area-inset-top))] sm:px-3">
+			<Tip label={isChat ? "Back to chats" : "Back to project"}>
+				<Button asChild variant="ghost" size="icon" aria-label={isChat ? "Back to chats" : "Back to project"}>
+					{isChat ? (
+						<Link to="/chats">
+							<ArrowLeft />
+						</Link>
+					) : (
+						<Link to="/projects/$projectId" params={{ projectId: session.projectId }}>
+							<ArrowLeft />
+						</Link>
+					)}
 				</Button>
 			</Tip>
 			{!compact ? (
@@ -156,14 +163,14 @@ export function SessionHeader({
 							<>
 								<StatusDot status={dot} label={stateLabel} className="size-1.5 [&>span]:size-1.5" />
 								<span className="capitalize">{stateLabel}</span>
-								{project ? <span className="truncate">· {project.name}</span> : null}
+								{project && !isChat ? <span className="truncate">· {project.name}</span> : null}
 							</>
 						)}
 					</span>
 				</div>
 			) : (
 				<nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-0.5 text-[13px] text-muted-foreground">
-					{workspace ? (
+					{workspace && !isChat ? (
 						<>
 							<Link to="/workspaces/$workspaceId" params={{ workspaceId: workspace.id }} className="hidden max-w-[10rem] truncate rounded-md px-1.5 py-0.5 outline-none transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:bg-surface-2 lg:block">
 								{workspace.name}
@@ -171,7 +178,7 @@ export function SessionHeader({
 							<ChevronRight className="hidden size-3.5 shrink-0 text-subtle lg:block" aria-hidden />
 						</>
 					) : null}
-					{project ? (
+					{project && !isChat ? (
 						<>
 							<Link to="/projects/$projectId" params={{ projectId: project.id }} className="hidden max-w-[10rem] truncate rounded-md px-1.5 py-0.5 outline-none transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:bg-surface-2 sm:block">
 								{project.name}
@@ -201,31 +208,35 @@ export function SessionHeader({
 				) : (
 					<span className="hidden shrink-0 items-center gap-1.5 px-1 text-xs text-muted-foreground md:flex" role="status" aria-label={`Runtime ${stateLabel}`}>
 						<StatusDot status={dot} label={stateLabel} />
-						<span className="capitalize">{stateLabel}</span>
+						<span className="hidden capitalize lg:inline">{stateLabel}</span>
 					</span>
 				)
 			) : null}
-			{!compact && !readOnly ? <ModelPicker stream={stream} className="hidden md:inline-flex md:max-w-[14rem]" /> : null}
+			{!compact && !readOnly ? <ModelPicker stream={stream} className="hidden lg:inline-flex lg:max-w-[14rem]" /> : null}
 			{!compact && canAdd ? (
-				<Button size="sm" variant="outline" onClick={onAddAgent} className="hidden shrink-0 md:inline-flex">
-					<UserPlus /> Add agent
+				<Button size="sm" variant="outline" onClick={onAddAgent} className="hidden shrink-0 md:inline-flex" aria-label="Add agent" title="Add agent">
+					<UserPlus /> <span className="hidden xl:inline">Add agent</span>
 				</Button>
 			) : null}
 			{!compact && canAdd ? (
-				<Button size="sm" variant="primary" onClick={onHandover} className="hidden shrink-0 md:inline-flex">
-					<ArrowRightLeft /> Hand over…
-				</Button>
-			) : null}
-			{!compact && team.length > 0 ? (
-				<Button size="sm" variant="ghost" onClick={onOpenTeam} className="hidden shrink-0 md:inline-flex" aria-label={teamUnread > 0 ? `Team, ${teamUnread} unread messages` : "Team"}>
-					<Users /> Team
-					{teamUnread > 0 ? <span className="tabular grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 font-mono text-2xs font-semibold text-accent-foreground">{teamUnread}</span> : null}
+				<Button size="sm" variant="ghost" onClick={onHandover} className="hidden shrink-0 md:inline-flex" aria-label="Hand over" title="Hand over…">
+					<ArrowRightLeft /> <span className="hidden xl:inline">Hand over…</span>
 				</Button>
 			) : null}
 
-			{approvals > 0 ? <span className="tabular grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-warning px-1 text-2xs font-semibold text-background" title="Approvals waiting">{approvals}</span> : null}
+			{!compact && !readOnly ? (
+				<Tip label="Open terminal here">
+					<Button asChild variant="ghost" size="icon" aria-label="Open terminal here" className="hidden shrink-0 md:inline-flex">
+						<Link to="/terminal" search={{ project: session.projectId }}>
+							<Terminal />
+						</Link>
+					</Button>
+				</Tip>
+			) : null}
 
-			{busy && !readOnly ? (
+			{approvals > 0 && !compact ? <span className="tabular grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-warning px-1 text-2xs font-semibold text-background" title="Approvals waiting">{approvals}</span> : null}
+
+			{busy && !readOnly && !compact ? (
 				<Tip label={aborting ? "Stopping…" : "Stop the agent"} shortcut="Esc">
 					<Button
 						variant="outline"
@@ -241,27 +252,34 @@ export function SessionHeader({
 			) : null}
 
 			{compact ? (
-				<PanelToggle label="Threads" pressed={panels.showLeft} onClick={panels.onToggleLeft}>
-					<MessagesSquare />
-				</PanelToggle>
-			) : null}
-			{compact && canAdd ? (
-				<PanelToggle label="Hand over…" pressed={false} onClick={onHandover} className="text-accent">
-					<ArrowRightLeft />
+				<PanelToggle label={isChat ? "Files" : "Threads"} pressed={panels.showLeft} onClick={panels.onToggleLeft}>
+					{isChat ? <FolderOpen /> : <MessagesSquare />}
 				</PanelToggle>
 			) : null}
 			{compact ? (
-				<PanelToggle label={teamUnread > 0 ? `Team (${teamUnread} unread)` : "Team"} pressed={false} onClick={onOpenTeam} className="relative">
-					<Users />
-					{teamUnread > 0 ? <span aria-hidden className="absolute right-1.5 top-1.5 size-2 rounded-full bg-accent" /> : null}
-				</PanelToggle>
+				<SessionMenu
+					projectId={session.projectId}
+					canAdd={canAdd}
+					readOnly={readOnly}
+					teamUnread={teamUnread}
+					approvals={approvals}
+					onAddAgent={onAddAgent}
+					onHandover={onHandover}
+					onOpenTeam={onOpenTeam}
+					onToggleLog={panels.onToggleLog}
+					onToggleRight={panels.onToggleRight}
+				/>
 			) : null}
-			<PanelToggle label="Runtime log" shortcut="\\" pressed={panels.showLog} onClick={panels.onToggleLog}>
-				<PanelBottom />
-			</PanelToggle>
-			<PanelToggle label="Context" shortcut="]" pressed={panels.showRight} onClick={panels.onToggleRight}>
-				<PanelRight />
-			</PanelToggle>
+			{compact ? null : (
+				<>
+					<PanelToggle label="Runtime log" shortcut="\\" pressed={panels.showLog} onClick={panels.onToggleLog}>
+						<PanelBottom />
+					</PanelToggle>
+					<PanelToggle label="Context" shortcut="]" pressed={panels.showRight} onClick={panels.onToggleRight}>
+						<PanelRight />
+					</PanelToggle>
+				</>
+			)}
 		</header>
 	);
 }

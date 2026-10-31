@@ -1,10 +1,13 @@
 import { ulid, type wire } from "@clam/agent-network";
-import { agents, agentSessions, peerAgents, projects, workspaceMembers } from "@clam/database";
+import { rm } from "node:fs/promises";
+import { agents, agentSessions, peerAgents, projects, workspaceMembers, workspaces } from "@clam/database";
 import { isTerminalStatus, normalizeRepoUrl } from "@clam/task-engine";
-import type { TaskStatus } from "@clam/contracts";
+import type { TaskDeliverAs, TaskStatus } from "@clam/contracts";
 import { and, eq, isNull } from "drizzle-orm";
 import { ApiError } from "../http/errors.ts";
+import { followExecutor } from "./follow.ts";
 import type { CreateOutgoingInput, SenderApi, TaskHub } from "./hub.ts";
+import type { TaskFiles } from "./files.ts";
 import { TaskMirror } from "./mirror.ts";
 import { newTaskId, type TaskRow } from "./store.ts";
 
@@ -31,16 +34,24 @@ export class TaskSender implements SenderApi {
 			throw new ApiError(409, "capability_missing", `${peer.name} has not granted this node tasks.send, so tasks cannot be delegated to it`, { missing: ["tasks.send"] });
 		}
 
-		const project = db.select().from(projects).where(eq(projects.id, input.projectId)).get();
-		if (!project) throw ApiError.notFound("Project");
-		const repo = project.repository ? normalizeRepoUrl(project.repository.htmlUrl) : null;
-		if (!repo) throw new ApiError(409, "project_not_linked", "Link the project to its GitHub repository first: the other node finds the project by repository");
+		const project = input.projectId ? db.select().from(projects).where(eq(projects.id, input.projectId)).get() : undefined;
+		if (input.projectId && !project) throw ApiError.notFound("Project");
+		const linked = project?.repository ? normalizeRepoUrl(project.repository.htmlUrl) : null;
+		const deliverAs: TaskDeliverAs = input.deliverAs ?? (linked ? "branch" : "files");
+		if (deliverAs === "branch" && !linked) {
+			throw new ApiError(409, "project_not_linked", project ? "Link the project to its GitHub repository first: the other node finds the project by repository (or deliver the result as files)" : "A task delivered as a branch needs a project linked to its GitHub repository (or deliver the result as files)");
+		}
+		const inputPaths = input.inputPaths ?? [];
+		if (inputPaths.length > 0 && !project) throw ApiError.badRequest("inputPaths need the project they are taken from (projectId)");
+		// The other node finds its project by repository for branch/summary tasks; a files task runs in a folder of its own there.
+		const repo = deliverAs === "files" ? null : linked;
+		const workspaceId = this.workspaceFor(input, project?.workspaceId ?? null, peer);
 		const member = db
 			.select()
 			.from(workspaceMembers)
-			.where(and(eq(workspaceMembers.workspaceId, project.workspaceId), eq(workspaceMembers.memberId, peer.id), isNull(workspaceMembers.revokedAt)))
+			.where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.memberId, peer.id), isNull(workspaceMembers.revokedAt)))
 			.get();
-		if (!member) throw new ApiError(409, "workspace_not_shared", `The project's workspace is not shared with ${peer.name}`);
+		if (!member) throw new ApiError(409, "workspace_not_shared", `The task's workspace is not shared with ${peer.name}`);
 
 		// The directory cache is only a hint: an empty cache (never fetched) accepts any agent id and the executor decides.
 		const known = db.select().from(peerAgents).where(eq(peerAgents.peerId, peer.id)).all();
@@ -58,34 +69,46 @@ export class TaskSender implements SenderApi {
 
 		const id = newTaskId();
 		const correlationId = ulid();
+		// The input bundle is built (and its file placed) before the row exists; the row and the artifact are inserted together below.
+		let inputs: Awaited<ReturnType<TaskFiles["bundleInputs"]>> | null = null;
+		if (input.reuseInputsOf) {
+			const source = hub.store.find(input.reuseInputsOf);
+			inputs = source ? await hub.files.copyInputs(source, id) : null;
+		} else if (inputPaths.length > 0 && project) {
+			inputs = await hub.files.bundleInputs(id, project, inputPaths);
+		}
 		const body: wire.CreateTaskRequest = {
 			taskId: id,
-			workspaceId: project.workspaceId,
-			projectRef: { repoUrl: repo.url, ...(input.baseBranch ? { branch: input.baseBranch } : {}) },
+			workspaceId,
+			...(repo && { projectRef: { repoUrl: repo.url, ...(input.baseBranch ? { branch: input.baseBranch } : {}) } }),
+			...(inputs && { inputFiles: inputs.announced }),
 			title: input.title,
 			description: input.description,
 			...(input.targetAgentId ? { targetAgentId: input.targetAgentId } : {}),
-			deliverAs: input.deliverAs,
+			deliverAs,
 			constraints: input.constraints,
 			epoch: 0,
 			correlationId,
 			sender: { agentId: sender?.id ?? null, agentName: sender?.name ?? null },
 		};
 		// The row and its delivery are one decision: either both exist or neither.
-		const row = db.transaction(() => {
+		let row: TaskRow;
+		try {
+			row = db.transaction(() => {
 			const created = hub.store.insert({
 				id,
 				direction: "outgoing",
 				peerId: peer.id,
-				workspaceId: project.workspaceId,
-				projectId: project.id,
+				workspaceId,
+				projectId: project?.id ?? null,
 				title: input.title,
 				description: input.description,
 				status: "offered",
 				epoch: 0,
-				repoUrl: repo.url,
+				repoUrl: repo?.url ?? null,
 				repoBranch: input.baseBranch ?? null,
-				deliverAs: input.deliverAs,
+				deliverAs,
+				inputFiles: inputs?.announced ?? null,
 				constraints: input.constraints,
 				senderNodeId: identity.nodeId,
 				senderNodeName: hub.nodeName(),
@@ -99,12 +122,35 @@ export class TaskSender implements SenderApi {
 				retryOf: input.retryOf ?? null,
 				correlationId,
 			});
+			if (inputs) hub.store.insertArtifact(inputs.artifact);
 			hub.store.enqueue({ peerId: peer.id, taskId: id, kind: "task.create", path: "/tasks", body, correlationId });
 			return created;
-		});
+			});
+		} catch (error) {
+			if (inputs) await rm(hub.artifacts.taskDir(id), { recursive: true, force: true });
+			throw error;
+		}
 		hub.outbox.kick(peer.id);
 		hub.changed(id);
 		return row;
+	}
+
+	/** The workspace of a task: the one asked for, else the project's, else the only workspace this node shares with the executor. */
+	private workspaceFor(input: CreateOutgoingInput, projectWorkspaceId: string | null, peer: { id: string; name: string }): string {
+		const { db } = this.hub.ctx;
+		if (input.workspaceId && projectWorkspaceId && input.workspaceId !== projectWorkspaceId) throw ApiError.badRequest("The project belongs to another workspace than workspaceId");
+		const chosen = input.workspaceId ?? projectWorkspaceId;
+		if (chosen) {
+			if (!db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, chosen)).get()) throw ApiError.notFound("Workspace");
+			return chosen;
+		}
+		const shared = db
+			.select({ id: workspaceMembers.workspaceId })
+			.from(workspaceMembers)
+			.where(and(eq(workspaceMembers.memberId, peer.id), isNull(workspaceMembers.revokedAt)))
+			.all();
+		if (shared.length === 1) return (shared[0] as { id: string }).id;
+		throw new ApiError(409, "workspace_required", shared.length === 0 ? `No workspace is shared with ${peer.name}` : `${peer.name} is a member of several workspaces; choose one (workspaceId)`, { workspaces: shared.map((w) => w.id) });
 	}
 
 	async cancel(taskId: string, reason: string | null): Promise<TaskRow> {
@@ -148,14 +194,16 @@ export class TaskSender implements SenderApi {
 		const row = this.hub.store.get(taskId);
 		if (row.direction !== "outgoing") throw ApiError.conflict("Only the node that delegated a task can retry it");
 		if (!RETRYABLE_STATUSES.includes(row.status)) throw ApiError.conflict(`Only a finished task can be retried; this one is ${row.status}`);
-		if (!row.projectId) throw ApiError.conflict("The project this task was delegated from no longer exists");
+		if (!row.projectId && row.repoUrl) throw ApiError.conflict("The project this task was delegated from no longer exists");
 		return this.create({
 			targetNodeId: row.peerId,
 			targetAgentId: row.executorAgentId,
 			projectId: row.projectId,
+			workspaceId: row.workspaceId,
 			title: row.title,
 			description: row.description,
-			deliverAs: row.deliverAs === "summary" ? "summary" : "branch",
+			deliverAs: row.deliverAs as TaskDeliverAs,
+			reuseInputsOf: row.inputFiles ? row.id : null,
 			baseBranch: row.repoBranch,
 			constraints: row.constraints,
 			senderSessionId: row.senderSessionId,
@@ -169,6 +217,10 @@ export class TaskSender implements SenderApi {
 
 	syncPeer(peerId: string): Promise<void> {
 		return this.mirror.syncPeer(peerId);
+	}
+
+	followExecutor(taskId: string, callerId: string, change: wire.TaskExecutorChange): Promise<TaskRow> {
+		return followExecutor(this.hub, { taskId, callerId, change, syncOld: () => this.mirror.syncTask(taskId) });
 	}
 
 	start(): void {

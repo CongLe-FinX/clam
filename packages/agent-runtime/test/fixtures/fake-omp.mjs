@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Test fixture: stand-in for the `omp` binary. `--mode rpc` emulates the RPC server (fake-omp-rpc.mjs);
+// Test fixture: stand-in for the `omp` binary. `--mode rpc` / `--mode rpc-ui` emulate the RPC server (fake-omp-rpc.mjs);
 // every other invocation is handled by the CLI emulation (fake-omp-cli.mjs).
 const argv = process.argv.slice(2);
 const modeIndex = argv.indexOf("--mode");
-if (modeIndex !== -1 && argv[modeIndex + 1] === "rpc") {
+if (modeIndex !== -1 && (argv[modeIndex + 1] === "rpc" || argv[modeIndex + 1] === "rpc-ui")) {
 	const { runRpc } = await import("./fake-omp-rpc.mjs");
 	process.exit(await runRpc(argv, process.env));
 } else {

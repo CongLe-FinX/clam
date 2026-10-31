@@ -80,6 +80,13 @@ export const projects = sqliteTable(
 		repositoryId: text("repository_id"),
 		/** Linked repository snapshot (contracts `RepositoryRef`); null when unlinked. */
 		repository: text("repository", { mode: "json" }).$type<RepositoryRef | null>(),
+		/**
+		 * Created by CL Agent Mesh under `<dataDir>/projects/<id>` (the user picked no path). Whether the folder is a git
+		 * working tree is NOT stored: `vcs` is derived live from the folder (a `.git` entry at its root).
+		 */
+		managed: integer("managed", { mode: "boolean" }).notNull().default(false),
+		/** `user` = a project the person added or created; `chat` = the working folder of a chat started without a project. */
+		origin: text("origin", { enum: ["user", "chat"] }).notNull().default("user"),
 		createdAt: text("created_at").notNull().default(now),
 		updatedAt: text("updated_at").notNull().default(now),
 	},
@@ -465,11 +472,14 @@ export const tasks = sqliteTable(
 		status: text("status").notNull().default("offered"),
 		/** Ownership epoch / fencing token (protocol §9). */
 		epoch: integer("epoch").notNull().default(0),
-		repoUrl: text("repo_url").notNull(),
+		/** null = a task without a git repository (deliverAs summary/files). */
+		repoUrl: text("repo_url"),
 		repoBranch: text("repo_branch"),
 		repoCommit: text("repo_commit"),
-		/** summary | branch */
+		/** summary | branch | files */
 		deliverAs: text("deliver_as").notNull().default("branch"),
+		/** The input bundle sent along (sender: stored as an artifact of this task; executor: fetched from the sender); null = none. */
+		inputFiles: text("input_files", { mode: "json" }).$type<{ artifactId: string; sha256: string; size: number; fileCount: number } | null>(),
 		constraints: text("constraints", { mode: "json" }).$type<TaskConstraints>().notNull().default(sql`'{}'`),
 		senderNodeId: text("sender_node_id").notNull(),
 		senderNodeName: text("sender_node_name").notNull(),
@@ -494,6 +504,10 @@ export const tasks = sqliteTable(
 		execState: text("exec_state", { mode: "json" }).$type<Record<string, unknown>>().notNull().default(sql`'{}'`),
 		/** Sender side: the terminal/blocked status for which a note was already injected into the delegating session. */
 		notifiedStatus: text("notified_status"),
+		/** M7: this node released the task by a handoff (or saw a higher epoch): its sessions are never started, resumed or prompted again. */
+		fenced: integer("fenced", { mode: "boolean" }).notNull().default(false),
+		/** M7: highest ownership epoch this node has ever seen for the task (boot fence scan, docs/handoff-protocol.md §8). */
+		highestSeenEpoch: integer("highest_seen_epoch").notNull().default(0),
 		createdAt: text("created_at").notNull().default(now),
 		updatedAt: text("updated_at").notNull().default(now),
 		startedAt: text("started_at"),
@@ -646,6 +660,19 @@ export interface SharedTransferMeta {
 	updatedAt: string;
 }
 
+/** Files mode: what the former driver kept of its own work (see `shared_sessions.rescue_files`). */
+export interface SharedRescueFiles {
+	/** Relative to `<dataDir>/shared`. */
+	path: string;
+	sha256: string;
+	size: number;
+	fileCount: number;
+	/** The files in the bundle (capped at 200). */
+	paths: string[];
+	epoch: number;
+	at: string;
+}
+
 /** Node-private bookkeeping of a shared session (never leaves the node). */
 export interface SharedMeta {
 	/** Former driver: the rescue/moved/mirror steps of the epoch change are not finished yet (re-run at boot). */
@@ -656,6 +683,8 @@ export interface SharedMeta {
 	turnsSinceCheckpoint?: number;
 	/** Driver: the hand-over this node started (progress and result; terminal records stay until dismissed). */
 	transfer?: SharedTransferMeta | null;
+	/** Files mode: the checkpoint whose folder bundle this node last made (driver) or applied (participant); undefined = the folder never received one. */
+	appliedFilesSeq?: number;
 	/** Participant: the node already fetched the shared branch once. */
 	[key: string]: unknown;
 }
@@ -673,9 +702,12 @@ export const sharedSessions = sqliteTable(
 		title: text("title").notNull(),
 		/** What the work is about (the first prompt / title); sent to participants as the briefing. */
 		goal: text("goal").notNull().default(""),
-		repoUrl: text("repo_url").notNull(),
-		/** The shared branch `clam/shared/<slug>-<shortid>`. */
-		branch: text("branch").notNull(),
+		/** git | files: how the working files travel (a shared branch, or folder bundles with no repository). */
+		vcs: text("vcs").notNull().default("git"),
+		/** null in files mode. */
+		repoUrl: text("repo_url"),
+		/** The shared branch `clam/shared/<slug>-<shortid>`; null in files mode. */
+		branch: text("branch"),
 		baseBranch: text("base_branch"),
 		baseCommit: text("base_commit"),
 		epoch: integer("epoch").notNull().default(1),
@@ -693,6 +725,8 @@ export const sharedSessions = sqliteTable(
 		/** Loop guard: agent messages a node may post to the thread without a human message in between. */
 		agentMessageLimit: integer("agent_message_limit").notNull().default(12),
 		rescueBranch: text("rescue_branch"),
+		/** Files mode: the former driver's unsynced local changes, saved as a bundle under `<dataDir>/shared/<id>/` (`{ path, sha256, size, fileCount, paths, at }`). */
+		rescueFiles: text("rescue_files", { mode: "json" }).$type<SharedRescueFiles | null>(),
 		lastCheckpointSeq: integer("last_checkpoint_seq").notNull().default(0),
 		meta: text("meta", { mode: "json" }).$type<SharedMeta>().notNull().default(sql`'{}'`),
 		createdAt: text("created_at").notNull().default(now),
@@ -783,6 +817,33 @@ export const sharedMessages = sqliteTable(
 );
 
 /**
+ * Files posted into the group chat of a shared session (migration `0008_chats`). The metadata replicates with the message
+ * that carries it; the bytes live in `<dataDir>/attachments/<sha256>` (content-addressed, shared by every row with the same
+ * digest) and `stored` says whether THIS node holds them. `message_id` is null between the upload and the message that
+ * references it. `copied_path` is where this node's agent already got a copy (relative to its project folder).
+ */
+export const sharedAttachments = sqliteTable(
+	"shared_attachments",
+	{
+		id: text("id").primaryKey(),
+		sharedSessionId: text("shared_session_id")
+			.notNull()
+			.references(() => sharedSessions.id, { onDelete: "cascade" }),
+		messageId: text("message_id"),
+		name: text("name").notNull(),
+		mimeType: text("mime_type").notNull(),
+		size: integer("size").notNull(),
+		sha256: text("sha256").notNull(),
+		/** The node that first stored the bytes. */
+		originNodeId: text("origin_node_id").notNull(),
+		stored: integer("stored", { mode: "boolean" }).notNull().default(false),
+		copiedPath: text("copied_path"),
+		createdAt: text("created_at").notNull().default(now),
+	},
+	(t) => [index("shared_attachments_session_idx").on(t.sharedSessionId), index("shared_attachments_message_idx").on(t.messageId)],
+);
+
+/**
  * Checkpoints: the driver's commit on the shared branch plus the OMP session snapshot (`omp session pack`, archive v1).
  * Every node stores the metadata; `snapshot_path` (relative to `<dataDir>/shared`, file mode 0600) is set on the nodes that
  * hold the archive: the driver that made it and each participant that downloaded it. Snapshots never enter Git.
@@ -797,9 +858,14 @@ export const sharedCheckpoints = sqliteTable(
 		epoch: integer("epoch").notNull(),
 		/** The driver node that took it. */
 		nodeId: text("node_id").notNull(),
-		branch: text("branch").notNull(),
+		/** null in files mode. */
+		branch: text("branch"),
 		commit: text("commit"),
 		pushed: integer("pushed", { mode: "boolean" }).notNull().default(false),
+		/** Files mode: the folder bundle of this checkpoint (metadata on every node; `files_path` on the nodes that hold the archive). */
+		files: text("files", { mode: "json" }).$type<{ sha256: string; size: number; fileCount: number } | null>(),
+		/** Relative to `<dataDir>/shared`, file mode 0600. */
+		filesPath: text("files_path"),
 		snapshotSha256: text("snapshot_sha256"),
 		snapshotSize: integer("snapshot_size"),
 		snapshotMessages: integer("snapshot_messages"),
@@ -827,8 +893,9 @@ export const sharedInvites = sqliteTable(
 		fromAgentName: text("from_agent_name"),
 		title: text("title").notNull(),
 		goal: text("goal").notNull().default(""),
-		repoUrl: text("repo_url").notNull(),
-		repoBranch: text("repo_branch").notNull(),
+		vcs: text("vcs").notNull().default("git"),
+		repoUrl: text("repo_url"),
+		repoBranch: text("repo_branch"),
 		workspaceId: text("workspace_id").notNull(),
 		/** The local agent the driver asked for; null = this node picks. */
 		agentId: text("agent_id"),

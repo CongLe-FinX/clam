@@ -1,8 +1,8 @@
 # CL Agent Mesh — Handoff State Machine and Recovery Design
 
-> **Note (M5 shipped part of this).** [Shared sessions](./shared-sessions.md) (M5) already deliver a **manual takeover**: a participant node unpacks the driver's last OMP session snapshot (`omp session pack`/`unpack`), checks out the shared git branch checkpoint, becomes the driver under a new **epoch** (fencing), and the returning former driver becomes a read-only *moved* copy with a **rescue branch**; a driver that is online can **transfer** the role after a fresh checkpoint that the target acknowledged. What remains **planned for M7** and is specified below: the handoff package/manifest, the source/target state machines with the ten target steps, **dependency/environment setup and the durable target ack before the source may release**, `POST /handoffs*`, `task_assignments`/`handoffs` tables, recovery at every state, and **context sync** (`.clmesh/`, M6). The shared-session epoch is per shared session, not per task; M7 unifies the two.
+> **Status: implemented in M7** (server side; Handoff Center UI in `apps/web/src/features/handoff`). The design below is what the code does; where the implementation chose differently or added something, an **Implemented as (M7)** note says so, and [§11](#11-implemented-as-m7) lists the units, wire calls and deviations in one place. Earlier, [shared sessions](./shared-sessions.md) (M5) delivered the manual takeover of a *shared session*; M7 records those hand-overs as `kind: session` handoffs and adds dependency setup + validation to them.
 
-Status: **design for M7** (handoff + checkpoint + recovery). Prerequisites: node identity/pairing (M3), task engine (M4), context + git sync (M2/M6). M1 contains none of this code; it only reserves the data model ([database-schema.md](./database-schema.md#34-handoffs--m7)) and the vocabulary.
+Prerequisites: node identity/pairing (M3), task engine (M4), context + git sync (M2/M6). Pure logic (manifest, state tables, recovery decisions, fencing, environment detection, setup runner, resume prompt) is `@clam/handoff-engine`; the server side is `apps/server/src/handoff/`; the data model is [database-schema.md §3.4](./database-schema.md#34-handoffs--m7-implemented-migration-0009_handoff).
 
 A **handoff** moves ownership of an in-flight task from a **source** node to a **target** node so the target can continue while the source goes offline. Acceptance test **T4**: A codes to some state, A creates a handoff, B pulls code + context, B sets up deps, B acks, A goes offline, B continues, A returns but does **not** run the task twice.
 
@@ -90,6 +90,7 @@ interface HandoffManifest {
     runtimes: { name: string; versionRange: string }[];     // e.g. node >=22.12
     packageManager?: { name: string; lockfile: string; installCommand: string };
     requiredEnvVars: string[];           // NAMES only
+    projects?: { path: string; packageManager: { name: string; lockfile: string | null; installCommand: string } }[];   // ≤ 20 projects in subfolders (depth ≤ 3: a `web/package.json` under a root without one); absent when the root is the only project. `path` is a relative folder inside the work folder; each install runs with that folder as cwd
     setupCommands: string[];             // reviewed; run only after target approval policy allows
     systemRequirements: string[];
   };
@@ -191,7 +192,7 @@ Combined view (happy path): `draft → preparing → offered → accepted → aw
 | 2 | **Persist** | In one SQLite transaction: insert `handoffs` (status `persisted`, manifest, hash), create/attach the local `tasks` row in state `handoff_pending`, write step log `handoff_steps`. Artifacts are downloaded/verified by sha-256 and stored | `failed(manifest_invalid\|disk_full)` |
 | 3 | **Git restore** | Locate/clone the project repo (account from `github_connections`, never from the source). `git fetch`; check out `git.branch` at `git.commit` into a **dedicated worktree/branch** so the user's own changes are never overwritten (never force, never discard local changes). Apply `patch` with `git apply --check` then `git apply`; restore untracked files. Refuse if the target checkout has conflicting local changes | `failed(checkout_conflict\|patch_failed\|git_unavailable)` |
 | 4 | **Context restore** | Fetch referenced `contexts` versions from `.clmesh/` (via git) or `/context/sync`; verify sha-256; load plan and conversation summary into local task context | `failed(manifest_invalid)` if hashes mismatch |
-| 5 | **Dependency setup** | Check `environment.runtimes` against local tools; run `packageManager.installCommand` and reviewed `setupCommands` per local approval policy (default: show to the user on the target node for approval unless the node has pre-authorized setup for this workspace). Timeouts per command | `failed(deps_failed)` |
+| 5 | **Dependency setup** | Check `environment.runtimes` against local tools; run `packageManager.installCommand` (in the work folder), the install command of every `projects[]` entry (in its own folder), and the reviewed `setupCommands` per local approval policy (default: show to the user on the target node for approval unless the node has pre-authorized setup for this workspace). Timeouts per command | `failed(deps_failed)` |
 | 6 | **Validate workspace** | HEAD equals `git.commit` (+ patch applied), tree matches manifest expectations, `requiredFiles` exist, optional `checkCommand` passes | `failed(validation_failed)` |
 | 7 | **Create new local OMP session** | Create an `agent_sessions` row (new CL session, new session directory); start runtime; `open_session` on the new directory; seed it with the handoff context (see §9). **Never** resumes the source's OMP session | `failed(session_failed)` |
 | 8 | **Durable ack** | In one transaction write `handoffs.status = acked`, `ack_at`, `target_session_id`, new `owner_epoch` candidate; **then** `POST /handoffs/:id/ack` (retried until deadline — safe because idempotent). The ack record is written to disk *before* it is sent | send failure: keep retrying; do not proceed past step 9 until the source's response arrives **or** the recovery rule in §6.4 applies |
@@ -304,3 +305,49 @@ Why a new session is mandatory: a runtime session binds provider credentials, mo
 ## 10. Observability
 
 Each state transition emits a handoff event (`handoff:<id>` stream, `seq` gap-free) and a `task_events` row with `correlationId`; both nodes show identical timelines in **Handoff Center** ([ui-sitemap.md](./ui-sitemap.md)). Failures include `failure_code`, the last completed step, and the recommended action (retry, extend, reclaim, cancel). Tests required by the spec: process crash at each state (§6), network disconnect between offer/ack, duplicate events and replayed requests (idempotency + nonces), source returning after ack, concurrent competing handoffs for the same task (unique `(task_id, epoch)`).
+
+---
+
+## 11. Implemented as (M7)
+
+### 11.1 Units (`apps/server/src/handoff/`)
+
+| Unit | Role |
+| --- | --- |
+| `store.ts` | every SQL statement: compare-and-set `transition` (the engine's edge table is enforced), gap-free `handoff_events`, steps, setup rows, artifacts, the `Handoff` view with the per-role/state `actions` |
+| `service.ts` | composition root `HandoffService` (`ctx.handoffs`); `hub.transition` persists a state + timeline event + the outbox items it announces **in one transaction**, publishes `handoffs` / `handoff:<id>`, then runs the fault-injection check; local API |
+| `source.ts`, `source-prepare.ts` | source flow: create → preparing (freeze, OMP `handoff` summary, git commit+push or patch / folder bundle / none, environment, contexts, thread, manifest seal) → offered → accepted → awaiting_ack → acked → released → completed; cancel / extend / reclaim / retry |
+| `target.ts`, `restore.ts`, `context-restore.ts`, `projects.ts`, `target-task.ts` | target flow: the ten steps, re-entrant per step; project/agent resolution; task row creation; ownership; resume prompt |
+| `setup.ts` | `DependencySetup`: dependency-setup policy + validation (steps 5–6), shared with `kind: session` handoffs |
+| `fence.ts` | fencing: freeze (source window) / fence (released) / `assertOwner` / boot fence scan / prompt guard |
+| `recovery.ts` | boot recovery with `recoveryAction`, timers (offer expiry, restore deadline, completed grace), reconcile on peer reconnect |
+| `session-kind.ts` | `kind: session` records of M5 hand-over/takeover + steps 5–6 before the continuation prompt |
+| `outbox.ts` | outbox kinds `handoff.offer|accept|ack|state` and `task.executor`, delivered by the M4 `OutboxService` (ordered per `(handoff, peer)`; the ack is retried until the restore deadline) |
+| `fault.ts` | `CLAM_FAULT=handoff:<role>:<state>` fault injection |
+| `tasks/follow.ts` | the task sender following the new executor |
+
+### 11.2 Wire (`/api/v1`, signed, `Idempotency-Key`; one capability `handoff.receive`, checked on the receiving node, needed in **both** directions)
+
+| Call | From → to | Notes |
+| --- | --- | --- |
+| `POST /handoffs` | source → target | `{handoffId, taskId, fromEpoch, toEpoch, manifest, manifestSha256, expiresAt}`; `201 {state:"received"}`; `409 stale_epoch` (+`details.currentEpoch`), `409 competing_handoff`, `400 manifest_invalid` |
+| `POST /handoffs/:id/accept` | target → source | `{epoch, targetAgentId?, acceptedAt}` → `{state: accepted\|rejected, deadlineAt}` (the source's clock decides the restore window) |
+| `POST /handoffs/:id/ack` | target → source | the durable ack (`manifestSha256`, `epoch`, `targetSessionId`, `validation`, `fencingToken` signed by the target); the source verifies hash, epoch, caller = pinned target, token; persists `acked` **first**; answers `{fencingToken, sourceLastEventSeq}`; a stale ack (reclaimed/cancelled) is `409 stale_epoch` |
+| `POST /handoffs/:id/state` | both ways | progress (`persisted … session_created`, `owner`, `resumed`, `completed`), `rejected`, `failed` + failure, `cancelled`; source → target: `cancelled`, `reclaimed`, `expired`, `released`, `extended` (+`deadlineAt`) |
+| `GET /handoffs/:id` | either way | this node's side (`state`, `taskEpoch`, `failure`, `ackAt`, `fencingToken`, `lastEventSeq`): the authoritative answer for reconcile/recovery; `404` when the caller is not the counterpart |
+| `GET /handoffs/:id/artifacts/:artifactId` | target → source | folder bundle / patch / base manifest / opt-in transcript pack, streamed with `Content-Digest`; sha-256 and size verified against the manifest |
+| `POST /tasks/:id/executor` | new executor → task **sender** | `tasks.receive`; `wire.TaskExecutorChange`; verified with the caller's pinned key (fencing token); the sender follows the new executor |
+
+### 11.3 Decisions that refine the design above
+
+* **Sender follows the executor.** A task has three nodes: the SENDER (A), the executor/source (B) and the target (C). After step 9 C tells **A** (`POST /tasks/:id/executor`, durable outbox item `task.executor`); A switches its outgoing row to C (`peer`, executor columns, epoch, event base), retargets still-pending outbox items (rewriting `epoch`), then polls C. C must be paired with A, an active member of the task's workspace and hold `tasks.receive` from A, else it **rejects** at step 1 with a clear reason (B checks workspace membership of A and C at creation). If the target is the sender itself ("returns home") A flips its own outgoing row into a local executor row (`direction = incoming`, `peerId` = own node id).
+* **Event timeline continuity.** B appends one `note` event during preparing and seals `task.lastEventSeq` K; nothing else is appended on B afterwards (the task is **frozen**: `execState.handoffId`; the executor ignores its events, `mesh_complete` and cancel are refused locally, and wire messages/cancel from the sender get `503 handoff_in_progress`/`503 handed_off` + `Retry-After: 2` so the sender's outbox keeps them until the executor changed). C's row starts at `lastEventSeq = K`; its first events are K+1.
+* **Release without events.** On a valid ack B sets `tasks.status = handed_off`, `fenced = true`, `highest_seen_epoch = n+1` with no status event; the sender ignores `handed_off` records (does not adopt status/epoch/result) and waits for the new executor's notice.
+* **Retryable target failures.** `deps_failed`, `validation_failed`, `files_conflict`, `checkout_conflict`, `patch_failed`, `git_unavailable`, `disk_full`, `session_failed` leave the target at its step (user can **Retry**) and the source in `awaiting_ack` (frozen, owner; the restore deadline still applies and ends in `ack_timeout`). Every other failure (`cancelled`, `timeout`, `superseded`, `manifest_invalid`, `policy_denied`, `capacity`) moves the source to `failed` and unfreezes the task.
+* **Denied setup commands are not a failure.** Denied (or `skip`ped) commands are reported as skipped in the resume prompt; only a failing command is `deps_failed`.
+* **`draft` is not observable**: the row is inserted and advanced to `preparing` in one synchronous step.
+* **Fault injection.** `CLAM_FAULT=handoff:<role>:<state>[,…]` (`*` wildcards) exits the process (code 86) right after the matching state is durable and before any side effect that follows; `HandoffServiceOptions.fault = { spec, mode: "throw" }` is the in-process test seam (the service then "crashes": nothing more is persisted). Tests restart the node on the same data directory and assert recovery.
+* **Late results.** A fenced executor whose agent still finishes stores a `late_result` task event (never a status/result change; not served on the wire).
+* **Git mode.** The source commits WIP on the task branch and pushes (never forced); when it cannot push it ships a `git diff --binary` patch built with a temporary index on the base commit. The target creates its own work branch `clam/<node>/…-h<handoffId>` from the commit, applies the patch with `git apply --check` then `git apply`, and never touches the user's checkout (`checkout_conflict` when tracked changes would be overwritten).
+* **Files mode / none.** The task folder travels as a `@clam/workspace-files` bundle (credential-scanned) plus the executor's base manifest (so the final result bundle still measures against the original input); `vcs none` has nothing to restore.
+* **Settings.** `NodeSettings.dependencySetup` (`ask` default | `auto` | `skip`) and `autoAcceptHandoffs` (default `false`).

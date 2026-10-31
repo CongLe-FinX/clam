@@ -18,24 +18,48 @@ export const routes = {
 	tunnelStop: "/tunnel/stop", // POST → TunnelState
 
 	// Owner access to this node's UI through its domain. Login/status answer without a session; everything else needs one remotely.
-	access: "/access", // GET AccessStatus · PATCH UpdateAccessBody → AccessStatus (loopback only)
+	access: "/access", // GET AccessStatus · PATCH UpdateAccessBody → AccessStatus (enabling: loopback only; remote sessions may only switch off)
 	accessPassword: "/access/password", // PUT SetPasswordBody → AccessStatus
 	accessLogin: "/access/login", // POST LoginBody → AccessStatus (sets the session cookie)
 	accessLogout: "/access/logout", // POST → 204
 	accessLogoutAll: "/access/logout-all", // POST → 204 (invalidates every remote session)
+	accessStepUp: "/access/step-up", // POST StepUpBody → AccessStatus (remote session: elevatedUntil = now + ELEVATION_MINUTES)
+
+	// Machine Terminal: real shells on THIS machine (PTYs). Loopback UI always; through the domain only when switched on + step-up. Never relayed through /api/v1.
+	// The terminal bytes travel on the dedicated socket `GET /ws/terminal/:id` (see TERMINAL_WS_PATH in terminal.ts), not on /ws.
+	terminalInfo: "/terminal", // GET TerminalInfo
+	terminalSessions: "/terminal/sessions", // GET TerminalSession[] · POST CreateTerminalBody → TerminalSession (remote: needs step-up)
+	terminalSession: (id: string) => `/terminal/sessions/${id}`, // GET TerminalSession · PATCH UpdateTerminalBody → TerminalSession · DELETE → 204 (kills the shell and removes the terminal)
+
+	// Machine Browser: a headless Chromium ON this machine, streamed to the UI (see browser.ts). Loopback UI always; through the domain only when switched on. Never relayed through /api/v1.
+	// The pixels and input travel on the dedicated socket `GET /ws/browser/:tabId` (see browserSocketPath in browser.ts), not on /ws.
+	browser: "/browser", // GET BrowserStatus
+	browserInstall: "/browser/install", // POST → BrowserStatus (installs Chromium into <dataDir>/browsers; progress in BrowserStatus.install, poll `browser`)
+	browserTabs: "/browser/tabs", // GET BrowserTab[] · POST OpenTabBody → BrowserTab (starts the browser on first use)
+	browserTab: (tabId: string) => `/browser/tabs/${tabId}`, // DELETE → 204
+	browserNavigate: (tabId: string) => `/browser/tabs/${tabId}/navigate`, // POST NavigateBody → BrowserTab (bare `localhost:1234` → http://localhost:1234; chrome://, devtools:// and file:// outside project folders → 400 `url_blocked`)
+	browserPorts: "/browser/ports", // GET ListeningPort[] (TCP listeners on this machine, excluding this node's own ports)
+	browserDownloads: "/browser/downloads", // GET BrowserDownload[]
+	browserDownload: (name: string) => `/browser/downloads/${encodeURIComponent(name)}`, // GET the file (attachment)
+	browserUpload: (uploadId: string) => `/browser/uploads/${uploadId}`, // PUT raw bytes, ?name=<file name> (repeat for several files) → 204; then send `file-chooser-done` on the tab's socket
 
 	// Shared sessions (driver/participants, mirror, checkpoints, takeover)
 	sharedSessions: "/shared", // GET SharedSession[]
-	sharedSession: (id: string) => `/shared/${id}`, // GET SharedSessionDetail
+	sharedSession: (id: string) => `/shared/${id}`, // GET ?messageLimit=N → SharedSessionDetail (without messageLimit: the whole log)
 	sessionParticipants: (sessionId: string) => `/sessions/${sessionId}/participants`, // POST AddParticipantBody → SharedSession (shares the session on first use)
 	sharedParticipant: (id: string, nodeId: string) => `/shared/${id}/participants/${nodeId}`, // DELETE → SharedSession
-	sharedMessages: (id: string) => `/shared/${id}/messages`, // POST PostSharedMessageBody → SharedMessage
+	sharedMessages: (id: string) => `/shared/${id}/messages`, // POST PostSharedMessageBody → SharedMessage · GET ?before=<cursor>&limit=1..200 → SharedMessagesPage (newest page when no cursor)
 	sharedRead: (id: string) => `/shared/${id}/read`, // POST → 204
+	sharedAttachmentUpload: (id: string) => `/shared/${id}/attachments`, // POST raw bytes ?name= (Content-Type = file type) → SharedAttachment (then reference it in PostSharedMessageBody.attachmentIds)
+	sharedAttachment: (id: string, attachmentId: string) => `/shared/${id}/attachments/${attachmentId}`, // GET ?download=1 → bytes (Range supported; fetched from a member node when not stored here)
+	sharedAttachmentSave: (id: string, attachmentId: string) => `/shared/${id}/attachments/${attachmentId}/save`, // POST SaveAttachmentBody → FileEntry (copy into a local project folder)
 	sharedCheckpoint: (id: string) => `/shared/${id}/checkpoint`, // POST CheckpointBody → Checkpoint (driver only)
 	sharedTakeover: (id: string) => `/shared/${id}/takeover`, // POST TakeoverBody → SharedSession (participant: continue here)
 	sharedTransfer: (id: string) => `/shared/${id}/transfer`, // POST TransferBody → 202 SharedSession (driver: hand over to a participant; progress in SharedSession.transfer) · DELETE → SharedSession (cancel a pending hand-over, or dismiss a finished one)
 	sessionHandover: (sessionId: string) => `/sessions/${sessionId}/handover`, // POST TransferBody → 202 SharedSession (shares the session first when it is not shared yet, invites the node, then hands over)
 	sharedLeave: (id: string) => `/shared/${id}/leave`, // POST → SharedSession (participant leaves)
+	sharedRescuePreview: (id: string) => `/shared/${id}/rescue/preview`, // GET ?projectId → FilesPreview (files mode: the rescue bundle vs a local project)
+	sharedRescueApply: (id: string) => `/shared/${id}/rescue/apply`, // POST ApplyFilesBody → FilesApplyResult
 	sharedInvites: "/shared/invites", // GET SharedInvite[]
 	sharedInviteDecide: (id: string) => `/shared/invites/${id}/decide`, // POST DecideSharedInviteBody → SharedInvite
 
@@ -61,7 +85,29 @@ export const routes = {
 	taskRetry: (id: string) => `/tasks/${id}/retry`, // POST → Task (sender side; a NEW task with retryOf = id)
 	taskRead: (id: string) => `/tasks/${id}/read`, // POST → 204 (marks messages read)
 	taskArtifact: (id: string, artifactId: string) => `/tasks/${id}/artifacts/${artifactId}`, // GET → artifact bytes (fetched from the executor when needed)
+	taskFilesPreview: (id: string) => `/tasks/${id}/files/preview`, // GET ?projectId → FilesPreview (result bundle vs a local project)
+	taskFilesApply: (id: string) => `/tasks/${id}/files/apply`, // POST ApplyFilesBody → FilesApplyResult (never overwrites a locally changed file unless listed in `overwrite`)
 	activity: "/activity", // GET ?workspaceId&limit&before → ActivityItem[]
+
+	// Handoff (M7): move an in-flight task (or record a shared-session hand-over) with dependency setup + durable ack
+	handoffs: "/handoffs", // GET HandoffListQuery → Handoff[] · POST CreateTaskHandoffBody → 202 Handoff (source: the task's executor)
+	handoff: (id: string) => `/handoffs/${id}`, // GET HandoffDetail · DELETE → Handoff (source: cancel while offered/accepted/awaiting_ack)
+	handoffDecide: (id: string) => `/handoffs/${id}/decide`, // POST DecideHandoffBody → Handoff (target: accept / reject)
+	handoffSetup: (id: string) => `/handoffs/${id}/setup`, // POST SetupDecisionBody → Handoff (target: approve / deny setup commands)
+	handoffRetry: (id: string) => `/handoffs/${id}/retry`, // POST → Handoff (source: prepare_failed → draft → preparing; target: re-run the failed step)
+	handoffExtend: (id: string) => `/handoffs/${id}/extend`, // POST ExtendHandoffBody → Handoff (source: awaiting_ack / ack_timeout)
+	handoffReclaim: (id: string) => `/handoffs/${id}/reclaim`, // POST ReclaimHandoffBody → Handoff (source: ack_timeout → reclaimed, tombstone epoch)
+
+	// Context (M6): memory, plans, decisions, summaries — private by default, shareable ones sync to workspace members
+	contexts: "/contexts", // GET ContextListQuery → Context[] · POST CreateContextBody → Context
+	context: (id: string) => `/contexts/${id}`, // GET Context · PATCH UpdateContextBody → Context · DELETE → 204 (local copy; a shareable one is tombstoned for members)
+	contextVersions: (id: string) => `/contexts/${id}/versions`, // GET ContextVersion[]
+	contextResolve: (id: string) => `/contexts/${id}/resolve`, // POST ResolveContextConflictBody → Context
+	contextSearch: "/contexts/search", // GET ContextSearchQuery → ContextSearchHit[]
+	contextExport: (projectId: string) => `/projects/${projectId}/context/export`, // POST → ContextExportResult (git projects; writes .clmesh/, no commit)
+	contextImport: (projectId: string) => `/projects/${projectId}/context/import`, // POST → ContextImportResult (git projects; reads .clmesh/)
+	workspaceMembers: (workspaceId: string) => `/workspaces/${workspaceId}/members`, // GET WorkspaceMember[] · POST AddWorkspaceMemberBody → WorkspaceMember[]
+	workspaceMember: (workspaceId: string, nodeId: string) => `/workspaces/${workspaceId}/members/${nodeId}`, // DELETE → WorkspaceMember[]
 
 	// workspaces & projects
 	workspaces: "/workspaces", // GET Workspace[] · POST CreateWorkspaceBody → Workspace
@@ -70,6 +116,8 @@ export const routes = {
 	project: (id: string) => `/projects/${id}`, // GET · PATCH UpdateProjectBody · DELETE
 	projectFiles: (id: string) => `/projects/${id}/files`, // GET ?path= → FileEntry[] (one directory level)
 	projectFile: (id: string) => `/projects/${id}/file`, // GET ?path= → FileContent
+	projectRaw: (id: string) => `/projects/${id}/raw`, // GET ?path=&download=1 → file bytes with its content type (Range supported: video/audio seek, pdf)
+	projectUpload: (id: string) => `/projects/${id}/upload`, // POST raw bytes ?path= (relative, parent dirs created; refuses to overwrite unless &overwrite=1) → FileEntry
 	dirSuggestions: "/fs/suggest", // GET ?prefix= → DirSuggestion[]
 
 	// agents & sessions
@@ -78,13 +126,18 @@ export const routes = {
 	sessions: "/sessions", // GET ?projectId&archived → AgentSession[] · POST CreateSessionBody → AgentSession
 	session: (id: string) => `/sessions/${id}`, // GET · PATCH UpdateSessionBody · DELETE
 	sessionMessages: (id: string) => `/sessions/${id}/messages`, // GET ?cursor&limit → MessagesPage (newest page first when no cursor)
+	sessionOutputs: (id: string) => `/sessions/${id}/outputs`, // GET → SessionOutputsPage (files each agent turn created/modified in the project folder)
 	sessionState: (id: string) => `/sessions/${id}/state`, // GET SessionLiveState (starts runtime if needed)
 	sessionPrompt: (id: string) => `/sessions/${id}/prompt`, // POST PromptBody → PromptAccepted
 	sessionAbort: (id: string) => `/sessions/${id}/abort`, // POST → 204
 	sessionModel: (id: string) => `/sessions/${id}/model`, // POST SetModelBody → SessionLiveState
 	sessionThinking: (id: string) => `/sessions/${id}/thinking`, // POST SetThinkingBody → SessionLiveState
-	sessionUiResponse: (id: string) => `/sessions/${id}/ui-response`, // POST UiResponseBody → 204
+	sessionUiResponse: (id: string) => `/sessions/${id}/ui-response`, // POST UiResponseBody → 204 (on a mirror of a shared session: forwarded to the driver, 409 already_answered when somebody was first)
 	sessionUiRequests: (id: string) => `/sessions/${id}/ui-requests`, // GET PendingUiRequest[] (unanswered)
+	sessionSubagents: (id: string) => `/sessions/${id}/subagents`, // GET SubagentsPage (live registry, or the last known snapshot while the runtime is stopped)
+	sessionSubagentMessages: (id: string, subagentId: string) => `/sessions/${id}/subagents/${subagentId}/messages`, // GET ?fromByte → SubagentMessagesPage (incremental transcript)
+	sessionSubagentCancel: (id: string, subagentId: string) => `/sessions/${id}/subagents/${subagentId}/cancel`, // POST → CancelSubagentResult
+	sessionSubagentSteer: (id: string, subagentId: string) => `/sessions/${id}/subagents/${subagentId}/steer`, // POST SteerSubagentBody → 204
 	runtime: "/runtime", // GET RuntimeStatus[]
 	runtimeStop: (sessionId: string) => `/runtime/${sessionId}/stop`, // POST → 204
 	runtimeRestart: (sessionId: string) => `/runtime/${sessionId}/restart`, // POST → RuntimeStatus

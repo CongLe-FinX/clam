@@ -35,6 +35,34 @@ function info(node = a, over: Record<string, unknown> = {}) {
 	};
 }
 
+describe("no-git payloads (files mode, task inputs)", () => {
+	const sha = "a".repeat(64);
+	it("a task without projectRef parses, with optional input files and deliverAs files", () => {
+		const create = { taskId: "tsk_01J", workspaceId: "w1", title: "T", description: "d", epoch: 0, correlationId: "corr_1", deliverAs: "files", inputFiles: { artifactId: "art_1", sha256: sha, size: 10, fileCount: 2 } };
+		const parsed = wire.CreateTaskRequest.parse(create);
+		expect(parsed.projectRef ?? null).toBeNull();
+		expect(parsed.inputFiles).toMatchObject({ fileCount: 2 });
+		expect(wire.CreateTaskRequest.safeParse({ ...create, inputFiles: { ...create.inputFiles, sha256: "short" } }).success).toBe(false);
+	});
+
+	it("a files-mode invite carries vcs and no repo; the default stays git", () => {
+		const base = { inviteId: "shi_01J", sharedSessionId: "shs_01J", workspaceId: "w1", title: "T", epoch: 1 };
+		expect(wire.SharedInviteRequest.parse({ ...base, vcs: "files" })).toMatchObject({ vcs: "files" });
+		const git = wire.SharedInviteRequest.parse({ ...base, repo: { url: "https://github.com/o/r", branch: "clam/shared/x" } });
+		expect(git.vcs).toBe("git");
+		expect(wire.SharedInviteRequest.safeParse({ ...base, vcs: "svn" }).success).toBe(false);
+	});
+
+	it("checkpoint notices and acks describe the folder bundle", () => {
+		const notice = wire.SharedCheckpointNotice.parse({ seq: 1, epoch: 1, pushed: false, files: { sha256: sha, size: 5, fileCount: 1 }, at: "2030-01-01T00:00:00.000Z" });
+		expect(notice.branch ?? null).toBeNull();
+		expect(notice.files).toMatchObject({ fileCount: 1 });
+		expect(wire.SharedCheckpointAck.parse({ files: { sha256: sha, size: 5 } }).sha256).toBeUndefined();
+		expect(wire.SharedCheckpointAck.parse({ sha256: sha, size: 5 })).toMatchObject({ size: 5 });
+		expect(wire.SharedCheckpointAck.safeParse({ files: { sha256: "x", size: 5 } }).success).toBe(false);
+	});
+});
+
 describe("wire.NodeInfo", () => {
 	it("accepts a well-formed document with either key encoding and a null publicUrl, ignoring unknown fields", () => {
 		expect(wire.NodeInfo.safeParse(info()).success).toBe(true);

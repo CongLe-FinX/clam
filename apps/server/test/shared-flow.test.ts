@@ -46,8 +46,8 @@ describe("sharing a session and joining it", () => {
 		// A: a SharedSession with this node as driver, epoch 1 and a shared branch created from main and pushed
 		expect(shared).toMatchObject({ epoch: 1, localRole: "driver", localSessionId: sessionId, localProjectId: pair.projectA.id, driverNodeId: pair.aId, title: "Add notes" });
 		expect(shared.repo).toEqual({ url: "https://github.com/acme/demo", branch: expect.stringMatching(/^clam\/shared\/add-notes-[a-z0-9]{6}$/) });
-		expect(remoteBranches(pair.origin)).toContain(shared.repo.branch);
-		expect(git(pair.workA, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo.branch);
+		expect(remoteBranches(pair.origin)).toContain(shared.repo?.branch);
+		expect(git(pair.workA, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo?.branch);
 		expect((await sessionOn(pair.a, sessionId)).sharedSessionId).toBe(shared.id);
 
 		// B: participant, with a read-only mirror and its own briefed participant session in its clone
@@ -62,7 +62,7 @@ describe("sharing a session and joining it", () => {
 
 		// the first checkpoint: committed + pushed by A (nothing to commit but the session), snapshot delivered to B
 		const onA = await waitForShared(pair.a, shared.id, (s) => s.lastCheckpoint?.snapshot != null && s.lastCheckpoint.deliveredTo.includes(pair.bId), "the snapshot reached B");
-		expect(onA.lastCheckpoint).toMatchObject({ seq: 1, epoch: 1, nodeId: pair.aId, branch: shared.repo.branch, pushed: true });
+		expect(onA.lastCheckpoint).toMatchObject({ seq: 1, epoch: 1, nodeId: pair.aId, branch: shared.repo?.branch, pushed: true });
 		const onBLater = await waitForShared(pair.b, shared.id, (s) => s.lastCheckpoint?.snapshot != null && s.takeoverBlockedReason !== "No session snapshot has been received yet", "B holds the snapshot");
 		expect(onBLater.lastCheckpoint?.snapshot?.sha256).toBe(onA.lastCheckpoint?.snapshot?.sha256);
 		const stored = path.join(pair.b.dataDir, "shared", shared.id, "snapshots", "1.tar");
@@ -172,12 +172,12 @@ describe("checkpoints", () => {
 		const next = await waitForShared(pair.a, shared.id, (s) => (s.lastCheckpoint?.seq ?? 0) >= 2 && s.lastCheckpoint?.deliveredTo.includes(pair.bId) === true, "an automatic checkpoint with the file");
 		const checkpoint = next.lastCheckpoint as Checkpoint;
 		expect(checkpoint.pushed).toBe(true);
-		expect(git(pair.origin, "show", `${shared.repo.branch}:SHARED_NOTES.md`)).toBe("line one\n");
-		const message = git(pair.origin, "log", "-1", "--format=%B", shared.repo.branch);
+		expect(git(pair.origin, "show", `${shared.repo?.branch}:SHARED_NOTES.md`)).toBe("line one\n");
+		const message = git(pair.origin, "log", "-1", "--format=%B", shared.repo?.branch as string);
 		expect(message).toContain(`Session: ${shared.id}`);
 		expect(message).toContain("Epoch: 1");
 		expect(message).toContain("Agent: OMP Agent@node-a");
-		expect(git(pair.origin, "rev-parse", shared.repo.branch).trim()).toBe(checkpoint.commit);
+		expect(git(pair.origin, "rev-parse", shared.repo?.branch as string).trim()).toBe(checkpoint.commit);
 
 		// a manual checkpoint with nothing new: no new commit, a new snapshot
 		const manual = await api(pair.a).post<Checkpoint>(`/shared/${shared.id}/checkpoint`, { note: "before lunch" });
@@ -201,5 +201,17 @@ describe("checkpoints", () => {
 		await eventually(async () => (await transcriptTexts(pair.a, sessionId)).some((t) => t.includes("FAKE: during the cycle")), "the complete answer to the prompt sent during the cycle");
 		expect((await taking).status).toBe(200);
 		expect((await sessionsOn(pair.a)).find((s) => s.id === sessionId)).toBeDefined();
+	});
+
+	it("a turn that settles while a checkpoint runs is covered by the next checkpoint, not followed by an empty extra one", async () => {
+		pair = await startSharedPair();
+		const { sessionId, shared } = await pair.shareAndJoin({ firstPrompt: "start" });
+		// no waiting for the initial checkpoint: this turn settles while it runs, which used to leave a second, empty automatic checkpoint queued behind the one that covers the turn
+		await promptAndWait(pair.a, sessionId, "@@fake-sh echo 'line one' > SHARED_NOTES.md");
+		const covering = await waitForShared(pair.a, shared.id, (s) => (s.lastCheckpoint?.seq ?? 0) >= 2 && s.lastCheckpoint?.deliveredTo.includes(pair.bId) === true, "the automatic checkpoint with the file");
+		// a manual checkpoint queues behind every automatic one that is still waiting: it is the very next one only when none is
+		const manual = await api(pair.a).post<Checkpoint>(`/shared/${shared.id}/checkpoint`, {});
+		expect(manual.status).toBe(200);
+		expect(manual.body.seq).toBe((covering.lastCheckpoint as Checkpoint).seq + 1);
 	});
 });

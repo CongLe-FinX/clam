@@ -1,3 +1,4 @@
+import { type MentionCandidate, mentionTokens, parseMentions } from "@clam/contracts";
 import { describe, expect, it } from "vitest";
 import {
 	BUFFER_MAX_CHARS,
@@ -9,14 +10,12 @@ import {
 	mergeHlc,
 	orderGroupMessages,
 	parseHlc,
-	parseMentions,
 	parseSharedInjectionHeader,
 	pickFallbackAgent,
 	resolveRecipients,
 	tickHlc,
 	wakeBudget,
 	wakesAgents,
-	type MentionCandidate,
 	type MessageTo,
 } from "../src/index.ts";
 
@@ -104,6 +103,70 @@ describe("parseMentions", () => {
 		const longer: MentionCandidate = { nodeId: "node_e", nodeName: "Node-E", agentId: "ag_e", agentName: "Ada Lovelace" };
 		expect(parseMentions("@Ada Lovelace you too", [A, longer]).agents).toEqual(targets(longer));
 		expect(parseMentions("@ada then @Ada then @node-a", [A, longer]).agents).toEqual(targets(A));
+	});
+
+	describe("two agents with the same name on different machines", () => {
+		const alpha: MentionCandidate = { nodeId: "node_alpha", nodeName: "Alpha", agentId: "ag_1", agentName: "OMP Agent" };
+		const bravo: MentionCandidate = { nodeId: "node_bravo", nodeName: "Bravo", agentId: "ag_2", agentName: "OMP Agent" };
+		const twins = [alpha, bravo];
+
+		it("a qualified @agent@machine mention addresses exactly one agent", () => {
+			expect(parseMentions("@OMP Agent@Bravo please look", twins).agents).toEqual(targets(bravo));
+			expect(parseMentions("@OMP Agent@Alpha", twins).agents).toEqual(targets(alpha));
+			expect(parseMentions("@omp-agent@bravo, @ompagent@ALPHA", twins).agents).toEqual(targets(bravo, alpha));
+			expect(parseMentions("hi @OMP Agent@Bravo", twins).agents).toEqual(targets(bravo));
+		});
+
+		it("a qualified mention works with a machine name that has spaces or hyphens", () => {
+			const mac: MentionCandidate = { nodeId: "node_mac", nodeName: "Cong's Mac mini", agentId: "ag_3", agentName: "OMP Agent" };
+			const lin: MentionCandidate = { nodeId: "node_lin", nodeName: "build-box", agentId: "ag_4", agentName: "OMP Agent" };
+			expect(parseMentions("@OMP Agent@Cong's Mac mini go", [mac, lin]).agents).toEqual(targets(mac));
+			expect(parseMentions("@OMP Agent@build-box go", [mac, lin]).agents).toEqual(targets(lin));
+			expect(parseMentions("@OMP Agent@build box go", [mac, lin]).agents).toEqual([]);
+		});
+
+		it("the machine short form addresses one agent; the bare ambiguous name still addresses all of them", () => {
+			expect(parseMentions("@Bravo", twins).agents).toEqual(targets(bravo));
+			expect(parseMentions("@OMP Agent", twins).agents).toEqual(targets(alpha, bravo));
+		});
+
+		it("a qualifier that matches nothing never widens into every agent of that name", () => {
+			expect(parseMentions("@OMP Agent@Charlie hello", twins)).toEqual({ all: false, agents: [] });
+			// …but a unique name keeps working next to punctuation
+			expect(parseMentions("@Ada, @Bob Builder@Node-C", [A, B, C]).agents).toEqual(targets(A, C));
+		});
+
+		it("an agent whose name is another machine's name is still told apart by the qualified form", () => {
+			const odd: MentionCandidate = { nodeId: "node_x", nodeName: "Bravo", agentId: "ag_x", agentName: "Zed" };
+			const other: MentionCandidate = { nodeId: "node_y", nodeName: "Yankee", agentId: "ag_y", agentName: "Bravo" };
+			expect(parseMentions("@Zed@Bravo", [odd, other]).agents).toEqual(targets(odd));
+			expect(parseMentions("@Bravo@Yankee", [odd, other]).agents).toEqual(targets(other));
+		});
+
+		it("resolveRecipients: a human message with the qualified token goes to that agent only", () => {
+			expect(resolveRecipients({ author: "human", authorNodeId: "node_alpha", text: "@OMP Agent@Bravo answer this", candidates: twins })).toEqual({ mode: "agents", agents: targets(bravo) });
+		});
+
+		it("the picker's tokens each address exactly the one agent they were made for", () => {
+			const solo: MentionCandidate = { nodeId: "node_s", nodeName: "Sierra", agentId: "ag_s", agentName: "Ada" };
+			const group = [alpha, bravo, solo];
+			// ambiguous agent name → the machine short form
+			expect(mentionTokens({ ...bravo, agentName: "OMP Agent" }, group)).toEqual({ agent: "@Bravo", machine: "@Bravo" });
+			// unique agent name → the name; the machine form is its own option
+			expect(mentionTokens({ ...solo, agentName: "Ada" }, group)).toEqual({ agent: "@Ada", machine: "@Sierra" });
+			for (const c of group) {
+				const t = mentionTokens({ ...c, agentName: c.agentName as string }, group);
+				for (const token of [t.agent, t.machine]) expect(parseMentions(token, group), token).toEqual({ all: false, agents: targets(c) });
+			}
+		});
+
+		it("falls back to @agent@machine when the machine name is itself another agent's name", () => {
+			const odd: MentionCandidate = { nodeId: "node_x", nodeName: "Bravo", agentId: "ag_x", agentName: "OMP Agent" };
+			const other: MentionCandidate = { nodeId: "node_y", nodeName: "Yankee", agentId: "ag_y", agentName: "Bravo" };
+			const group = [odd, other, { ...alpha, nodeName: "Alpha" }];
+			expect(mentionTokens({ ...odd, agentName: "OMP Agent" }, group)).toEqual({ agent: "@OMP Agent@Bravo", machine: "@OMP Agent@Bravo" });
+			expect(parseMentions("@OMP Agent@Bravo", group).agents).toEqual(targets(odd));
+		});
 	});
 });
 

@@ -1,5 +1,8 @@
 import {
 	type Agent,
+	type Context,
+	type ContextTopicEvent,
+	type WorkspaceMember,
 	type AgentSession,
 	type DirectoryAgent,
 	type Invitation,
@@ -65,6 +68,14 @@ export const qk = {
 	shared: ["local", "shared"] as const,
 	sharedDetail: (id: string) => ["local", "shared", id] as const,
 	sharedInvites: ["local", "shared-invites"] as const,
+	contextsAll: ["local", "contexts"] as const,
+	contexts: (filter: { workspaceId?: string; projectId?: string; type?: string } = {}) =>
+		["local", "contexts", "list", { workspaceId: filter.workspaceId ?? null, projectId: filter.projectId ?? null, type: filter.type ?? null }] as const,
+	context: (id: string) => ["local", "contexts", "one", id] as const,
+	contextVersions: (id: string) => ["local", "contexts", "versions", id] as const,
+	contextSearch: (q: string, workspaceId?: string, projectId?: string) => ["local", "contexts", "search", q, workspaceId ?? null, projectId ?? null] as const,
+	members: (workspaceId: string) => ["local", "members", workspaceId] as const,
+	taskFilesPreview: (taskId: string, projectId: string) => ["local", "task", taskId, "files-preview", projectId] as const,
 	activityAll: ["local", "activity"] as const,
 	activity: (workspaceId?: string) => ["local", "activity", { workspaceId: workspaceId ?? null }] as const,
 	ompProviders: ["local", "omp", "providers"] as const,
@@ -122,15 +133,15 @@ export const useDirectory = () => useQuery({ queryKey: qk.directory, queryFn: ({
 export const useTasks = () => useQuery({ queryKey: qk.tasks, queryFn: ({ signal }) => api.get<Task[]>(routes.tasks, undefined, { signal }), staleTime: 30_000 });
 export const useSharedSessions = () => useQuery({ queryKey: qk.shared, queryFn: ({ signal }) => api.get<SharedSession[]>(routes.sharedSessions, undefined, { signal }), staleTime: 30_000 });
 export const useSharedInvites = () => useQuery({ queryKey: qk.sharedInvites, queryFn: ({ signal }) => api.get<SharedInvite[]>(routes.sharedInvites, undefined, { signal }), staleTime: 30_000 });
-/** Invites that wait for this node's user. */
+/** Invites that wait for this machine's user. */
 export const isPendingInvite = (i: SharedInvite): boolean => i.state === "pending";
 
 const FINISHED: Record<string, true> = { rejected: true, succeeded: true, failed: true, cancelled: true, handed_off: true };
 export const isActiveTask = (t: Task): boolean => !FINISHED[t.status];
-/** Tasks that wait for this node's user: an offer to decide on, or unread discussion messages. */
+/** Tasks that wait for this machine's user: an offer to decide on, or unread discussion messages. */
 export const taskNeedsAttention = (t: Task): boolean => (t.direction === "incoming" && t.status === "offered") || t.unreadMessages > 0;
 
-/** Requests that wait for this node's user (drives the sidebar badge and the inbox). */
+/** Requests that wait for this machine's user (drives the sidebar badge and the inbox). */
 export const isAwaitingApproval = (r: PairingRequest): boolean => r.state === "awaiting_approval";
 
 function upsertBy<T>(list: T[] | undefined, item: T, id: (t: T) => string): T[] | undefined {
@@ -219,16 +230,6 @@ export function useRealtimeBridge(): void {
 				case "pairing_request": {
 					const r = e.request;
 					qc.setQueryData<PairingRequest[]>(qk.pairingRequests, (d) => upsertBy(d, r, (x) => x.id));
-					if (r.state === "awaiting_approval") {
-						toast(`Pairing request from ${r.remote.name}`, {
-							id: `pairing-${r.id}`,
-							description: "A node entered your invitation code. Compare its fingerprint, then approve or reject.",
-							duration: 20_000,
-							action: { label: "Review", onClick: () => useUi.getState().openDialog({ kind: "pairing-requests" }) },
-						});
-					} else {
-						toast.dismiss(`pairing-${r.id}`);
-					}
 					break;
 				}
 				case "join":
@@ -240,6 +241,37 @@ export function useRealtimeBridge(): void {
 			}
 		},
 		{ onResync: () => void qc.invalidateQueries({ queryKey: qk.networkAll }) },
+	);
+
+	// Shared Context (M6): the `contexts` topic carries full Context objects, member lists and removals.
+	useTopic(
+		"contexts",
+		(raw) => {
+			const e = raw as ContextTopicEvent;
+			if (e.type === "context") {
+				const c = e.context;
+				const prev = qc.getQueryData<Context>(qk.context(c.id));
+				qc.setQueryData(qk.context(c.id), c);
+				// Lists, versions and searches are cheap to refetch and depend on filters.
+				void qc.invalidateQueries({ queryKey: [...qk.contextsAll, "list"] });
+				void qc.invalidateQueries({ queryKey: [...qk.contextsAll, "search"] });
+				if (!prev || prev.version !== c.version) void qc.invalidateQueries({ queryKey: qk.contextVersions(c.id) });
+				if (c.sync.state === "conflict" && prev?.sync.state !== "conflict") {
+					toast.warning(`Context conflict: ${c.title}`, {
+						id: `context-conflict-${c.id}`,
+						description: `${c.sync.conflict?.nodeName ?? "Another machine"} edited it too. Open Shared Context to resolve.`,
+						duration: 15_000,
+					});
+				}
+			} else if (e.type === "removed") {
+				qc.removeQueries({ queryKey: qk.context(e.contextId) });
+				void qc.invalidateQueries({ queryKey: [...qk.contextsAll, "list"] });
+				void qc.invalidateQueries({ queryKey: [...qk.contextsAll, "search"] });
+			} else if (e.type === "members") {
+				qc.setQueryData<WorkspaceMember[]>(qk.members(e.workspaceId), e.members);
+			}
+		},
+		{ onResync: () => void qc.invalidateQueries({ queryKey: qk.contextsAll }) },
 	);
 
 	useTopic(

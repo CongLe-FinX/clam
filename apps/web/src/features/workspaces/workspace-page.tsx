@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { Bot, FolderGit2, FolderPlus, GitBranch, Layers, MessageSquarePlus, Pencil, Trash2 } from "lucide-react";
+import { BookMarked, Bot, Folder, FolderGit2, FolderPlus, GitBranch, Layers, MessageSquarePlus, Pencil, Trash2, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { SessionRow } from "@/components/session-row";
@@ -69,6 +69,16 @@ export default function WorkspacePage() {
 						<Button variant="ghost" size="icon" aria-label="Delete workspace" onClick={() => setConfirmDelete(true)}>
 							<Trash2 />
 						</Button>
+						<Button asChild variant="outline">
+							<Link to="/workspaces/$workspaceId/context" params={{ workspaceId }} search={{}}>
+								<BookMarked /> Context
+							</Link>
+						</Button>
+						<Button asChild variant="outline">
+							<Link to="/workspaces/$workspaceId/members" params={{ workspaceId }} search={{}}>
+								<Users /> Members
+							</Link>
+						</Button>
 						<Button variant="primary" onClick={() => openDialog({ kind: "create-project", workspaceId })}>
 							<FolderPlus /> Add project
 						</Button>
@@ -85,30 +95,39 @@ export default function WorkspacePage() {
 						))}
 					</div>
 				) : null}
-				{projects.isSuccess && projects.data.length === 0 ? (
+				{projects.isSuccess && projects.data.filter((p) => p.origin !== "chat").length === 0 ? (
 					<Card>
 						<EmptyState
 							icon={FolderGit2}
 							title="No projects in this workspace"
-							description="Add a project directory so agents can work in it."
+							description="Add a project directory (with or without Git) or start from an empty folder so agents can work in it."
 							action={
-								<Button variant="primary" onClick={() => openDialog({ kind: "create-project", workspaceId })}>
-									<FolderPlus /> Add project
-								</Button>
+								<div className="flex flex-wrap justify-center gap-2">
+									<Button variant="primary" onClick={() => openDialog({ kind: "create-project", workspaceId })}>
+										<FolderPlus /> Add project
+									</Button>
+									<Button variant="outline" onClick={() => openDialog({ kind: "create-project", workspaceId, mode: "empty" })}>
+										<Folder /> New empty folder
+									</Button>
+								</div>
 							}
 						/>
 					</Card>
 				) : null}
 				<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-					{projects.data?.map((p) => (
+					{projects.data?.filter((p) => p.origin !== "chat").map((p) => (
 						<Card key={p.id} className="transition-[box-shadow,transform] duration-200 hover:-translate-y-px hover:shadow-[inset_0_0_0_1px_var(--border-strong)]">
 							<Link to="/projects/$projectId" params={{ projectId: p.id }} preload="intent" className="flex flex-col gap-2.5 rounded-xl p-4 outline-none">
 								<div className="flex items-center gap-2.5">
-									<FolderGit2 className="size-4 shrink-0 text-accent" />
+									{p.vcs === "none" ? <Folder className="size-4 shrink-0 text-accent" /> : <FolderGit2 className="size-4 shrink-0 text-accent" />}
 									<h3 className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">{p.name}</h3>
 									{p.repository ? (
 										<Badge variant="outline" className="gap-1">
 											<GitBranch /> {p.repository.owner}/{p.repository.name}
+										</Badge>
+									) : p.vcs === "none" ? (
+										<Badge variant="outline" className="gap-1">
+											{p.managed ? "Managed folder" : "Folder"}
 										</Badge>
 									) : null}
 								</div>
@@ -164,7 +183,7 @@ export default function WorkspacePage() {
 								</span>
 							</div>
 						))}
-						{agents.isSuccess && agents.data.length === 0 ? <p className="text-[13px] text-subtle">No agents on this node.</p> : null}
+						{agents.isSuccess && agents.data.length === 0 ? <p className="text-[13px] text-subtle">No agents on this machine.</p> : null}
 					</CardContent>
 				</Card>
 			</div>

@@ -17,6 +17,8 @@ import { PeerService } from "./peers.ts";
 import { TokenBuckets } from "./rate-limit.ts";
 import type { TaskService } from "../tasks/service.ts";
 import type { SharedService } from "../shared/service.ts";
+import type { ContextService } from "../context/service.ts";
+import type { HandoffService } from "../handoff/service.ts";
 import type { ServerContext } from "../context.ts";
 import { TunnelService } from "./tunnel.ts";
 import type { NetworkBase, NetworkService } from "./types.ts";
@@ -93,6 +95,8 @@ export function createNetwork(base: NetworkBase, options: NetworkOptions = {}): 
 	const directory = new DirectoryService({ db, bus, client: probeClient, peers, local: base, nodeId: identity.nodeId, nodeName, log });
 	let attachedTasks: TaskService | null = null;
 	let attachedShared: SharedService | null = null;
+	let attachedContexts: ContextService | null = null;
+	let attachedHandoffs: HandoffService | null = null;
 	let attachedUi: ServerContext | null = null;
 	const monitor = new PeerMonitor({
 		client,
@@ -183,6 +187,18 @@ export function createNetwork(base: NetworkBase, options: NetworkOptions = {}): 
 		},
 		attachShared(shared) {
 			attachedShared = shared;
+		},
+		get contexts() {
+			return attachedContexts;
+		},
+		attachContexts(contexts) {
+			attachedContexts = contexts;
+		},
+		get handoffs() {
+			return attachedHandoffs;
+		},
+		attachHandoffs(handoffs) {
+			attachedHandoffs = handoffs;
 		},
 		get ui() {
 			return attachedUi;

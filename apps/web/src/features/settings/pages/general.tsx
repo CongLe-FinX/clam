@@ -6,7 +6,9 @@ import { Input } from "@/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
 import { Skeleton } from "@/ui/skeleton";
 import { Switch } from "@/ui/switch";
+import { HandoffSettingsSection } from "@/features/handoff/settings-section";
 import { InlineError, PageBody, PageIntro, SettingsSection } from "../components/section";
+import { ThemePicker } from "../components/theme-picker";
 import { usePatchSettings, useSettings } from "../hooks";
 
 const APPROVAL_MODES: { value: NodeSettings["approvalMode"]; label: string; hint: string }[] = [
@@ -100,8 +102,11 @@ export default function GeneralPage() {
 
 	return (
 		<>
-			<PageIntro title="General" description="Settings for this node. Changes apply immediately; running agent processes pick up approval mode on their next start." />
+			<PageIntro title="General" description="Settings for this machine. Changes apply immediately; running agent processes pick up approval mode on their next start." />
 			<PageBody>
+				<SettingsSection title="Appearance" description="Saved in this browser, so your phone and your desktop can use different themes.">
+					<ThemePicker />
+				</SettingsSection>
 				{settings.isError && <InlineError error={settings.error} onRetry={() => settings.refetch()} />}
 				{settings.isPending && (
 					<div className="space-y-3">
@@ -112,10 +117,10 @@ export default function GeneralPage() {
 				)}
 				{s && (
 					<>
-						<SettingsSection title="Node">
+						<SettingsSection title="Machine">
 							<div className="divide-y divide-border">
-								<Row label="Node name" hint="Shown to teammates and in the Agent Network." htmlFor="node-name">
-									<CommitInput id="node-name" value={s.nodeName} onCommit={(v) => save({ nodeName: v }, "Node name")} />
+								<Row label="Machine name" hint="Shown to teammates and in the Agent Network." htmlFor="node-name">
+									<CommitInput id="node-name" value={s.nodeName} onCommit={(v) => save({ nodeName: v }, "Machine name")} />
 								</Row>
 								<Row label="Start automatically" hint={s.autoStartDetail ?? "Launch CL Agent Mesh when you log in to this machine."} htmlFor="autostart">
 									<Switch id="autostart" checked={s.autoStart} onCheckedChange={(v) => save({ autoStart: v }, "Autostart")} />
@@ -137,7 +142,7 @@ export default function GeneralPage() {
 										onCommit={num("runtimeIdleTimeoutMin", "Idle timeout")}
 									/>
 								</Row>
-								<Row label="Max concurrent runtimes" hint="Upper bound for simultaneously running OMP processes on this node." htmlFor="max-runtimes">
+								<Row label="Max concurrent runtimes" hint="Upper bound for simultaneously running OMP processes on this machine." htmlFor="max-runtimes">
 									<CommitInput
 										id="max-runtimes"
 										type="number"
@@ -169,6 +174,7 @@ export default function GeneralPage() {
 								</p>
 							)}
 						</SettingsSection>
+						<HandoffSettingsSection settings={s} />
 					</>
 				)}
 			</PageBody>

@@ -8,8 +8,8 @@ import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/ui/dialog";
 import { EmptyState } from "@/ui/empty-state";
-import { CapabilityChecklist } from "./capabilities";
-import { CopyBlock } from "./components";
+import { CapabilityChecklist, summarizeCapabilities } from "./capabilities";
+import { FingerprintCompare } from "./fingerprint";
 import { formatFingerprint, hostOf } from "./format";
 import { useApprovePairing, useRejectPairing } from "./hooks";
 
@@ -52,22 +52,22 @@ export function PairingRequestCard({ request }: { request: PairingRequest }) {
 
 			{awaiting ? (
 				<>
-					<CopyBlock label="Fingerprint presented by the other node" value={request.remote.fingerprint} display={formatFingerprint(request.remote.fingerprint)}>
+					<FingerprintCompare label="Fingerprint presented by the other machine" fingerprint={request.remote.fingerprint}>
 						<p className="flex items-start gap-1.5 text-xs text-muted-foreground">
 							<ShieldAlert className="mt-0.5 size-3.5 shrink-0 text-warning" />
-							Ask the other person to read the fingerprint on their <em>Join a node</em> screen. Approve only if it matches exactly.
+							Ask the other person to read the words and fingerprint on their Waiting screen. Approve only if it matches exactly.
 						</p>
-					</CopyBlock>
+					</FingerprintCompare>
 					<details className="group rounded-xl shadow-[inset_0_0_0_1px_var(--border)]">
-						<summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-3 text-[13px] font-medium">
-							Capabilities to grant
-							<span className="flex items-center gap-1 text-2xs text-subtle">
-								{caps.length} selected · <span className="text-accent group-open:hidden">review &amp; edit</span>
+						<summary className="flex min-h-11 cursor-pointer list-none flex-wrap items-center justify-between gap-x-2 py-1.5 rounded-xl px-3 text-[13px] font-medium outline-none focus-visible:shadow-[0_0_0_2px_var(--ring)]">
+							Access to grant
+							<span className="flex min-w-0 items-center gap-1 text-2xs text-subtle">
+								{summarizeCapabilities(caps)} · <span className="text-accent group-open:hidden">review &amp; edit</span>
 								<ChevronDown className="size-3.5 transition-transform group-open:rotate-180" />
 							</span>
 						</summary>
 						<div className="border-t">
-							<CapabilityChecklist value={caps} onChange={setPicked} disabled={busy} className="shadow-none" />
+							<CapabilityChecklist value={caps} onChange={setPicked} disabled={busy} peerName={request.remote.name} className="p-3" />
 						</div>
 					</details>
 					<div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -85,7 +85,7 @@ export function PairingRequestCard({ request }: { request: PairingRequest }) {
 					{request.error ? <p className="text-xs text-danger">{request.error}</p> : null}
 					{request.state === "paired" ? (
 						<Link to="/network/nodes/$peerId" params={{ peerId: request.remote.nodeId }} className="text-xs font-medium text-accent hover:underline">
-							Open node
+							Open machine
 						</Link>
 					) : null}
 				</>
@@ -105,7 +105,7 @@ export function PairingRequestsDialog({ onClose }: { onClose: () => void }) {
 			<DialogContent className="max-w-xl" sheetOnMobile>
 				<DialogHeader>
 					<DialogTitle>Pairing requests</DialogTitle>
-					<DialogDescription>Nodes that entered one of your invitation codes. Nothing is shared until you approve.</DialogDescription>
+					<DialogDescription>Machines that entered one of your invitation codes. Nothing is shared until you approve.</DialogDescription>
 				</DialogHeader>
 				<div className="-mx-1 flex min-h-0 flex-col gap-3 overflow-y-auto px-1">
 					{requests.isSuccess && list.length === 0 ? <EmptyState icon={Inbox} title="No pairing requests" description="Create an invitation and share the code; requests show up here as soon as someone uses it." /> : null}

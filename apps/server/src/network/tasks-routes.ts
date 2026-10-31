@@ -43,6 +43,14 @@ export function registerTaskWireRoutes(api: FastifyInstance, deps: TaskWireDeps)
 		return row;
 	}
 
+	/** The sender's call reached a task that a handoff holds or that moved away: retryable, so its outbox keeps the call until the new executor is known. */
+	function refuseWhileMoving(reply: FastifyReply, row: TaskRow): void {
+		const moving = tasks.movingError(row);
+		if (!moving) return;
+		reply.header("Retry-After", "2");
+		throw moving;
+	}
+
 	api.post("/tasks", { preHandler: requires("tasks.send") }, (request, reply) =>
 		idempotent(request, reply, async () => {
 			const body = bodyOf(wire.CreateTaskRequest, request);
@@ -56,12 +64,14 @@ export function registerTaskWireRoutes(api: FastifyInstance, deps: TaskWireDeps)
 		const { since } = request.query;
 		if (since === undefined) return store.toWireRecord(row);
 		if (!/^\d{1,15}$/.test(since)) throw ApiError.badRequest("since must be a non-negative integer");
-		return { ...store.toWireRecord(row), events: store.eventsSince(row.id, Number(since)).map((e) => store.toEvent(e)) };
+		// A fenced node keeps its own `late_result` notes private: the timeline the sender mirrors ends at the seal.
+		return { ...store.toWireRecord(row), events: store.eventsSince(row.id, Number(since)).filter((e) => e.type !== "late_result").map((e) => store.toEvent(e)) };
 	});
 
 	api.post<{ Params: IdParams }>("/tasks/:id/cancel", { preHandler: requires("tasks.cancel") }, (request, reply) =>
 		idempotent(request, reply, async () => {
 			const row = ownTask(request, request.params.id, "incoming");
+			refuseWhileMoving(reply, row);
 			const body = bodyOf(wire.CancelTaskRequest, request);
 			const epoch = checkEpoch(row.epoch, body.epoch);
 			if (!epoch.ok) {
@@ -78,9 +88,37 @@ export function registerTaskWireRoutes(api: FastifyInstance, deps: TaskWireDeps)
 		const needed: Capability = row.direction === "incoming" ? "tasks.send" : "tasks.receive";
 		if (!request.peer?.capabilities.includes(needed)) throw new ApiError(403, "forbidden", `Missing capability: ${needed}`, { missing: [needed] });
 		return idempotent(request, reply, async () => {
+			refuseWhileMoving(reply, store.get(row.id));
 			const body = bodyOf(wire.TaskMessageRequest, request);
 			return { status: 202, body: await tasks.receiveMessage(request.peer?.id as string, row.id, body) };
 		});
+	});
+
+	// The NEW executor of a task THIS node delegated announces itself after a handoff (docs/handoff-protocol.md §5). The caller is not the task's
+	// current peer: the fencing token it signed (verified with its pinned key) and the epoch rules authorize the change.
+	api.post<{ Params: IdParams }>("/tasks/:id/executor", { preHandler: requires("tasks.receive") }, (request, reply) =>
+		idempotent(request, reply, async () => {
+			const body = bodyOf(wire.TaskExecutorChange, request);
+			const row = await tasks.sender.followExecutor(request.params.id, request.peer?.id as string, body);
+			return { status: 200, body: store.toWireRecord(row) satisfies wire.TaskRecord };
+		}),
+	);
+
+	// The input bundle of a task THIS node delegated, served to its executor only while that node holds `tasks.receive` from us.
+	api.get<{ Params: IdParams & { artifactId: string } }>("/tasks/:id/inputs/:artifactId", { preHandler: requires("tasks.receive") }, async (request, reply) => {
+		const { params } = request;
+		const task = ownTask(request, params.id);
+		if (task.direction !== "outgoing" || task.inputFiles?.artifactId !== params.artifactId) throw ApiError.notFound("Artifact");
+		const artifact = store.artifact(task.id, params.artifactId);
+		if (!artifact) throw ApiError.notFound("Artifact");
+		let bytes: Buffer;
+		try {
+			bytes = await readFile(tasks.artifacts.absolutePath(artifact));
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") throw ApiError.notFound("Artifact");
+			throw error;
+		}
+		return sendArtifact(reply, { bytes, name: artifact.name, mediaType: artifact.mediaType });
 	});
 
 	api.get<{ Params: IdParams & { artifactId: string } }>("/tasks/:id/artifacts/:artifactId", { preHandler: requires() }, async (request, reply) => {

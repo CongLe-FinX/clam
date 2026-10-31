@@ -1,6 +1,6 @@
 import type { SharedSession } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRight, Eye, GitBranch, Inbox, RefreshCw, Users } from "lucide-react";
+import { ArrowUpRight, Eye, Inbox, RefreshCw, Users } from "lucide-react";
 import { useMemo } from "react";
 import { errorMessage } from "@/lib/api";
 import { isPendingInvite, useNode, useSharedInvites, useSharedSessions } from "@/lib/queries";
@@ -13,16 +13,17 @@ import { Skeleton } from "@/ui/skeleton";
 import { StatusDot } from "@/ui/status-dot";
 import { driverOf, nodeDot, NODE_STATUS_LABEL, participantLabel, ROLE_LABEL, teamOf } from "./format.ts";
 import { InviteCard } from "./invite-card.tsx";
+import { ModeLabel } from "./mode.tsx";
 
 const ROLE_VARIANT = { driver: "accent", participant: "neutral", former_driver: "warning" } as const satisfies Record<SharedSession["localRole"], string>;
 
 function statusLine(s: SharedSession): { text: string; tone: "warning" | "muted" | "success" } {
-	if (s.localRole === "former_driver") return { text: s.rescueBranch ? `Work continues elsewhere · your unpushed changes are on ${s.rescueBranch}` : "Work continues on another node", tone: "warning" };
+	if (s.localRole === "former_driver") return { text: s.rescueBranch ? `Work continues elsewhere · your unpushed changes are on ${s.rescueBranch}` : "Work continues on another machine", tone: "warning" };
 	if (s.localRole === "participant") {
-		if (s.takeoverAvailable) return { text: "The driver looks offline — you can continue the work on this node", tone: "warning" };
+		if (s.takeoverAvailable) return { text: "The driver looks offline — you can continue the work on this machine", tone: "warning" };
 		return { text: s.takeoverBlockedReason ?? "Following the driver live", tone: "muted" };
 	}
-	return { text: s.lastCheckpoint ? `Checkpoint ${s.lastCheckpoint.seq} · ${relativeTime(s.lastCheckpoint.at)}${s.lastCheckpoint.pushed ? "" : " · not pushed"}` : "No checkpoint yet", tone: "success" };
+	return { text: s.lastCheckpoint ? `Checkpoint ${s.lastCheckpoint.seq} · ${relativeTime(s.lastCheckpoint.at)}${s.vcs === "git" && s.lastCheckpoint.commit && !s.lastCheckpoint.pushed ? " · not pushed" : ""}` : "No checkpoint yet", tone: "success" };
 }
 
 function SharedRow({ s }: { s: SharedSession }) {
@@ -50,10 +51,7 @@ function SharedRow({ s }: { s: SharedSession }) {
 						</span>
 					</span>
 				) : null}
-				<span className="inline-flex items-center gap-1.5">
-					<GitBranch className="size-3.5 text-subtle" aria-hidden />
-					<code className="max-w-[18rem] truncate font-mono">{s.repo.branch}</code>
-				</span>
+				<ModeLabel vcs={s.vcs} repo={s.repo} className="text-xs" />
 				<span className="tabular font-mono text-2xs text-subtle">epoch {s.epoch}</span>
 			</div>
 			<div className="flex flex-wrap items-center gap-1.5">
@@ -96,7 +94,7 @@ export default function SharedPage() {
 			<PageHeader
 				eyebrow="Agent Network"
 				title="Shared sessions"
-				description={`Work that several nodes do together${node ? ` — ${node.name} drives some and follows others` : ""}. Add an agent from another node to a session to share it.`}
+				description={`Work that several machines do together${node ? ` — ${node.name} drives some and follows others` : ""}. Add an agent from another machine to a session to share it.`}
 			/>
 
 			{pending.length > 0 ? (
@@ -138,7 +136,7 @@ export default function SharedPage() {
 					<EmptyState
 						icon={Users}
 						title="No shared sessions yet"
-						description="Open an agent session and use “Add agent” in its header to bring an agent from another node into it. Invitations from other nodes show up here."
+						description="Open an agent session and use “Add agent” in its header to bring an agent from another machine into it. Invitations from other machines show up here."
 						action={
 							<Button asChild variant="outline">
 								<Link to="/node/sessions">Go to agent sessions</Link>

@@ -271,7 +271,7 @@ describe("mirroring the executor", () => {
 			expect(current().epoch).toBe(2);
 
 			// A record that is ahead of our timeline and brings no events waits for the poll that brings both.
-			const result = { summary: "built", autoCompleted: false, branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [] };
+			const result = { summary: "built", autoCompleted: false, branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [], files: null };
 			const finished = record({ epoch: 2, status: "succeeded", lastEventSeq: 3, finishedAt: now, result });
 			expect(applyRecord(hub, row.id, finished, [])).toEqual({ changed: false, gap: false, settled: false });
 			expect(current().status).toBe("running");
@@ -297,7 +297,8 @@ describe("creating a task", () => {
 		expect((await post({ projectId: "prj_unknown" })).status).toBe(404);
 
 		const unlinked = (await api(t.a).post<Project>("/projects", { workspaceId: t.workspace.id, name: "plain", path: mkDir(t, "plain") })).body;
-		const noRepo = await post({ projectId: unlinked.id });
+		// delivering as a branch needs a linked repository (summary/files tasks do not: see nogit-tasks.test.ts)
+		const noRepo = await post({ projectId: unlinked.id, deliverAs: "branch" });
 		expect([noRepo.status, noRepo.body.error.code]).toEqual([409, "project_not_linked"]);
 
 		const other = (await api(t.a).post<Workspace>("/workspaces", { name: "Other" })).body;

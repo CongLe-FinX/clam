@@ -116,57 +116,78 @@ export class CheckpointService implements CheckpointApi {
 		const wait = Math.max(0, (Number.isNaN(last) ? 0 : last) + this.hub.options.checkpointDebounceMs - Date.now());
 		const timer = setTimeout(() => {
 			this.autoTimers.delete(sharedId);
-			const shared = this.store.find(sharedId);
-			if (!shared || shared.state !== "active" || shared.localRole !== "driver" || (shared.meta.turnsSinceCheckpoint ?? 0) === 0) return;
-			if (this.store.activePeers(sharedId).length === 0) return;
-			this.checkpoint(sharedId, { manual: false }).catch((error: unknown) => this.hub.log.warn({ err: errorText(error), sharedId }, "automatic checkpoint failed"));
+			this.takeAutomatic(sharedId).catch((error: unknown) => this.hub.log.warn({ err: errorText(error), sharedId }, "automatic checkpoint failed"));
 		}, wait);
 		timer.unref();
 		this.autoTimers.set(sharedId, timer);
 	}
 
-	checkpoint(sharedId: string, options: { note?: string; manual: boolean }): Promise<Checkpoint> {
+	/**
+	 * The automatic checkpoint a timer asks for. It usually has to wait for the checkpoint that is running, and that one
+	 * (which started after the turn settled) may already have covered the turns that scheduled this one: what is pending is
+	 * decided once this one holds the lock, never when it was queued, so no empty checkpoint follows a covered turn.
+	 */
+	private takeAutomatic(sharedId: string): Promise<void> {
 		return this.lock.run(sharedId, async () => {
-			const shared = this.store.get(sharedId);
-			if (shared.state !== "active" || shared.localRole !== "driver") throw new ApiError(409, "not_driver", "Only the driver of a shared session takes checkpoints");
-			if (!shared.localSessionId || !shared.localProjectId) throw ApiError.conflict("The driving session or its project is missing on this node");
-			const seq = shared.lastCheckpointSeq + 1;
-			const turnsAtStart = shared.meta.turnsSinceCheckpoint ?? 0;
-			const git = await this.commitAndPush(shared, seq, options.note);
-			const snapshot = await this.takeSnapshot(shared, seq);
-			const session = this.ctx.db.select({ model: agentSessions.model }).from(agentSessions).where(eq(agentSessions.id, shared.localSessionId)).get();
-			const note = [options.note?.trim(), ...git.problems, ...snapshot.problems].filter(Boolean).join(" · ").slice(0, 500) || null;
-			const { row } = this.store.insertCheckpoint({
-				sharedSessionId: shared.id,
-				seq,
-				epoch: shared.epoch,
-				nodeId: this.ctx.identity.nodeId,
-				branch: shared.branch,
-				commit: git.commit,
-				pushed: git.pushed,
-				snapshotSha256: snapshot.sha256,
-				snapshotSize: snapshot.size,
-				snapshotMessages: snapshot.messageCount,
-				snapshotPath: snapshot.relative,
-				model: session?.model ?? null,
-				deliveredTo: [],
-				note,
-			});
-			this.store.update(shared.id, { lastCheckpointSeq: seq });
-			// A turn that settled while this checkpoint ran changed the tree after the commit: it stays counted for the next one.
-			const unsettled = Math.max(0, (this.store.get(shared.id).meta.turnsSinceCheckpoint ?? 0) - turnsAtStart);
-			this.store.patchMeta(shared.id, { lastCheckpointCommit: git.commit, turnsSinceCheckpoint: unsettled });
-			this.lastRun.set(shared.id, Date.now());
-			if (unsettled > 0) this.scheduleAutomatic(shared.id);
-			await this.prune(shared.id);
-			for (const participant of this.store.activePeers(shared.id)) this.enqueueNotice(row, participant.nodeId, participant.joinedAt ?? "");
-			this.hub.changed(shared.id, { checkpoints: [row] });
-			// Low noise: a line for a checkpoint someone asked for or that moved the shared branch, not for every automatic one that found nothing new.
-			if (options.manual || (git.pushed && git.commit !== (shared.meta.lastCheckpointCommit ?? null))) {
-				this.hub.discussion.note(shared.id, `Checkpoint ${seq} taken${git.commit ? `: commit ${git.commit.slice(0, 12)}${git.pushed ? " pushed" : " (not pushed)"}` : ": no new commit"}${snapshot.sha256 ? ", session snapshot saved" : ", no session snapshot"}.`);
-			}
-			return this.hub.views.checkpoint(row);
+			const shared = this.store.find(sharedId);
+			if (!shared || shared.state !== "active" || shared.localRole !== "driver" || (shared.meta.turnsSinceCheckpoint ?? 0) === 0) return;
+			if (this.store.activePeers(sharedId).length === 0) return;
+			await this.take(sharedId, { manual: false });
 		});
+	}
+
+	checkpoint(sharedId: string, options: { note?: string; manual: boolean }): Promise<Checkpoint> {
+		return this.lock.run(sharedId, () => this.take(sharedId, options));
+	}
+
+	/** One checkpoint; the caller holds the per-session lock. */
+	private async take(sharedId: string, options: { note?: string; manual: boolean }): Promise<Checkpoint> {
+		const shared = this.store.get(sharedId);
+		if (shared.state !== "active" || shared.localRole !== "driver") throw new ApiError(409, "not_driver", "Only the driver of a shared session takes checkpoints");
+		if (!shared.localSessionId || !shared.localProjectId) throw ApiError.conflict("The driving session or its project is missing on this node");
+		const seq = shared.lastCheckpointSeq + 1;
+		const turnsAtStart = shared.meta.turnsSinceCheckpoint ?? 0;
+		const filesMode = shared.vcs === "files";
+		const git: GitOutcome = filesMode ? { commit: null, pushed: false, problems: [] } : await this.commitAndPush(shared, seq, options.note);
+		const bundle = filesMode ? await this.hub.files.bundle(shared, seq) : null;
+		if (bundle) git.problems.push(...bundle.problems);
+		const snapshot = await this.takeSnapshot(shared, seq);
+		const session = this.ctx.db.select({ model: agentSessions.model }).from(agentSessions).where(eq(agentSessions.id, shared.localSessionId)).get();
+		const note = [options.note?.trim(), ...git.problems, ...snapshot.problems].filter(Boolean).join(" · ").slice(0, 500) || null;
+		const { row } = this.store.insertCheckpoint({
+			sharedSessionId: shared.id,
+			seq,
+			epoch: shared.epoch,
+			nodeId: this.ctx.identity.nodeId,
+			branch: shared.branch,
+			commit: git.commit,
+			pushed: git.pushed,
+			files: bundle?.meta ?? null,
+			filesPath: bundle?.relative ?? null,
+			snapshotSha256: snapshot.sha256,
+			snapshotSize: snapshot.size,
+			snapshotMessages: snapshot.messageCount,
+			snapshotPath: snapshot.relative,
+			model: session?.model ?? null,
+			deliveredTo: [],
+			note,
+		});
+		this.store.update(shared.id, { lastCheckpointSeq: seq });
+		// A turn that settled while this checkpoint ran changed the tree after the commit: it stays counted for the next one.
+		const unsettled = Math.max(0, (this.store.get(shared.id).meta.turnsSinceCheckpoint ?? 0) - turnsAtStart);
+		this.store.patchMeta(shared.id, { lastCheckpointCommit: git.commit, turnsSinceCheckpoint: unsettled });
+		this.lastRun.set(shared.id, Date.now());
+		if (unsettled > 0) this.scheduleAutomatic(shared.id);
+		await this.prune(shared.id);
+		for (const participant of this.store.activePeers(shared.id)) this.enqueueNotice(row, participant.nodeId, participant.joinedAt ?? "");
+		this.hub.changed(shared.id, { checkpoints: [row] });
+		// Low noise: a line for a checkpoint someone asked for or that moved the shared branch, not for every automatic one that found nothing new.
+		if (filesMode) {
+			if (options.manual) this.hub.discussion.note(shared.id, `Checkpoint ${seq} taken: ${bundle?.meta ? `folder bundle of ${bundle.meta.fileCount} file(s)` : "no folder bundle"}${snapshot.sha256 ? ", session snapshot saved" : ", no session snapshot"}.`);
+		} else if (options.manual || (git.pushed && git.commit !== (shared.meta.lastCheckpointCommit ?? null))) {
+			this.hub.discussion.note(shared.id, `Checkpoint ${seq} taken${git.commit ? `: commit ${git.commit.slice(0, 12)}${git.pushed ? " pushed" : " (not pushed)"}` : ": no new commit"}${snapshot.sha256 ? ", session snapshot saved" : ", no session snapshot"}.`);
+		}
+		return this.hub.views.checkpoint(row);
 	}
 
 	/** Commit everything in the working tree to the shared branch and push it. Problems become part of the checkpoint note. */
@@ -192,7 +213,7 @@ export class CheckpointService implements CheckpointApi {
 			return outcome;
 		}
 		try {
-			if (status.branch !== shared.branch) status = await gitService.checkout(projectId, shared.branch);
+			if (status.branch !== shared.branch) status = await gitService.checkout(projectId, shared.branch as string);
 		} catch (error) {
 			outcome.problems.push(`could not switch to ${shared.branch}: ${errorText(error, 160)}`);
 			return outcome;
@@ -260,6 +281,7 @@ export class CheckpointService implements CheckpointApi {
 			branch: row.branch,
 			commit: row.commit,
 			pushed: row.pushed,
+			files: row.files,
 			snapshot: row.snapshotSha256 !== null && row.snapshotSize !== null ? { sha256: row.snapshotSha256, size: row.snapshotSize, messageCount: row.snapshotMessages ?? 0 } : null,
 			model: row.model,
 			note: row.note,
@@ -291,10 +313,11 @@ export class CheckpointService implements CheckpointApi {
 	}
 
 	private async prune(sharedId: string): Promise<void> {
-		const held = this.store.checkpoints(sharedId).filter((c) => c.snapshotPath !== null);
+		const held = this.store.checkpoints(sharedId).filter((c) => c.snapshotPath !== null || c.filesPath !== null);
 		for (const old of held.slice(0, Math.max(0, held.length - KEEP_SNAPSHOTS))) {
-			await this.files.remove(old.snapshotPath as string).catch(() => {});
-			this.store.updateCheckpoint(sharedId, old.seq, { snapshotPath: null });
+			if (old.snapshotPath !== null) await this.files.remove(old.snapshotPath).catch(() => {});
+			if (old.filesPath !== null) await this.files.remove(old.filesPath).catch(() => {});
+			this.store.updateCheckpoint(sharedId, old.seq, { snapshotPath: null, filesPath: null });
 		}
 	}
 
@@ -315,9 +338,11 @@ export class CheckpointService implements CheckpointApi {
 			seq: notice.seq,
 			epoch: notice.epoch,
 			nodeId: peerId,
-			branch: notice.branch,
+			branch: notice.branch ?? null,
 			commit: notice.commit ?? null,
 			pushed: notice.pushed,
+			files: notice.files ?? null,
+			filesPath: null,
 			snapshotSha256: notice.snapshot?.sha256 ?? null,
 			snapshotSize: notice.snapshot?.size ?? null,
 			snapshotMessages: notice.snapshot?.messageCount ?? null,
@@ -331,8 +356,8 @@ export class CheckpointService implements CheckpointApi {
 			if (notice.seq > shared.lastCheckpointSeq) this.store.update(sharedId, { lastCheckpointSeq: notice.seq });
 			this.hub.changed(sharedId, { checkpoints: [row] });
 		}
-		if (row.snapshotSha256 && !row.snapshotPath) void this.download(sharedId, notice.seq);
-		else if (row.snapshotPath) this.enqueueAck(row);
+		if (this.missing(row)) void this.download(sharedId, notice.seq);
+		else this.enqueueAck(row);
 	}
 
 	async downloadPending(peerId?: string): Promise<void> {
@@ -355,38 +380,65 @@ export class CheckpointService implements CheckpointApi {
 		return work;
 	}
 
+	/** Something the checkpoint announced that this node does not hold yet. */
+	private missing(row: CheckpointRow): boolean {
+		return (row.snapshotSha256 !== null && row.snapshotPath === null) || (row.files !== null && row.filesPath === null);
+	}
+
 	private async runDownload(sharedId: string, seq: number): Promise<void> {
 		if (this.stopped) return;
 		const row = this.store.checkpoint(sharedId, seq);
-		if (!row || row.snapshotPath || !row.snapshotSha256 || row.snapshotSize === null) return;
+		if (!row || !this.missing(row)) return;
 		const peer = this.ctx.network.peers.row(row.nodeId);
 		if (!peer || (peer.status !== "online" && peer.status !== "degraded")) return; // `peers.onChange(online)` retries
-		const tmp = await this.files.temporary(sharedId, `get-${seq}`);
 		const key = `${sharedId}:${seq}`;
 		try {
-			await downloadSnapshot(this.ctx, peer, { sharedId, seq, expected: { sha256: row.snapshotSha256, size: row.snapshotSize } }, tmp, { maxBytes: this.hub.options.maxSnapshotBytes, idleMs: this.hub.options.downloadIdleMs });
-			const current = this.store.checkpoint(sharedId, seq);
-			if (!current || current.snapshotPath) {
-				await rm(tmp, { force: true });
-				return;
+			if (row.snapshotSha256 !== null && row.snapshotSize !== null && row.snapshotPath === null) {
+				const relative = await this.fetchBlob(peer, sharedId, seq, "snapshot", { sha256: row.snapshotSha256, size: row.snapshotSize });
+				if (relative) this.store.updateCheckpoint(sharedId, seq, { snapshotPath: relative });
 			}
-			const relative = await this.files.place(tmp, sharedId, seq);
-			const updated = this.store.updateCheckpoint(sharedId, seq, { snapshotPath: relative }) as CheckpointRow;
+			const current = this.store.checkpoint(sharedId, seq);
+			if (current && current.files !== null && current.filesPath === null) {
+				const relative = await this.fetchBlob(peer, sharedId, seq, "files", current.files);
+				if (relative) this.store.updateCheckpoint(sharedId, seq, { filesPath: relative });
+			}
+			const updated = this.store.checkpoint(sharedId, seq);
+			if (!updated) return;
 			this.failures.delete(key);
 			await this.prune(sharedId);
-			this.enqueueAck(updated);
+			if (!this.missing(updated)) this.enqueueAck(updated);
 			this.hub.changed(sharedId, { checkpoints: [updated] });
+			if (updated.filesPath !== null) await this.hub.files.applyInitial(sharedId, seq);
 		} catch (error) {
-			await rm(tmp, { force: true });
 			if (error instanceof SnapshotRejectedError) {
-				this.hub.log.warn({ err: error.message, sharedId, seq }, "a snapshot cannot be downloaded");
-				this.store.updateCheckpoint(sharedId, seq, { note: `${row.note ? `${row.note} · ` : ""}snapshot unavailable: ${error.message}`.slice(0, 500), snapshotSha256: null, snapshotSize: null, snapshotMessages: null });
+				const part = error.message.includes("folder bundle") ? "folder bundle" : "snapshot";
+				this.hub.log.warn({ err: error.message, sharedId, seq }, `a ${part} cannot be downloaded`);
+				const fresh = this.store.checkpoint(sharedId, seq) ?? row;
+				const note = `${fresh.note ? `${fresh.note} · ` : ""}${part} unavailable: ${error.message}`.slice(0, 500);
+				this.store.updateCheckpoint(sharedId, seq, part === "folder bundle" ? { note, files: null } : { note, snapshotSha256: null, snapshotSize: null, snapshotMessages: null });
 				const failed = this.store.checkpoint(sharedId, seq);
 				if (failed) this.hub.changed(sharedId, { checkpoints: [failed] });
 				return;
 			}
-			this.hub.log.debug({ err: errorText(error), sharedId, seq }, "snapshot download failed; retrying");
+			this.hub.log.debug({ err: errorText(error), sharedId, seq }, "checkpoint download failed; retrying");
 			this.scheduleRetry(sharedId, seq);
+		}
+	}
+
+	/** Download one part of a checkpoint into place; null when the row changed meanwhile (someone else stored it). */
+	private async fetchBlob(peer: { url: string }, sharedId: string, seq: number, kind: "snapshot" | "files", expected: { sha256: string; size: number }): Promise<string | null> {
+		const tmp = await this.files.temporary(sharedId, `get-${seq}`, kind);
+		try {
+			await downloadSnapshot(this.ctx, peer, { sharedId, seq, expected: { sha256: expected.sha256, size: expected.size }, kind }, tmp, { maxBytes: this.hub.options.maxSnapshotBytes, idleMs: this.hub.options.downloadIdleMs });
+			const current = this.store.checkpoint(sharedId, seq);
+			if (!current || (kind === "snapshot" ? current.snapshotPath : current.filesPath)) {
+				await rm(tmp, { force: true });
+				return null;
+			}
+			return await this.files.place(tmp, sharedId, seq, kind);
+		} catch (error) {
+			await rm(tmp, { force: true });
+			throw error;
 		}
 	}
 
@@ -405,8 +457,11 @@ export class CheckpointService implements CheckpointApi {
 	}
 
 	private enqueueAck(row: CheckpointRow): void {
-		if (!row.snapshotSha256 || row.snapshotSize === null) return;
-		const body: wire.SharedCheckpointAck = { sha256: row.snapshotSha256, size: row.snapshotSize };
+		if (!row.snapshotSha256 && !row.files) return;
+		const body: wire.SharedCheckpointAck = {
+			...(row.snapshotSha256 && row.snapshotSize !== null && { sha256: row.snapshotSha256, size: row.snapshotSize }),
+			...(row.files && { files: { sha256: row.files.sha256, size: row.files.size } }),
+		};
 		this.hub.enqueue({
 			peerId: row.nodeId,
 			sharedSessionId: row.sharedSessionId,
@@ -426,7 +481,7 @@ export class CheckpointService implements CheckpointApi {
 		const participant = this.store.participant(sharedId, peerId);
 		if (!participant || participant.state !== "active") throw new ApiError(403, "forbidden", "Only participants of the shared session may acknowledge snapshots");
 		const row = this.store.checkpoint(sharedId, seq);
-		if (!row || row.snapshotSha256 !== ack.sha256) throw ApiError.notFound("Checkpoint");
+		if (!row || (ack.sha256 !== undefined && row.snapshotSha256 !== ack.sha256) || (ack.files !== undefined && row.files?.sha256 !== ack.files.sha256)) throw ApiError.notFound("Checkpoint");
 		if (!row.deliveredTo.includes(peerId)) {
 			const updated = this.store.updateCheckpoint(sharedId, seq, { deliveredTo: [...row.deliveredTo, peerId] }) as CheckpointRow;
 			this.hub.changed(sharedId, { checkpoints: [updated] });

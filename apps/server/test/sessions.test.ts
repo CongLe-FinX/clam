@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentSession, MeshUsage, MessagesPage, Project, RuntimeStatus, SessionLiveState, Workspace } from "@clam/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CHAT_RENDERING_GUIDANCE } from "../src/services/agent-guidance.ts";
 import { api, connectWs, createFullHarness, type FullHarness, type WsClient } from "./full-harness.ts";
 
 let full: FullHarness;
@@ -291,6 +292,106 @@ describe("sessions", () => {
 		const args = readFileSync(full.fakeLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((r) => r.kind === "spawn");
 		expect(args.argv).not.toContain("--no-ui");
 		expect(args.argv).toEqual(expect.arrayContaining(["--approval-mode", "always-ask"]));
+	});
+
+	it("lets the agent ask clarifying questions (ask) in yolo and answers them with OMP's answers shape", async () => {
+		const session = await createSession();
+		const sessions = await subscribe("sessions");
+		const ws = await subscribe(`session:${session.id}`);
+		await http.post(`/sessions/${session.id}/prompt`, { message: "__ask__", clientId: "q1" });
+		const request = await ws.waitFor((f) => f.event?.type === "ui_request", "ask request");
+		expect(request.event).toMatchObject({ method: "ask", questions: [{ id: "db", recommended: 1, options: [{ label: "Postgres", description: "Relational" }, { label: "SQLite" }] }, { id: "features", multi: true }] });
+		await sessions.waitFor((f) => f.topic === "sessions" && f.event.type === "upsert" && f.event.session.id === session.id && f.event.session.pendingRequests === 1, "pending badge");
+		expect((await http.get<Array<{ questions: unknown[] }>>(`/sessions/${session.id}/ui-requests`)).body[0]?.questions).toHaveLength(2);
+
+		// The body must carry exactly one of value / answers, and answers must match the questions.
+		expect((await http.post(`/sessions/${session.id}/ui-response`, { requestId: request.event.requestId })).status).toBe(400);
+		expect((await http.post(`/sessions/${session.id}/ui-response`, { requestId: request.event.requestId, value: "SQLite", answers: [] })).status).toBe(400);
+		const bad = await http.post(`/sessions/${session.id}/ui-response`, { requestId: request.event.requestId, answers: [{ id: "db", selectedOptions: ["Mongo"] }, { id: "features", selectedOptions: [] }] });
+		expect(bad.status).toBe(400);
+		const answers = [
+			{ id: "db", selectedOptions: ["SQLite"] },
+			{ id: "features", selectedOptions: ["Auth", "Search"] },
+		];
+		expect((await http.post(`/sessions/${session.id}/ui-response`, { requestId: request.event.requestId, answers })).status).toBe(204);
+		await ws.waitFor((f) => f.event?.type === "settled", "settled");
+		expect(sessionEvents(ws, session.id)).toContainEqual({ type: "ui_request_resolved", requestId: request.event.requestId, outcome: "answered", answers });
+		await sessions.waitFor((f) => f.topic === "sessions" && f.event.type === "upsert" && f.event.session.id === session.id && f.event.session.pendingRequests === 0, "badge cleared");
+		const spawn = readFileSync(full.fakeLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((r) => r.kind === "spawn");
+		expect(spawn.argv).toEqual(expect.arrayContaining(["--mode", "rpc-ui", "--no-ui"]));
+		expect(fakeCommands("extension_ui_response")[0]).toMatchObject({ answers });
+	});
+
+	it("serves subagents: live list, incremental transcript, steer and stop, then the saved snapshot once the runtime is stopped", async () => {
+		const session = await createSession();
+		const ws = await subscribe(`session:${session.id}`);
+		await http.post(`/sessions/${session.id}/prompt`, { message: "__subagents__", clientId: "t1" });
+		await ws.waitFor((f) => f.event?.type === "subagent_upsert" && f.event.subagent.id === "Beta" && f.event.subagent.status === "running", "Beta running");
+
+		const page = (await http.get<{ subagents: Array<{ id: string; status: string; parentToolCallId: string | null }>; live: boolean }>(`/sessions/${session.id}/subagents`)).body;
+		expect(page.live).toBe(true);
+		expect(page.subagents.map((s) => s.id).sort()).toEqual(["Alpha", "Beta"]);
+		expect(page.subagents.find((s) => s.id === "Beta")).toMatchObject({ status: "running", parentToolCallId: "call_fake_task" });
+
+		const first = (await http.get<{ nextByte: number; messages: Array<{ role: string }> }>(`/sessions/${session.id}/subagents/Beta/messages`)).body;
+		expect(first.messages[0]?.role).toBe("user");
+		expect((await http.post(`/sessions/${session.id}/subagents/Beta/steer`, { message: "   " })).status).toBe(400);
+		expect((await http.post(`/sessions/${session.id}/subagents/Beta/steer`, { message: "keep going" })).status).toBe(204);
+		const next = (await http.get<{ fromByte: number; messages: Array<{ content: Array<{ text?: string }> }> }>(`/sessions/${session.id}/subagents/Beta/messages?fromByte=${first.nextByte}`)).body;
+		expect(next.fromByte).toBe(first.nextByte);
+		expect(next.messages.some((m) => m.content.some((b) => b.text === "keep going"))).toBe(true);
+		expect((await http.get(`/sessions/${session.id}/subagents/Ghost/messages`)).status).toBe(404);
+		expect((await http.post(`/sessions/${session.id}/subagents/Ghost/steer`, { message: "x" })).status).toBe(404);
+
+		expect((await http.post<{ cancelled: boolean }>(`/sessions/${session.id}/subagents/Beta/cancel`, {})).body).toEqual({ cancelled: true });
+		await ws.waitFor((f) => f.event?.type === "subagent_upsert" && f.event.subagent.id === "Beta" && f.event.subagent.status === "aborted", "Beta aborted");
+		expect((await http.post<{ cancelled: boolean }>(`/sessions/${session.id}/subagents/Beta/cancel`, {})).body).toEqual({ cancelled: false });
+		expect((await http.post<{ cancelled: boolean }>(`/sessions/${session.id}/subagents/Ghost/cancel`, {})).body).toEqual({ cancelled: false });
+		await ws.waitFor((f) => f.event?.type === "settled", "settled");
+
+		expect((await http.post(`/runtime/${session.id}/stop`, {})).status).toBe(204);
+		const stopped = (await http.get<{ subagents: Array<{ id: string; status: string }>; live: boolean }>(`/sessions/${session.id}/subagents`)).body;
+		expect(stopped.live).toBe(false);
+		expect(stopped.subagents.map((s) => [s.id, s.status])).toEqual([["Alpha", "completed"], ["Beta", "aborted"]]);
+		const stoppedMessages = (await http.get<{ messages: unknown[] }>(`/sessions/${session.id}/subagents/Alpha/messages`)).body;
+		expect(stoppedMessages.messages.length).toBeGreaterThan(0);
+		expect((await http.post(`/sessions/${session.id}/subagents/Alpha/steer`, { message: "x" })).status).toBe(409);
+	});
+
+	it("tells every session's agent how the chat renders (appended system prompt), plain chats included", async () => {
+		const plain = await http.post<AgentSession>("/sessions", { title: "Plain chat" });
+		expect(plain.status).toBe(201);
+		const ws = await subscribe(`session:${plain.body.id}`);
+		await http.post(`/sessions/${plain.body.id}/prompt`, { message: "hi", clientId: "g1" });
+		await ws.waitFor((f) => f.event?.type === "settled", "settled");
+		const spawn = readFileSync(full.fakeLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((r) => r.kind === "spawn");
+		const at = (spawn.argv as string[]).indexOf("--append-system-prompt");
+		expect(at).toBeGreaterThan(-1);
+		const note = spawn.argv[at + 1] as string;
+		expect(note).toBe(CHAT_RENDERING_GUIDANCE);
+		expect(note.length).toBeLessThan(600);
+		for (const word of ["![alt](relative/path.png)", "```mermaid", "```chart", "$$", "automatically"]) expect(note).toContain(word);
+	});
+
+	it("reports the files a real turn created in the project folder: stored per turn, pushed live, served by /outputs", async () => {
+		const session = await createSession();
+		const ws = await subscribe(`session:${session.id}`);
+		await http.post(`/sessions/${session.id}/prompt`, { message: "draw it\n@@fake-sh printf 'png' > drawing.png\n@@fake-sh mkdir -p out && printf '%PDF' > out/report.pdf", clientId: "o1" });
+		const pushed = await ws.waitFor((f) => f.topic === `session:${session.id}` && f.event?.type === "turn_outputs", "turn_outputs");
+		await ws.waitFor((f) => f.event?.type === "settled", "settled");
+		const stored = (await http.get<{ outputs: Array<{ id: string; projectId: string; anchorMessageId: string | null; files: Array<{ path: string; mimeType: string; change: string }> }> }>(`/sessions/${session.id}/outputs`)).body.outputs;
+		expect(stored).toHaveLength(1);
+		expect(stored[0]?.files.map((f) => [f.path, f.mimeType, f.change])).toEqual([
+			["drawing.png", "image/png", "created"],
+			["out/report.pdf", "application/pdf", "created"],
+		]);
+		expect(stored[0]?.projectId).toBe(project.id);
+		expect(stored[0]?.anchorMessageId).toEqual(expect.any(String));
+		expect(pushed.event.outputs).toEqual(stored[0]);
+		// a turn that changes nothing adds nothing
+		await http.post(`/sessions/${session.id}/prompt`, { message: "just talk", clientId: "o2" });
+		await ws.waitFor((f) => f.event?.type === "settled" && ws.frames.filter((x) => x.event?.type === "settled").length >= 2, "second settled");
+		expect((await http.get<{ outputs: unknown[] }>(`/sessions/${session.id}/outputs`)).body.outputs).toHaveLength(1);
 	});
 
 	it("removes the session directory on delete but never anything outside the data dir", async () => {

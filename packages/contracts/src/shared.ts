@@ -40,8 +40,11 @@ export const Checkpoint = z.object({
 	seq: z.number().int(),
 	epoch: z.number().int(),
 	nodeId: z.string(),
-	branch: z.string(),
+	/** git mode: shared branch + commit; null in files mode. */
+	branch: z.string().nullable(),
 	commit: z.string().nullable(),
+	/** files mode: bundle of the working folder (no git), delivered with the session snapshot. */
+	files: z.object({ sha256: z.string(), size: z.number().int(), fileCount: z.number().int() }).nullable(),
 	pushed: z.boolean(),
 	/** OMP session snapshot (archive v1) metadata; null when the snapshot could not be taken. */
 	snapshot: z.object({ sha256: z.string(), size: z.number().int(), messageCount: z.number().int() }).nullable(),
@@ -83,7 +86,10 @@ export const SharedSession = z.object({
 	id: z.string(),
 	workspaceId: z.string(),
 	title: z.string(),
-	repo: z.object({ url: z.string(), branch: z.string() }),
+	/** How the working files travel between nodes: a shared git branch, or folder bundles shipped node to node (no repository). */
+	vcs: z.enum(["git", "files"]),
+	/** git mode only. */
+	repo: z.object({ url: z.string(), branch: z.string() }).nullable(),
 	epoch: z.number().int(),
 	driverNodeId: z.string(),
 	/** This node's relation to it. */
@@ -102,6 +108,8 @@ export const SharedSession = z.object({
 	takeoverBlockedReason: z.string().nullable(),
 	/** Rescue branch where this node's unpushed changes were saved after losing the driver role. */
 	rescueBranch: z.string().nullable(),
+	/** Files mode: this node's work after the last checkpoint, saved as a bundle when it lost the driver role (apply it to a project with `sharedRescueApply`). */
+	rescueFiles: z.object({ sha256: z.string(), size: z.number().int(), fileCount: z.number().int(), paths: z.array(z.string()), epoch: z.number().int(), at: IsoDate }).nullable(),
 	agentMessageBudget: z.number().int(),
 	unreadMessages: z.number().int(),
 	/** The hand-over this node started (null when none). */
@@ -110,6 +118,26 @@ export const SharedSession = z.object({
 	updatedAt: IsoDate,
 });
 export type SharedSession = z.infer<typeof SharedSession>;
+
+/**
+ * A file posted into the group chat (by a human upload or by an agent via `mesh_share_file`). Metadata replicates with
+ * the message; bytes replicate to every member node (eagerly up to `ATTACHMENT_EAGER_MAX_BYTES`, on demand above),
+ * verified by sha-256, so any one online member can serve them.
+ */
+export const SharedAttachment = z.object({
+	id: z.string(),
+	name: z.string(),
+	mimeType: z.string(),
+	size: z.number().int(),
+	sha256: z.string(),
+	/** Node that first stored the bytes. */
+	originNodeId: z.string(),
+	/** Whether the bytes are present on THIS node (false = fetched from a member when opened). */
+	available: z.boolean(),
+});
+export type SharedAttachment = z.infer<typeof SharedAttachment>;
+export const ATTACHMENT_EAGER_MAX_BYTES = 100 * 1024 * 1024;
+export const ATTACHMENT_MAX_BYTES = 2 * 1024 * 1024 * 1024;
 
 export const SharedMessage = z.object({
 	id: z.string(),
@@ -131,6 +159,7 @@ export const SharedMessage = z.object({
 	/** Hybrid logical clock used for ordering: sort by (hlc, originNodeId). */
 	hlc: z.string(),
 	createdAt: IsoDate,
+	attachments: z.array(SharedAttachment).default([]),
 	delivery: z.enum(["local", "pending", "delivered", "failed"]),
 	injectedIntoSession: z.boolean(),
 });
@@ -140,8 +169,14 @@ export const SharedSessionDetail = z.object({
 	shared: SharedSession,
 	checkpoints: z.array(Checkpoint),
 	messages: z.array(SharedMessage),
+	/** Set when `GET /shared/:id?messageLimit=N` returned only the newest N messages: pass it as `before` to `GET /shared/:id/messages` for older ones. Absent/null = `messages` is the whole log. */
+	messagesCursor: z.string().nullable().optional(),
 });
 export type SharedSessionDetail = z.infer<typeof SharedSessionDetail>;
+
+/** `GET /shared/:id/messages?before=<cursor>&limit=`: one page of the group log in display order (oldest → newest); `nextCursor` (opaque) pages further back, null at the start of the log. Without `before` it is the newest page. */
+export const SharedMessagesPage = z.object({ messages: z.array(SharedMessage), nextCursor: z.string().nullable() });
+export type SharedMessagesPage = z.infer<typeof SharedMessagesPage>;
 
 /** Incoming invitation on a participant node. */
 export const SharedInvite = z.object({
@@ -149,7 +184,8 @@ export const SharedInvite = z.object({
 	sharedSessionId: z.string(),
 	from: z.object({ nodeId: z.string(), nodeName: z.string(), agentName: z.string().nullable() }),
 	title: z.string(),
-	repo: z.object({ url: z.string(), branch: z.string() }),
+	vcs: z.enum(["git", "files"]),
+	repo: z.object({ url: z.string(), branch: z.string() }).nullable(),
 	workspaceId: z.string(),
 	/** Requested local agent (null = this node picks). */
 	agentId: z.string().nullable(),
@@ -174,9 +210,17 @@ export const DecideSharedInviteBody = z.discriminatedUnion("decision", [
 ]);
 /** Humans post `chat` (default); @mentions in `text` are resolved server-side unless `to` is given explicitly. */
 export const PostSharedMessageBody = z.object({
-	text: z.string().trim().min(1).max(20_000),
+	/** May be empty when attachments are posted. */
+	text: z.string().trim().max(20_000).default(""),
 	kind: z.enum(["chat", "instruction", "answer", "note"]).default("chat"),
 	to: z.object({ mode: z.enum(["all", "lead", "agents"]), agents: z.array(z.object({ nodeId: z.string(), agentId: z.string() })).default([]) }).optional(),
+	/** Ids returned by `sharedAttachmentUpload` (uploaded first, then referenced here). */
+	attachmentIds: z.array(z.string()).max(20).default([]),
+}).refine((b) => b.text.length > 0 || b.attachmentIds.length > 0, { message: "Write a message or attach a file" });
+export const SaveAttachmentBody = z.object({
+	projectId: z.string().min(1),
+	/** Relative destination path; defaults to `attachments/<name>`. Never overwrites an existing file (a suffix is added). */
+	path: z.string().min(1).optional(),
 });
 export const CheckpointBody = z.object({ note: z.string().max(500).optional() });
 /** Participant side: continue the work here. */

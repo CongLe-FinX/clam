@@ -1,22 +1,32 @@
 import type { NodePreview, OutgoingPairing } from "@clam/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, CheckCircle2, CircleSlash, Clock, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleSlash, Clock, Loader2, MessagesSquare, ShieldCheck, Users, XCircle } from "lucide-react";
 import { useEffect, useState } from "react";
 import { errorMessage } from "@/lib/api";
-import { qk, useOutgoingPairings } from "@/lib/queries";
-import { cn } from "@/lib/utils";
+import { qk, useNode, useOutgoingPairings } from "@/lib/queries";
+import { useUi } from "@/lib/store";
 import { Button } from "@/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
 import { Field } from "@/ui/field";
 import { Input } from "@/ui/input";
-import { CopyBlock } from "./components";
-import { formatFingerprint, formatInvitationCode } from "./format";
+import { CODE_LENGTH, CodeInput } from "./code-input";
+import { FingerprintCompare } from "./fingerprint";
+import { formatInvitationCode } from "./format";
 import { useJoin, useJoinPreview } from "./hooks";
+import { Stepper } from "./stepper";
 
 type Step = "address" | "verify" | "code" | "progress";
 const STEPS: Step[] = ["address", "verify", "code", "progress"];
+const LABELS = ["Address", "Verify", "Code", "Waiting", "Paired"] as const;
 const TERMINAL: ReadonlySet<OutgoingPairing["state"]> = new Set(["paired", "rejected", "expired", "failed"]);
+
+const DESCRIPTION: Record<Step, string> = {
+	address: "Enter the address the other machine gave you.",
+	verify: "Make sure you are talking to the right machine before you use its code.",
+	code: "Type or paste the one-time code from the inviter.",
+	progress: "The inviter has to approve this request on their screen.",
+};
 
 const normalizeUrl = (raw: string): string => {
 	const t = raw.trim();
@@ -31,25 +41,19 @@ export default function JoinDialog({ onClose }: { onClose: () => void }) {
 	const [preview, setPreview] = useState<NodePreview | null>(null);
 	const [pairingId, setPairingId] = useState<string | null>(null);
 	const [joined, setJoined] = useState<OutgoingPairing | null>(null);
+	const outgoing = useOutgoingPairings();
+	const live = pairingId ? (outgoing.data?.find((x) => x.id === pairingId) ?? joined) : null;
+	const stepIndex = step === "progress" ? (live?.state === "paired" ? LABELS.length : 3) : STEPS.indexOf(step);
 
 	return (
 		<Dialog open onOpenChange={(o) => !o && onClose()}>
 			<DialogContent className="max-w-xl" sheetOnMobile>
 				<DialogHeader>
-					<DialogTitle>Join a node</DialogTitle>
-					<DialogDescription className="flex items-center gap-1.5">
-						<span aria-hidden className="flex gap-1">
-							{STEPS.map((s, i) => (
-								<span key={s} className={cn("h-1 w-5 rounded-full transition-colors", i <= STEPS.indexOf(step) ? "bg-accent" : "bg-surface-3")} />
-							))}
-						</span>
-						<span>
-							Step {STEPS.indexOf(step) + 1} of {STEPS.length} ·{" "}
-							{step === "address" ? "Address" : step === "verify" ? "Verify fingerprint" : step === "code" ? "Enter code" : "Pairing"}
-						</span>
-					</DialogDescription>
+					<DialogTitle>Join another machine</DialogTitle>
+					<DialogDescription>{stepIndex === LABELS.length ? "Both machines are connected and now trust each other." : DESCRIPTION[step]}</DialogDescription>
+					<Stepper steps={LABELS} current={stepIndex} className="pt-2" />
 				</DialogHeader>
-				<div className="-mx-1 flex min-h-0 flex-col gap-4 overflow-y-auto px-1">
+				<div key={step} className="-mx-1 flex min-h-0 animate-fade-in flex-col gap-4 overflow-y-auto px-1">
 					{step === "address" ? (
 						<AddressStep
 							url={url}
@@ -96,7 +100,7 @@ function AddressStep({ url, setUrl, onPreview, onClose }: { url: string; setUrl:
 				if (url.trim()) go();
 			}}
 		>
-			<Field label="Address of the node" hint="The https:// address the inviter sent you, e.g. https://agent-a.example.com or a trycloudflare.com address." error={preview.error ? errorMessage(preview.error) : null}>
+			<Field label="Address of the machine" hint="The https:// address the inviter sent you, e.g. https://agent-a.example.com or a trycloudflare.com address." error={preview.error ? errorMessage(preview.error) : null}>
 				{(id) => (
 					<Input
 						id={id}
@@ -121,7 +125,7 @@ function AddressStep({ url, setUrl, onPreview, onClose }: { url: string; setUrl:
 					Cancel
 				</Button>
 				<Button type="submit" variant="primary" loading={preview.isPending} disabled={!url.trim()}>
-					Look up node
+					Look up machine
 				</Button>
 			</DialogFooter>
 		</form>
@@ -142,9 +146,9 @@ function VerifyStep({ preview, url, onBack, onConfirm }: { preview: NodePreview;
 					<div className="text-xs text-subtle">CL Agent Mesh v{preview.version}</div>
 				</div>
 			</div>
-			<CopyBlock label="Fingerprint presented by this node" value={preview.fingerprint} display={formatFingerprint(preview.fingerprint)} />
+			<FingerprintCompare label="Fingerprint presented by this machine" fingerprint={preview.fingerprint} />
 			<p className="text-[13px] text-muted-foreground">
-				Ask the inviter to read the fingerprint from their <strong>Invite a node</strong> screen. If a single character differs, stop — someone between you and that node may be impersonating it.
+				Ask the inviter to read the words and fingerprint from their <strong>Share this code</strong> screen. If a single character differs, stop — someone between you and that machine may be impersonating it.
 			</p>
 			<label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl bg-surface-2 p-3 text-[13px]">
 				<input type="checkbox" checked={checked} onChange={(e) => setChecked(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--accent)] coarse:size-5" />
@@ -165,32 +169,26 @@ function VerifyStep({ preview, url, onBack, onConfirm }: { preview: NodePreview;
 function CodeStep({ preview, url, onBack, onJoined }: { preview: NodePreview; url: string; onBack: () => void; onJoined: (p: OutgoingPairing) => void }) {
 	const join = useJoin();
 	const [code, setCode] = useState("");
-	const clean = code.replace(/-/g, "");
+	const ready = code.length === CODE_LENGTH;
 	return (
 		<form
 			className="flex flex-col gap-4"
 			onSubmit={(e) => {
 				e.preventDefault();
-				if (clean.length >= 6) join.mutate({ url, code: formatInvitationCode(code), expectedFingerprint: preview.fingerprint }, { onSuccess: onJoined });
+				if (ready) join.mutate({ url, code: formatInvitationCode(code), expectedFingerprint: preview.fingerprint }, { onSuccess: onJoined });
 			}}
 		>
-			<Field label={`Invitation code from ${preview.name}`} hint="Eight characters, valid once. The code itself is never sent over the network — only a proof that you know it." error={join.error ? errorMessage(join.error) : null}>
+			<Field label={`Invitation code from ${preview.name}`} hint="Eight characters, valid once. Paste the whole message if you like. The code itself is never sent over the network — only a proof that you know it." error={join.error ? errorMessage(join.error) : null}>
 				{(id) => (
-					<Input
+					<CodeInput
 						id={id}
 						autoFocus
 						value={code}
-						onChange={(e) => {
-							setCode(formatInvitationCode(e.target.value).slice(0, 19));
+						invalid={Boolean(join.error)}
+						onChange={(next) => {
+							setCode(next);
 							join.reset();
 						}}
-						autoCapitalize="characters"
-						autoCorrect="off"
-						autoComplete="off"
-						spellCheck={false}
-						placeholder="XXXX-XXXX"
-						aria-invalid={Boolean(join.error)}
-						className="h-14 text-center font-mono text-2xl font-semibold tracking-[0.2em] coarse:h-16"
 					/>
 				)}
 			</Field>
@@ -198,7 +196,7 @@ function CodeStep({ preview, url, onBack, onJoined }: { preview: NodePreview; ur
 				<Button variant="ghost" onClick={onBack}>
 					Back
 				</Button>
-				<Button type="submit" variant="primary" loading={join.isPending} disabled={clean.length < 6}>
+				<Button type="submit" variant="primary" loading={join.isPending} disabled={!ready}>
 					Pair with {preview.name}
 				</Button>
 			</DialogFooter>
@@ -211,6 +209,8 @@ function ProgressStep({ initial, id, onClose, onRetry, onRestart }: { initial: O
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const p = list.data?.find((x) => x.id === id) ?? initial;
+	const me = useNode();
+	const openDialog = useUi((s) => s.openDialog);
 	const done = TERMINAL.has(p.state);
 	// The `network` topic pushes state changes; this poll only covers a missed frame.
 	useEffect(() => {
@@ -221,20 +221,33 @@ function ProgressStep({ initial, id, onClose, onRetry, onRestart }: { initial: O
 
 	const name = p.remote.name;
 	return (
-		<div className="flex flex-col gap-4" role="status" aria-live="polite">
+		<div className="flex animate-fade-in flex-col gap-4" role="status" aria-live="polite">
 			{p.state === "hello_sent" ? (
 				<Panel icon={<Loader2 className="size-6 animate-spin text-accent" />} title={`Contacting ${name}…`}>
 					Proving that you know the code and checking that {name} presents the fingerprint you verified.
 				</Panel>
 			) : null}
 			{p.state === "awaiting_remote_approval" ? (
-				<Panel icon={<Clock className="size-6 text-accent" />} title={`Waiting for ${name} to approve`}>
-					The code was accepted. The inviter now sees a request showing <strong>your</strong> fingerprint under <strong>Connected nodes → Pairing requests</strong> and decides which capabilities to grant. Keep this window open or close it — pairing continues in the background.
-				</Panel>
+				<>
+					<Panel
+						icon={
+							<span className="relative grid size-14 place-items-center">
+								<span className="absolute inset-0 rounded-full bg-accent/30 [animation:clam-pulse-ring_1.8s_ease-out_infinite]" />
+								<span className="relative grid size-11 place-items-center rounded-full bg-accent-soft text-accent shadow-[inset_0_0_0_1.5px_var(--accent)]">
+									<Clock className="size-5" />
+								</span>
+							</span>
+						}
+						title={`Waiting for ${name} to approve`}
+					>
+						The code was accepted. The inviter now sees a request with <strong>your</strong> picture, words and fingerprint below, and decides what to grant. You can close this window — pairing continues in the background.
+					</Panel>
+					{me.data ? <FingerprintCompare label="Your fingerprint — the inviter compares this" fingerprint={me.data.fingerprint} /> : null}
+				</>
 			) : null}
 			{p.state === "paired" ? (
-				<Panel icon={<CheckCircle2 className="size-6 text-success" />} title={`Paired with ${name}`}>
-					Both nodes pinned each other's keys. Every request between you is now signed. It now appears under Connected nodes.
+				<Panel icon={<span className="grid size-14 place-items-center rounded-full bg-success/15"><CheckCircle2 className="size-7 text-success" /></span>} title={`Paired with ${name}`}>
+					Both machines pinned each other's keys. Every request between you is now signed, and {name} appears under Connected machines.
 				</Panel>
 			) : null}
 			{p.state === "rejected" ? (
@@ -249,20 +262,40 @@ function ProgressStep({ initial, id, onClose, onRetry, onRestart }: { initial: O
 			) : null}
 			{p.state === "failed" ? (
 				<Panel icon={<AlertTriangle className="size-6 text-danger" />} title="Pairing failed">
-					{p.error ?? "The nodes could not complete the handshake."}
+					{p.error ?? "The machines could not complete the handshake."}
 				</Panel>
 			) : null}
-			<DialogFooter>
+			<DialogFooter className="sm:flex-wrap">
 				{p.state === "paired" ? (
-					<Button
-						variant="outline"
-						onClick={() => {
-							onClose();
-							void navigate({ to: "/network/nodes/$peerId", params: { peerId: p.remote.nodeId } });
-						}}
-					>
-						View node
-					</Button>
+					<>
+						<Button
+							variant="ghost"
+							onClick={() => {
+								onClose();
+								void navigate({ to: "/network/nodes/$peerId", params: { peerId: p.remote.nodeId } });
+							}}
+						>
+							View machine
+						</Button>
+						<Button
+							variant="outline"
+							onClick={() => {
+								onClose();
+								openDialog({ kind: "new-chat" });
+							}}
+						>
+							<MessagesSquare /> Start a group chat with its agents
+						</Button>
+						<Button
+							variant="primary"
+							onClick={() => {
+								onClose();
+								void navigate({ to: "/network/agents" });
+							}}
+						>
+							<Users /> Open Agent Directory
+						</Button>
+					</>
 				) : null}
 				{p.state === "rejected" || p.state === "expired" ? (
 					<Button variant="outline" onClick={onRestart}>
@@ -274,9 +307,11 @@ function ProgressStep({ initial, id, onClose, onRetry, onRestart }: { initial: O
 						Try again
 					</Button>
 				) : null}
-				<Button variant={p.state === "paired" ? "primary" : "ghost"} onClick={onClose}>
-					{done ? "Close" : "Close — continue in background"}
-				</Button>
+				{p.state === "paired" ? null : (
+					<Button variant="ghost" onClick={onClose}>
+						{done ? "Close" : "Close — continue in background"}
+					</Button>
+				)}
 			</DialogFooter>
 		</div>
 	);

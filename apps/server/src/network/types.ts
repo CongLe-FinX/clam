@@ -14,9 +14,11 @@ import type { TokenBuckets } from "./rate-limit.ts";
 import type { TunnelService } from "./tunnel.ts";
 import type { TaskService } from "../tasks/service.ts";
 import type { SharedService } from "../shared/service.ts";
+import type { ContextService } from "../context/service.ts";
+import type { HandoffService } from "../handoff/service.ts";
 
 /** What the network services are built from: the server context before `network` exists. */
-export type NetworkBase = Omit<ServerContext, "network" | "access" | "sessions" | "gitService" | "hostTools" | "tasks" | "shared">;
+export type NetworkBase = Omit<ServerContext, "network" | "access" | "sessions" | "turnOutputs" | "gitService" | "hostTools" | "tasks" | "shared" | "contexts" | "handoffs" | "terminals" | "browser">;
 
 /**
  * Everything the agent network is made of. Lives on `ServerContext.network`; the `/api/local` routes use the
@@ -56,6 +58,14 @@ export interface NetworkService {
 	readonly shared: SharedService | null;
 	/** Connect the shared-session service; call before `listen()` so the listener registers its endpoints. */
 	attachShared(shared: SharedService): void;
+	/** The context service serving `/api/v1/context*`; null until `attachContexts` (the listener then answers 404 for them). */
+	readonly contexts: ContextService | null;
+	/** Connect the context service; call before `listen()` so the listener registers its endpoints. */
+	attachContexts(contexts: ContextService): void;
+	/** The handoff service serving `/api/v1/handoffs*`; null until `attachHandoffs` (the listener then answers 404 for them). */
+	readonly handoffs: HandoffService | null;
+	/** Connect the handoff service; call before `listen()` so the listener registers its endpoints. */
+	attachHandoffs(handoffs: HandoffService): void;
 	/** The server context whose owner web UI the public listener also serves (behind the owner-session gate); null = `/api/v1` only. */
 	readonly ui: ServerContext | null;
 	/** Connect the UI surface; call before `listen()` so the listener mounts it. */

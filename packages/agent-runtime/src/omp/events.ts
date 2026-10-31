@@ -1,6 +1,6 @@
-import type { MessagesPage, SessionEvent, TokenTotals, UiBlock, UiMessage } from "@clam/contracts";
+import type { AskAnswer, AskQuestion, MessagesPage, SessionEvent, TokenTotals, UiBlock, UiMessage, UiRequestOutcome } from "@clam/contracts";
 import { isRecord, type OmpFrame } from "./frames.ts";
-import { resultText, toAssistantBlock, toTokenTotals, toUiMessage } from "./messages.ts";
+import { resultText, toAssistantBlock, toTokenTotals, toUiMessage, toolDetailsOf } from "./messages.ts";
 
 export interface MapResult {
 	events: SessionEvent[];
@@ -97,6 +97,8 @@ export class OmpEventMapper {
 	#usage = new Map<string, UsageDelta>();
 	#pendingUi = new Map<string, UiRequestEvent>();
 
+	constructor(private readonly now: () => number = Date.now) {}
+
 	get messageCount(): number {
 		return this.#transcript.length;
 	}
@@ -187,8 +189,8 @@ export class OmpEventMapper {
 		return [...this.#pendingUi.values()];
 	}
 
-	markUiResolved(requestId: string): SessionEvent | null {
-		return this.#pendingUi.delete(requestId) ? { type: "ui_request_resolved", requestId } : null;
+	markUiResolved(requestId: string, outcome: UiRequestOutcome = "answered", answers?: AskAnswer[]): SessionEvent | null {
+		return this.#pendingUi.delete(requestId) ? { type: "ui_request_resolved", requestId, outcome, ...(answers ? { answers } : {}) } : null;
 	}
 
 	page(query: { cursor?: string; limit?: number }): MessagesPage {
@@ -246,10 +248,10 @@ export class OmpEventMapper {
 			}
 			case "tool_execution_end": {
 				if (typeof frame.toolCallId !== "string") return EMPTY;
-				return {
-					events: [{ type: "tool_end", toolCallId: frame.toolCallId, isError: frame.isError === true, result: resultText(frame.result) }],
-					stateDirty: frame.toolName === "todo",
-				};
+				const event: Extract<SessionEvent, { type: "tool_end" }> = { type: "tool_end", toolCallId: frame.toolCallId, isError: frame.isError === true, result: resultText(frame.result) };
+				const details = toolDetailsOf(frame.toolName, isRecord(frame.result) ? frame.result.details : undefined);
+				if (details !== undefined) event.toolDetails = details;
+				return { events: [event], stateDirty: frame.toolName === "todo" };
 			}
 			case "prompt_result":
 				return this.#promptResult(frame);
@@ -271,8 +273,11 @@ export class OmpEventMapper {
 					events: typeof frame.errorMessage === "string" && frame.errorMessage ? [{ type: "notice", level: "warning", message: `Compaction: ${frame.errorMessage}` }] : [],
 					stateDirty: true,
 				};
-			case "extension_ui_request":
-				return { events: this.#uiRequest(frame), stateDirty: false };
+			case "extension_ui_request": {
+				const events = this.#uiRequest(frame);
+				// A question or approval appearing/closing changes `awaiting` in the live state (mirrors show it).
+				return { events, stateDirty: events.some((e) => e.type === "ui_request" || e.type === "ui_request_resolved") };
+			}
 			default:
 				return dirty ? { events: [], stateDirty: true } : EMPTY;
 		}
@@ -540,6 +545,9 @@ export class OmpEventMapper {
 			case "select": {
 				const options = Array.isArray(frame.options) ? frame.options.filter((o): o is string => typeof o === "string") : [];
 				request = { type: "ui_request", requestId: id, method: "select", title, options };
+				if (Array.isArray(frame.optionDetails) && frame.optionDetails.some((d) => isRecord(d) && typeof d.description === "string")) {
+					request.optionDetails = frame.optionDetails.map((d) => (isRecord(d) && typeof d.description === "string" ? { description: d.description } : {}));
+				}
 				break;
 			}
 			case "confirm":
@@ -552,33 +560,77 @@ export class OmpEventMapper {
 				request = { type: "ui_request", requestId: id, method: "editor", title, ...(typeof frame.prefill === "string" ? { message: frame.prefill } : {}) };
 				break;
 			case "ask": {
-				const questions = Array.isArray(frame.questions) ? frame.questions.filter(isRecord) : [];
+				const questions = parseAskQuestions(frame.questions);
 				const first = questions[0];
 				if (!first) return [];
-				const options = Array.isArray(first.options)
-					? first.options.map((o) => (isRecord(o) && typeof o.label === "string" ? o.label : typeof o === "string" ? o : undefined)).filter((o): o is string => o !== undefined)
-					: [];
-				const lines = questions.map((q) => (typeof q.question === "string" ? q.question : "")).filter(Boolean);
 				request = {
 					type: "ui_request",
 					requestId: id,
 					method: "ask",
-					title: typeof first.header === "string" ? first.header : (lines[0] ?? ""),
-					message: lines.join("\n"),
-					options,
+					title: first.header ?? first.question,
+					message: questions.map((q) => q.question).join("\n"),
+					questions,
 				};
 				break;
 			}
 			case "cancel": {
 				const target = typeof frame.targetId === "string" ? frame.targetId : undefined;
-				return target !== undefined && this.#pendingUi.delete(target) ? [{ type: "ui_request_resolved", requestId: target }] : [];
+				const pending = target === undefined ? undefined : this.#pendingUi.get(target);
+				if (target === undefined || !pending) return [];
+				// OMP's own timer (or a signal abort) closes the dialog: on a timeout every question was answered with its default.
+				const timedOut = pending.timeoutMs !== undefined && pending.raisedAt !== undefined && this.now() - pending.raisedAt >= pending.timeoutMs - TIMEOUT_SLACK_MS;
+				const resolved = this.markUiResolved(target, timedOut ? "timed_out" : "cancelled", timedOut && pending.questions ? defaultAskAnswers(pending.questions) : undefined);
+				return resolved ? [resolved] : [];
 			}
 			case "notify":
 				return typeof frame.message === "string" ? [{ type: "notice", level: asLevel(frame.notifyType), message: frame.message }] : [];
 			default:
 				return [];
 		}
+		if (typeof frame.timeout === "number" && Number.isFinite(frame.timeout) && frame.timeout > 0) {
+			request.timeoutMs = frame.timeout;
+			request.raisedAt = this.now();
+		}
 		this.#pendingUi.set(id, request);
 		return [request];
 	}
+}
+
+/** Slack for the gap between OMP's timer firing and `cancel` arriving. */
+const TIMEOUT_SLACK_MS = 1500;
+
+/** Questions of an `ask` request; a question without an id or text makes the request unusable (OMP refuses answers that do not match). */
+export function parseAskQuestions(raw: unknown): AskQuestion[] {
+	if (!Array.isArray(raw)) return [];
+	const questions: AskQuestion[] = [];
+	for (const q of raw) {
+		if (!isRecord(q) || typeof q.id !== "string" || typeof q.question !== "string") return [];
+		const options: AskQuestion["options"] = [];
+		if (Array.isArray(q.options)) {
+			for (const o of q.options) {
+				if (typeof o === "string") options.push({ label: o });
+				else if (isRecord(o) && typeof o.label === "string") {
+					options.push({
+						label: o.label,
+						...(typeof o.description === "string" && o.description ? { description: o.description } : {}),
+						...(typeof o.preview === "string" && o.preview ? { preview: o.preview } : {}),
+					});
+				}
+			}
+		}
+		const question: AskQuestion = { id: q.id, question: q.question, options };
+		if (typeof q.header === "string" && q.header) question.header = q.header;
+		if (q.multi === true) question.multi = true;
+		if (typeof q.recommended === "number" && Number.isInteger(q.recommended) && q.recommended >= 0 && q.recommended < options.length) question.recommended = q.recommended;
+		questions.push(question);
+	}
+	return questions;
+}
+
+/** What OMP answers on a timeout: each question's recommended option, else its first. */
+export function defaultAskAnswers(questions: AskQuestion[]): AskAnswer[] {
+	return questions.map((q) => {
+		const option = q.options[q.recommended ?? 0] ?? q.options[0];
+		return { id: q.id, selectedOptions: option ? [option.label] : [] };
+	});
 }

@@ -150,8 +150,8 @@ describe("the lead's node is offline", () => {
 		expect(after.lastCheckpoint?.seq).toBe(before.lastCheckpoint?.seq);
 		expect(git(pair.workB, "rev-parse", "HEAD").trim()).toBe(headBefore);
 		expect(git(pair.workB, "status", "--porcelain")).toContain("?? NONLEAD.md");
-		expect(git(pair.origin, "ls-tree", "-r", "--name-only", shared.repo.branch)).not.toContain("NONLEAD.md");
-		expect(remoteBranches(pair.origin).filter((b) => b.startsWith("clam/") && b !== shared.repo.branch)).toEqual([]);
+		expect(git(pair.origin, "ls-tree", "-r", "--name-only", shared.repo?.branch as string)).not.toContain("NONLEAD.md");
+		expect(remoteBranches(pair.origin).filter((b) => b.startsWith("clam/") && b !== shared.repo?.branch)).toEqual([]);
 
 		// the lead returns and checkpoints: its commit has nothing of B's edit
 		await pair.start("a");
@@ -161,7 +161,7 @@ describe("the lead's node is offline", () => {
 		const checkpoint = await api(pair.a).post<{ commit: string; pushed: boolean }>(`/shared/${shared.id}/checkpoint`, {});
 		expect(checkpoint.status, JSON.stringify(checkpoint.body)).toBe(200);
 		expect(checkpoint.body.pushed).toBe(true);
-		const tree = git(pair.origin, "ls-tree", "-r", "--name-only", shared.repo.branch);
+		const tree = git(pair.origin, "ls-tree", "-r", "--name-only", shared.repo?.branch as string);
 		expect(tree).toContain("LEAD.md");
 		expect(tree).not.toContain("NONLEAD.md");
 	});

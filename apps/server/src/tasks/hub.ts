@@ -5,6 +5,7 @@ import type { MessageKind } from "@clam/task-engine";
 import type { FastifyBaseLogger } from "fastify";
 import type { ServerContext } from "../context.ts";
 import type { ArtifactStore } from "./artifacts.ts";
+import type { TaskFiles } from "./files.ts";
 import type { OutboxHandler } from "./outbox.ts";
 import type { TaskEventRow, TaskMessageRow, TaskRow, TaskStore } from "./store.ts";
 
@@ -52,23 +53,30 @@ export interface PostMessageInput {
 export interface CreateOutgoingInput {
 	targetNodeId: string;
 	targetAgentId?: string | null;
-	/** Local project whose linked GitHub repository the executor works on. */
-	projectId: string;
+	/** Local project: its linked GitHub repository (when there is one and the task is delivered as branch/summary) is what the executor works on; its files are what `inputPaths` picks from. Omit for a task with no repository. */
+	projectId?: string | null;
+	/** Workspace of the task; defaults to the project's, else the only workspace shared with the target node. */
+	workspaceId?: string | null;
 	title: string;
 	description: string;
-	deliverAs: TaskDeliverAs;
+	/** Default: `branch` for a project with a linked repository, else `files`. */
+	deliverAs?: TaskDeliverAs | undefined;
+	/** Project-relative files/folders sent along as an input bundle. */
+	inputPaths?: readonly string[] | undefined;
 	baseBranch?: string | null;
 	constraints: TaskConstraints;
 	/** The delegating agent session on this node (host tool `mesh_delegate`); null for tasks created from the UI. */
 	senderSessionId?: string | null;
 	/** Set when this task retries another one. */
 	retryOf?: string | null;
+	/** Retry: send the same input bundle as the task being retried (instead of `inputPaths`). */
+	reuseInputsOf?: string | null;
 }
 
 /** Sender side: creating, cancelling and mirroring tasks this node delegated. Implemented in `sender.ts`. */
 export interface SenderApi {
 	/**
-	 * Validate (peer active, `tasks.send` granted to us, project linked to a repo), store the task as `offered`
+	 * Validate (peer active, `tasks.send` granted to us, a project linked to a repo for `deliverAs: branch`, input paths bundled), store the task as `offered`
 	 * (outgoing) and queue its delivery in the outbox (`task.create`). Never waits for the peer.
 	 */
 	create(input: CreateOutgoingInput): Promise<TaskRow>;
@@ -83,6 +91,12 @@ export interface SenderApi {
 	syncTask(taskId: string): Promise<void>;
 	/** Poll every active outgoing task of the peer now (the peer just came online). Never throws. */
 	syncPeer(peerId: string): Promise<void>;
+	/**
+	 * `POST /tasks/:id/executor`: the new executor of a handed-over task tells us. Verifies the fencing token with `callerId`'s pinned key and the
+	 * epochs, syncs the old executor best-effort, then in one transaction points the row (peer, executor columns, epoch, event base) and the still
+	 * pending outbox items at the new executor, and polls it. Idempotent for the same `(caller, epoch)`.
+	 */
+	followExecutor(taskId: string, callerId: string, change: wire.TaskExecutorChange): Promise<TaskRow>;
 	start(): void;
 	stop(): Promise<void>;
 }
@@ -101,11 +115,22 @@ export interface ExecutorApi {
 	 * Cancel a task this node executes: aborts the run, never destroys work. Terminal tasks are returned unchanged
 	 * (idempotent). `by` is who asked: the sender over the wire, or the human on this node.
 	 */
-	cancel(taskId: string, options: { reason: string | null; by: "sender" | "local" }): Promise<TaskRow>;
+	cancel(taskId: string, options: { reason: string | null; by: "sender" | "local" | "handoff" }): Promise<TaskRow>;
 	/** `mesh_complete` from the executing agent's session. Resolves with the text of the tool result. */
 	complete(sessionId: string, input: { taskId?: string; outcome: "succeeded" | "failed" | "blocked"; summary: string }): Promise<string>;
 	/** A message was injected into the executing session (an answer/instruction unblocks a task waiting for it). */
 	messageInjected(task: TaskRow, message: TaskMessageRow): Promise<void>;
+	/**
+	 * Handoff target, step 9: the row (status `running`, bound `executorSessionId`) becomes this node's running task: spawn overrides, session map,
+	 * `holdsTree`, `sessionStarted`, freeze marker removed. Synchronous.
+	 */
+	adoptHandedOver(taskId: string): void;
+	/** A handoff ended without releasing the task (`unfreeze`): the agent whose turn was aborted is asked to continue (or a recorded completion is finalised). */
+	thaw(taskId: string, handoffId: string): Promise<void>;
+	/** Resume the session of an in-doubt task (block lifted by reconcile or user override). */
+	resumeInDoubt(taskId: string): Promise<void>;
+	/** The task left this node (released to a handoff target): its project's tree is free; start whatever the queue allows. Never throws. */
+	released(taskId: string): void;
 	/** Boot: re-open the sessions of running tasks (restart recovery) and start queued tasks. */
 	start(): Promise<void>;
 	stop(): Promise<void>;
@@ -144,6 +169,7 @@ export interface TaskHub {
 	readonly ctx: ServerContext;
 	readonly store: TaskStore;
 	readonly artifacts: ArtifactStore;
+	readonly files: TaskFiles;
 	readonly log: FastifyBaseLogger;
 	readonly timings: TaskTimings;
 	readonly sender: SenderApi;

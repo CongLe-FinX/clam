@@ -1,6 +1,6 @@
 import { LOCAL_API_PREFIX, type Task, routes } from "@clam/contracts";
 import { useQueryClient } from "@tanstack/react-query";
-import { Download, ExternalLink, GitBranch, GitPullRequest, Info, Paperclip } from "lucide-react";
+import { Download, ExternalLink, FileArchive, GitBranch, GitPullRequest, Info, Paperclip } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { useGitStatus } from "@/features/git/hooks";
@@ -12,6 +12,34 @@ import { Button } from "@/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
 
 const CreatePullRequestDialog = lazy(() => import("@/features/git/pull-requests.tsx").then((m) => ({ default: m.CreatePullRequestDialog })));
+const FilesApplyDialog = lazy(() => import("./files-apply-dialog.tsx"));
+
+/** deliverAs = files: the executor's changed files as one bundle; the delegating node previews and applies it. */
+function FilesResult({ task, files }: { task: Task; files: NonNullable<NonNullable<Task["result"]>["files"]> }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<div className="flex flex-col gap-2 rounded-xl bg-surface-2 p-3 shadow-[inset_0_0_0_1px_var(--border)]">
+			<div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+				<FileArchive className="size-4 text-muted-foreground" aria-hidden />
+				<span className="text-[13px] font-medium">
+					{files.fileCount} {files.fileCount === 1 ? "file" : "files"}
+				</span>
+				<span className="tabular font-mono text-2xs text-subtle">{formatBytes(files.size)}</span>
+				{task.direction === "outgoing" ? (
+					<Button size="sm" variant="primary" className="ml-auto" onClick={() => setOpen(true)}>
+						Preview &amp; apply
+					</Button>
+				) : null}
+			</div>
+			{task.direction === "incoming" ? <p className="text-xs text-muted-foreground">These files were returned to the delegating machine, which previews and applies them in its own project.</p> : <p className="text-xs text-muted-foreground">Nothing is written until you review the changes and apply them to a project.</p>}
+			{open ? (
+				<Suspense fallback={null}>
+					<FilesApplyDialog task={task} onClose={() => setOpen(false)} />
+				</Suspense>
+			) : null}
+		</div>
+	);
+}
 
 /** "Create PR" for a pushed task branch, in the delegating node's own project (M2 pull-request dialog). */
 function CreatePrAction({ task, projectId, branch, summary }: { task: Task; projectId: string; branch: string; summary: string }) {
@@ -29,7 +57,7 @@ function CreatePrAction({ task, projectId, branch, summary }: { task: Task; proj
 	};
 	return (
 		<>
-			<Button size="sm" variant="primary" onClick={() => void start()} loading={fetching} disabled={!ready} title={ready ? undefined : "The project must be a Git repository on this node"}>
+			<Button size="sm" variant="primary" onClick={() => void start()} loading={fetching} disabled={!ready} title={ready ? undefined : "The project must be a Git repository on this machine"}>
 				<GitPullRequest /> Create PR
 			</Button>
 			{open && status ? (
@@ -96,6 +124,8 @@ export function ResultCard({ task }: { task: Task }) {
 					</div>
 				) : null}
 
+				{result.files ? <FilesResult task={task} files={result.files} /> : task.deliverAs === "files" && task.status === "succeeded" ? <p className="text-xs text-muted-foreground">The executor did not return any changed files.</p> : null}
+
 				{result.artifacts.length > 0 ? (
 					<div className="flex flex-col gap-1.5">
 						<h3 className="text-2xs font-semibold uppercase tracking-wider text-subtle">Artifacts</h3>
@@ -115,7 +145,7 @@ export function ResultCard({ task }: { task: Task }) {
 								</li>
 							))}
 						</ul>
-						{task.direction === "incoming" ? <p className="text-2xs text-subtle">The delegating node downloads artifacts from this node.</p> : null}
+						{task.direction === "incoming" ? <p className="text-2xs text-subtle">The delegating machine downloads artifacts from this machine.</p> : null}
 					</div>
 				) : null}
 			</CardContent>

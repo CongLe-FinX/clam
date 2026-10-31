@@ -22,7 +22,7 @@ declare module "fastify" {
 /** Routes a remote caller may reach with no session: the status probe the login page needs, and the login itself. */
 const PUBLIC_ROUTES = new Set([`GET ${LOCAL_API_PREFIX}/access`, `POST ${LOCAL_API_PREFIX}/access/login`]);
 /** Routes that change how this node is exposed: only the person at the machine (the loopback UI port), never through the tunnel. */
-const LOOPBACK_ONLY_ROUTES = new Set([`PATCH ${LOCAL_API_PREFIX}/access`, `PUT ${LOCAL_API_PREFIX}/tunnel/config`]);
+const LOOPBACK_ONLY_ROUTES = new Set([`PUT ${LOCAL_API_PREFIX}/tunnel/config`]);
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const HSTS = "max-age=31536000";
 
@@ -43,10 +43,10 @@ function decodedPath(request: FastifyRequest): string {
 }
 
 const isWirePath = (path: string): boolean => path === API_PREFIX || path.startsWith(`${API_PREFIX}/`);
-const isDataPath = (path: string): boolean => path === "/ws" || path === LOCAL_API_PREFIX || path.startsWith(`${LOCAL_API_PREFIX}/`);
+const isDataPath = (path: string): boolean => path === "/ws" || path.startsWith("/ws/") || path === LOCAL_API_PREFIX || path.startsWith(`${LOCAL_API_PREFIX}/`);
 
 /** Refuse a request; a refused WebSocket handshake leaves the upgraded socket open, so end it once the answer is written. */
-function refuse(request: FastifyRequest, reply: FastifyReply, status: number, code: string, message: string): FastifyReply {
+export function refuse(request: FastifyRequest, reply: FastifyReply, status: number, code: string, message: string): FastifyReply {
 	if (request.headers.upgrade !== undefined) {
 		reply.header("connection", "close");
 		reply.raw.once("finish", () => request.raw.socket.destroySoon());
@@ -87,6 +87,8 @@ export function createPublicCsp(webDistDir: string | null): (host: string | unde
 			`script-src 'self' ${scriptHashes().join(" ")}`.trim(),
 			"style-src 'self' 'unsafe-inline'",
 			"img-src 'self' data: blob:",
+			"media-src 'self' blob:",
+			"frame-src 'self'",
 			"font-src 'self' data:",
 			`connect-src 'self' ${socket}`.trim(),
 			"manifest-src 'self'",
@@ -115,7 +117,9 @@ export function installLoopbackGate(ui: FastifyInstance): void {
  * request answers the same plain 404 as any unknown path. When on:
  *  - a browser's `Origin` must be this node's public origin (always for writes and WebSocket upgrades: CSRF);
  *  - `/api/local/*` and `/ws` need a valid owner session (401 `auth_required`) except the status probe and the login;
- *  - the routes that change exposure answer 403 `loopback_only` even to a signed-in owner;
+ *  - the routes that change exposure answer 403 `loopback_only` even to a signed-in owner (`PATCH /access` is decided by its handler:
+ *    a remote session may only switch things off);
+ *  - machine tools (`/ws/terminal/*`, `/api/local/terminal/*`) are per-route gated on top of the session: their toggle, and for the Terminal a step-up;
  *  - the SPA's static files are public (they contain no data).
  * `/api/v1/*` is never touched here: its own signature auth stays the only door, cookies are never read for it.
  */
@@ -164,7 +168,8 @@ export function installRemoteGate(ui: FastifyInstance, ctx: ServerContext): void
 		reply.removeHeader("content-digest");
 		reply.header("X-Content-Type-Options", "nosniff");
 		reply.header("Referrer-Policy", "no-referrer");
-		reply.header("Content-Security-Policy", csp(request.headers.host));
+		// A file response (project/attachment bytes) carries its own policy: the page-level one would forbid framing a PDF preview.
+		if (!reply.hasHeader("Content-Security-Policy")) reply.header("Content-Security-Policy", csp(request.headers.host));
 		reply.header("Strict-Transport-Security", HSTS);
 		reply.header("Cross-Origin-Opener-Policy", "same-origin");
 		reply.header("Cross-Origin-Resource-Policy", "same-origin");

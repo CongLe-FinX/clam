@@ -3,6 +3,7 @@ import { signRequest, signerFromIdentity } from "@clam/agent-network";
 import type { SecretStore } from "@clam/secret-store";
 import type { NetworkOptions } from "../src/network/index.ts";
 import type { SharedOptions } from "../src/shared/hub.ts";
+import type { ContextTimings } from "../src/context/service.ts";
 import { api, createFullHarness, type FullHarness } from "./full-harness.ts";
 
 /** Fast timers so heartbeat/offline/confirm retries are observable in milliseconds. */
@@ -15,13 +16,14 @@ export const FAST: NetworkOptions = {
 
 export async function startNode(
 	name: string,
-	extra: { dataDir?: string; port?: number; options?: NetworkOptions; secrets?: SecretStore; webDistDir?: string; sharedTimings?: Partial<SharedOptions> } = {},
+	extra: { dataDir?: string; port?: number; options?: NetworkOptions; secrets?: SecretStore; webDistDir?: string; sharedTimings?: Partial<SharedOptions>; contextTimings?: Partial<ContextTimings> } = {},
 ): Promise<FullHarness> {
 	return createFullHarness({
 		dataDir: extra.dataDir,
 		secrets: extra.secrets,
 		webDistDir: extra.webDistDir,
 		sharedTimings: extra.sharedTimings,
+		contextTimings: extra.contextTimings,
 		network: { port: extra.port, nodeName: name, options: { ...FAST, ...extra.options } },
 	});
 }

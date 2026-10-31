@@ -96,7 +96,7 @@ describe("manual takeover on B", () => {
 		expect(note).toContain("DRIVER");
 
 		// B's clone is on the shared branch at the checkpoint commit, with A's file
-		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo.branch);
+		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo?.branch);
 		expect(git(pair.workB, "rev-parse", "HEAD").trim()).toBe(checkpoint.commit);
 		expect(readIn(pair.workB, "SHARED_NOTES.md")).toBe("line one\n");
 		// `omp session unpack <archive> --cwd <B's clone, spelled the way omp spells it>` ran on B
@@ -172,8 +172,8 @@ describe("the former driver returns", () => {
 		expect(remoteBranches(pair.origin)).toContain(rescue);
 		expect(git(pair.origin, "show", `${rescue}:UNSAVED.md`)).toBe("uncommitted on A\n");
 		expect(git(pair.origin, "show", `${rescue}:LOCAL_COMMIT.md`)).toBe("committed on A, never pushed\n");
-		expect(() => git(pair.origin, "show", `${shared.repo.branch}:UNSAVED.md`)).toThrow();
-		expect(() => git(pair.origin, "show", `${shared.repo.branch}:LOCAL_COMMIT.md`)).toThrow();
+		expect(() => git(pair.origin, "show", `${shared.repo?.branch}:UNSAVED.md`)).toThrow();
+		expect(() => git(pair.origin, "show", `${shared.repo?.branch}:LOCAL_COMMIT.md`)).toThrow();
 		expect(git(pair.origin, "log", "-1", "--format=%B", rescue)).toContain(`Session: ${shared.id}`);
 		expect(git(pair.workA, "status", "--porcelain").trim()).toBe("");
 		expect(readIn(pair.workA, "UNSAVED.md")).toBe("uncommitted on A\n");
@@ -210,7 +210,7 @@ describe("the former driver returns", () => {
 		const staleNotice = await signedRequest(pair.a, pair.b.netUrl, {
 			method: "POST",
 			path: `/shared/${shared.id}/checkpoints`,
-			body: { seq: 99, epoch: 1, branch: shared.repo.branch, pushed: true, at: new Date().toISOString() },
+			body: { seq: 99, epoch: 1, branch: shared.repo?.branch, pushed: true, at: new Date().toISOString() },
 		});
 		expect(staleNotice.status).toBe(409);
 		expect(staleNotice.body.error.code).toBe("stale_epoch");

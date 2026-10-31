@@ -22,6 +22,7 @@ function scriptedRuntime() {
 	const session = {
 		sessionId: "ses1",
 		takeUsage: () => script.deltas.splice(0),
+		pendingUiRequests: () => [],
 		getStats: async () => {
 			if (script.statsFail || !script.stats) throw new Error("stats unavailable");
 			return script.stats;

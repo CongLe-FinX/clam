@@ -18,9 +18,11 @@ import {
 	Layers,
 	LayersIcon,
 	MessageSquarePlus,
+	Monitor,
 	Moon,
 	Settings,
 	Sun,
+	Terminal,
 	TerminalSquare,
 	Info,
 	Gauge,
@@ -39,6 +41,8 @@ import {
 	ArrowRightLeft,
 	ListChecks,
 	Send,
+	BookMarked,
+	BookPlus,
 	type LucideIcon,
 } from "lucide-react";
 import { type ReactNode, useMemo } from "react";
@@ -48,7 +52,7 @@ import { api } from "@/lib/api";
 import { tunnelBusy, useTunnelActions } from "@/features/network/hooks";
 import { isAwaitingApproval, isPendingInvite, qk, usePairingRequests, useProjects, useSessions, useSharedInvites, useSharedSessions, useTasks, useTunnel, useWorkspaces } from "@/lib/queries";
 import { useUi } from "@/lib/store";
-import { toggleTheme, useResolvedTheme } from "@/lib/theme";
+import { setThemePref, THEME_LABEL, useThemePref } from "@/lib/theme";
 import { relativeTime } from "@/lib/utils";
 import { StatusDot } from "@/ui/status-dot";
 import { Kbd } from "@/ui/kbd";
@@ -81,7 +85,7 @@ export default function CommandPalette() {
 	const setOpen = useUi((s) => s.setPaletteOpen);
 	const openDialog = useUi((s) => s.openDialog);
 	const navigate = useNavigate();
-	const theme = useResolvedTheme();
+	const themePref = useThemePref();
 	const sessions = useSessions();
 	const workspaces = useWorkspaces();
 	const projects = useProjects();
@@ -94,7 +98,7 @@ export default function CommandPalette() {
 	const pendingInvites = (useSharedInvites().data ?? []).filter(isPendingInvite).length;
 	const shared = useSharedSessions();
 	const recentShared = useMemo(() => [...(shared.data ?? [])].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, 10), [shared.data]);
-	const params = useParams({ strict: false }) as { projectId?: string; sessionId?: string };
+	const params = useParams({ strict: false }) as { projectId?: string; sessionId?: string; workspaceId?: string };
 	const sessionForGit = useQuery({
 		queryKey: qk.session(params.sessionId ?? ""),
 		queryFn: ({ signal }) => api.get<AgentSession>(routes.session(params.sessionId ?? ""), undefined, { signal }),
@@ -102,6 +106,9 @@ export default function CommandPalette() {
 	});
 	const gitProjectId = params.projectId ?? sessionForGit.data?.projectId;
 	const canHandover = sessionForGit.data?.kind === "local" && !sessionForGit.data.movedTo;
+	// Context actions target the workspace being looked at: the route's, the open project's, else the first one.
+	const contextWorkspaceId = params.workspaceId ?? projects.data?.find((p) => p.id === gitProjectId)?.workspaceId ?? workspaces.data?.[0]?.id;
+	const contextProjectId = params.projectId ?? sessionForGit.data?.projectId;
 	const requestIntent = useGitUi((s) => s.requestIntent);
 	const projectName = useMemo(() => new Map((projects.data ?? []).map((p) => [p.id, p.name])), [projects.data]);
 	const tasks = useTasks();
@@ -147,10 +154,34 @@ export default function CommandPalette() {
 					<Item icon={FolderPlus} value="create add project" onSelect={run(() => openDialog({ kind: "create-project" }))}>
 						Add project
 					</Item>
+					<Item icon={FolderPlus} value="create new empty folder project no repository no git" onSelect={run(() => openDialog({ kind: "create-project", mode: "empty" }))}>
+						New empty folder (no repository)
+					</Item>
+					<Item icon={MessageSquarePlus} value="create new chat no repository no project talk to an agent" onSelect={run(() => openDialog({ kind: "new-chat" }))}>
+						New chat
+					</Item>
 					<Item icon={MessageSquarePlus} value="create new agent session" onSelect={run(() => openDialog({ kind: "create-session" }))}>
 						New agent session
 					</Item>
 				</Group>
+
+				{contextWorkspaceId ? (
+					<Group heading="Shared Context">
+						<Item icon={BookPlus} value="new memory context note plan decision" keywords={["add", "remember"]} onSelect={run(() => openDialog({ kind: "create-context", workspaceId: contextWorkspaceId, projectId: contextProjectId }))}>
+							New memory…
+						</Item>
+						<Item
+							icon={BookMarked}
+							value="search context memory notes plans decisions"
+							onSelect={go("/workspaces/$workspaceId/context", { workspaceId: contextWorkspaceId })}
+						>
+							Search context
+						</Item>
+						<Item icon={UserPlus} value="add workspace member machine" keywords={["invite", "peer"]} onSelect={run(() => void navigate({ to: "/workspaces/$workspaceId/members", params: { workspaceId: contextWorkspaceId }, search: { add: "1" } }))}>
+							Add workspace member…
+						</Item>
+					</Group>
+				) : null}
 
 				{gitProjectId ? (
 					<Group heading={`Git · ${projectName.get(gitProjectId) ?? "this project"}`}>
@@ -206,9 +237,9 @@ export default function CommandPalette() {
 					</Group>
 				) : null}
 
-				{projects.data && projects.data.length > 0 ? (
+				{projects.data && projects.data.some((p) => p.origin !== "chat") ? (
 					<Group heading="Projects">
-						{projects.data.map((p) => (
+						{projects.data.filter((p) => p.origin !== "chat").map((p) => (
 							<Item key={p.id} icon={FolderGit2} value={`project ${p.name} ${p.path}`} hint={p.path} onSelect={go("/projects/$projectId", { projectId: p.id })}>
 								{p.name}
 							</Item>
@@ -217,7 +248,7 @@ export default function CommandPalette() {
 				) : null}
 
 				<Group heading="Tasks">
-					<Item icon={Send} value="delegate a task to an agent on another node" keywords={["send", "assign"]} onSelect={run(() => openDialog({ kind: "delegate-task" }))}>
+					<Item icon={Send} value="delegate a task to an agent on another machine" keywords={["send", "assign"]} onSelect={run(() => openDialog({ kind: "delegate-task" }))}>
 						Delegate a task…
 					</Item>
 					<Item icon={ListChecks} value="open task board tasks" onSelect={go("/tasks")}>
@@ -238,7 +269,7 @@ export default function CommandPalette() {
 
 				<Group heading="Shared sessions">
 					{canHandover && params.sessionId ? (
-						<Item icon={ArrowRightLeft} value="hand over this session to another node agent continue transfer driver" keywords={["handoff", "stop", "continue", "transfer"]} onSelect={run(() => openDialog({ kind: "handover", sessionId: params.sessionId ?? "" }))}>
+						<Item icon={ArrowRightLeft} value="hand over this session to another machine agent continue transfer driver" keywords={["handoff", "stop", "continue", "transfer"]} onSelect={run(() => openDialog({ kind: "handover", sessionId: params.sessionId ?? "" }))}>
 							Hand over this session…
 						</Item>
 					) : null}
@@ -264,11 +295,11 @@ export default function CommandPalette() {
 				</Group>
 
 				<Group heading="Agent Network">
-					<Item icon={UserPlus} value="invite a node pair create invitation code" onSelect={run(() => openDialog({ kind: "invite-node" }))}>
-						Invite a node
+					<Item icon={UserPlus} value="invite a machine node pair create invitation code" onSelect={run(() => openDialog({ kind: "invite-node" }))}>
+						Invite a machine
 					</Item>
-					<Item icon={LogIn} value="join a node pair enter invitation code" onSelect={run(() => openDialog({ kind: "join-node" }))}>
-						Join a node
+					<Item icon={LogIn} value="join a machine node pair enter invitation code" onSelect={run(() => openDialog({ kind: "join-node" }))}>
+						Join a machine
 					</Item>
 					{waiting > 0 ? (
 						<Item icon={Inbox} value="review pairing requests approve" hint={`${waiting} waiting`} onSelect={run(() => openDialog({ kind: "pairing-requests" }))}>
@@ -278,8 +309,8 @@ export default function CommandPalette() {
 					<Item icon={Bot} value="open agent directory network agents" onSelect={go("/network/agents")}>
 						Open Agent Directory
 					</Item>
-					<Item icon={Network} value="connected nodes peers network" onSelect={go("/network/nodes")}>
-						Connected Nodes
+					<Item icon={Network} value="machines connected nodes peers network" onSelect={go("/network/nodes")}>
+						Machines
 					</Item>
 					{tunnel.data ? (
 						tunnelBusy(tunnel.data.state) ? (
@@ -306,6 +337,8 @@ export default function CommandPalette() {
 					<Item icon={FolderGit2} value="go projects" onSelect={go("/node/projects")}>Projects</Item>
 					<Item icon={GitBranch} value="go git status branches" onSelect={go("/node/git")}>Git</Item>
 					<Item icon={Cpu} value="go runtime processes" onSelect={go("/node/runtime")}>Runtime</Item>
+					<Item icon={Terminal} value="go terminal shell command line console" keywords={["shell", "console", "cli", "pty"]} onSelect={go("/terminal")}>Terminal</Item>
+					<Item icon={Globe} value="go browser web localhost preview" keywords={["localhost", "preview", "chromium"]} onSelect={go("/browser")}>Browser</Item>
 					<Item icon={Bot} value="go agents" onSelect={go("/agents")} keywords={["agent"]}>Agents</Item>
 				</Group>
 
@@ -321,9 +354,11 @@ export default function CommandPalette() {
 				</Group>
 
 				<Group heading="Appearance">
-					<Item icon={theme === "dark" ? Sun : Moon} value="toggle theme dark light" onSelect={run(toggleTheme)}>
-						Switch to {theme === "dark" ? "light" : "dark"} theme
-					</Item>
+					{([["system", Monitor], ["light", Sun], ["dark", Moon]] as const).map(([p, Icon]) => (
+						<Item key={p} icon={Icon} value={`theme ${p} appearance`} onSelect={run(() => setThemePref(p))}>
+							{THEME_LABEL[p]} theme{themePref === p ? " · current" : ""}
+						</Item>
+					))}
 				</Group>
 			</Command.List>
 		</Command.Dialog>

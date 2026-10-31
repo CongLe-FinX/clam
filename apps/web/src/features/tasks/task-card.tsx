@@ -1,6 +1,6 @@
 import type { Task } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
-import { FolderGit2, GitBranch, MessageSquare } from "lucide-react";
+import { FileArchive, FolderGit2, GitBranch, MessageSquare } from "lucide-react";
 import { memo } from "react";
 import { cn, formatCost } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
@@ -51,7 +51,12 @@ export const TaskCard = memo(function TaskCard({ task, projectName, now, classNa
 						<span className="inline-flex items-center gap-1">
 							<GitBranch className="size-3" aria-hidden /> branch
 						</span>
+					) : task.deliverAs === "files" ? (
+						<span className="inline-flex items-center gap-1">
+							<FileArchive className="size-3" aria-hidden /> files{task.result?.files ? ` · ${task.result.files.fileCount}` : ""}
+						</span>
 					) : null}
+					{task.repo === null && task.deliverAs !== "summary" ? <span>no repository</span> : null}
 					{task.cost !== null ? <span className="tabular ml-auto font-mono">{formatCost(task.cost)}</span> : null}
 				</div>
 			</div>

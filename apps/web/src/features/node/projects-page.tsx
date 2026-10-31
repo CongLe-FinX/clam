@@ -1,7 +1,7 @@
 import type { Project } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { FolderGit2, GitBranch, MessageSquare, Plus, RefreshCw, Search } from "lucide-react";
+import { Folder, FolderGit2, GitBranch, MessageSquare, Plus, RefreshCw, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useDebounced } from "@/features/projects/session-list";
 import { errorMessage } from "@/lib/api";
@@ -30,7 +30,8 @@ export default function NodeProjectsPage() {
 	const wsNames = useMemo(() => new Map((workspaces.data ?? []).map((w) => [w.id, w.name] as const)), [workspaces.data]);
 
 	const visible = useMemo(() => {
-		const all = [...(projects.data ?? [])].sort((a, b) => Date.parse(b.lastActivityAt ?? b.updatedAt) - Date.parse(a.lastActivityAt ?? a.updatedAt));
+		// Chat folders belong to their chats (see Chats), not to the project list.
+		const all = (projects.data ?? []).filter((p) => p.origin !== "chat").sort((a, b) => Date.parse(b.lastActivityAt ?? b.updatedAt) - Date.parse(a.lastActivityAt ?? a.updatedAt));
 		if (!needle) return all;
 		return all.filter(
 			(p) =>
@@ -58,7 +59,7 @@ export default function NodeProjectsPage() {
 			<div className="mx-auto flex w-full max-w-[1400px] shrink-0 flex-col gap-4 px-4 pt-5 sm:px-6 lg:px-8 lg:pt-7">
 				<PageHeader
 					title="Projects"
-					description="Every project on this node, across workspaces."
+					description="Every project on this machine, across workspaces."
 					actions={
 						<Button variant="primary" onClick={() => openDialog({ kind: "create-project" })}>
 							<Plus /> Add project
@@ -160,8 +161,14 @@ function ProjectCard({ project: p, workspaceName }: { project: Project; workspac
 								{p.repository.owner}/{p.repository.name}
 							</span>
 						</Badge>
+					) : p.vcs === "git" ? (
+						<Badge variant="neutral" className="gap-1">
+							<GitBranch /> Local Git
+						</Badge>
 					) : (
-						<span>No repository</span>
+						<Badge variant="neutral" className="gap-1" title="No Git repository needed: sessions, tasks and shared sessions work on the folder.">
+							<Folder /> {p.managed ? "Managed folder" : "Plain folder"}
+						</Badge>
 					)}
 				</div>
 				<div className="flex shrink-0 items-center gap-3 tabular">

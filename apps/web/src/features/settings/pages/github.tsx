@@ -236,7 +236,7 @@ export default function GithubPage() {
 		<>
 			<PageIntro
 				title="GitHub Accounts"
-				description="Connect one or more GitHub accounts to this node. Tokens are kept in this machine's secret store and never leave it. Other nodes can use different accounts."
+				description="Connect one or more GitHub accounts to this machine. Tokens are kept in this machine's secret store and never leave it. Other machines can use different accounts."
 				actions={
 					<div className="flex flex-wrap gap-2">
 						{cfg.data?.ghCliAvailable && (

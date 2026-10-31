@@ -1,7 +1,7 @@
 import { type AgentSession, type Project, routes } from "@clam/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { Check, FileCode2, FolderGit2, FolderTree, GitBranch, MessageSquare, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Send, Trash2, X } from "lucide-react";
+import { BookMarked, Check, FileCode2, Folder, FolderGit2, FolderTree, GitBranch, MessageSquare, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Send, Terminal, Trash2, X } from "lucide-react";
 import { type KeyboardEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { toast } from "sonner";
@@ -24,6 +24,7 @@ import { FileViewer } from "./file-viewer.tsx";
 import { SessionList, SessionSkeletonRows, useDebounced } from "./session-list.tsx";
 
 const GitWorkbench = lazy(() => import("@/features/git/git-panel.tsx"));
+const ProjectContextTab = lazy(() => import("@/features/context/project-context-tab.tsx"));
 
 const mqWide = typeof matchMedia === "function" ? matchMedia("(min-width: 1024px)") : null;
 function useIsWide(): boolean {
@@ -39,10 +40,12 @@ function useIsWide(): boolean {
 
 export default function ProjectPage() {
 	const { projectId } = useParams({ strict: false }) as { projectId: string };
-	const { file, tab } = useSearch({ strict: false }) as { file?: string; tab?: "git" };
+	const { file, tab: rawTab } = useSearch({ strict: false }) as { file?: string; tab?: "git" | "context" };
 	const navigate = useNavigate();
 	const project = useProject(projectId);
 	const wide = useIsWide();
+	// A plain-folder project has no Git view: a stale `?tab=git` falls back to the workspace view.
+	const tab = rawTab === "git" && project.data?.vcs === "none" ? undefined : rawTab;
 
 	const openFile = useCallback(
 		(path: string) => void navigate({ to: "/projects/$projectId", params: { projectId }, search: { file: path, tab: undefined } }),
@@ -50,7 +53,7 @@ export default function ProjectPage() {
 	);
 	const closeFile = useCallback(() => void navigate({ to: "/projects/$projectId", params: { projectId }, search: { file: undefined, tab: undefined }, replace: true }), [navigate, projectId]);
 	const setTab = useCallback(
-		(next: "workspace" | "git") => void navigate({ to: "/projects/$projectId", params: { projectId }, search: { file: undefined, tab: next === "git" ? "git" : undefined }, replace: true }),
+		(next: "workspace" | "git" | "context") => void navigate({ to: "/projects/$projectId", params: { projectId }, search: { file: undefined, tab: next === "workspace" ? undefined : next }, replace: true }),
 		[navigate, projectId],
 	);
 
@@ -62,7 +65,7 @@ export default function ProjectPage() {
 				<EmptyState
 					icon={FolderGit2}
 					title={notFound ? "Project not found" : "Could not load project"}
-					description={notFound ? "It may have been deleted from this node." : errorMessage(project.error)}
+					description={notFound ? "It may have been deleted from this machine." : errorMessage(project.error)}
 					action={
 						notFound ? (
 							<Button asChild variant="outline" size="sm">
@@ -83,8 +86,16 @@ export default function ProjectPage() {
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<ProjectHeader project={p} compact={tab === "git" && !wide} />
-			<ProjectTabs projectId={p.id} tab={tab === "git" ? "git" : "workspace"} onChange={setTab} />
-			{tab === "git" ? (
+			<ProjectTabs projectId={p.id} vcs={p.vcs} tab={tab === "git" ? "git" : tab === "context" ? "context" : "workspace"} onChange={setTab} />
+			{tab === "context" ? (
+				<div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain">
+					<div className="mx-auto w-full max-w-4xl px-4 py-4 sm:px-6 sm:py-5">
+						<Suspense fallback={<GitTabSkeleton />}>
+							<ProjectContextTab project={p} />
+						</Suspense>
+					</div>
+				</div>
+			) : tab === "git" ? (
 				<div className="min-h-0 flex-1">
 					<Suspense fallback={<GitTabSkeleton />}>
 						<GitWorkbench projectId={p.id} />
@@ -121,12 +132,13 @@ export default function ProjectPage() {
 
 // ───────────────────────────── tabs ─────────────────────────────
 
-function ProjectTabs({ projectId, tab, onChange }: { projectId: string; tab: "workspace" | "git"; onChange: (t: "workspace" | "git") => void }) {
-	const status = useGitStatus(projectId).data;
+function ProjectTabs({ projectId, vcs, tab, onChange }: { projectId: string; vcs: Project["vcs"]; tab: "workspace" | "git" | "context"; onChange: (t: "workspace" | "git" | "context") => void }) {
+	const status = useGitStatus(projectId, { enabled: vcs === "git" }).data;
 	const dirty = status?.isRepo ? status.files.length : 0;
 	const items = [
 		{ id: "workspace" as const, label: "Workspace", icon: FolderTree },
-		{ id: "git" as const, label: "Git", icon: GitBranch },
+		...(vcs === "git" ? [{ id: "git" as const, label: "Git", icon: GitBranch }] : []),
+		{ id: "context" as const, label: "Context", icon: BookMarked },
 	];
 	return (
 		<div role="tablist" aria-label="Project views" className="flex shrink-0 items-center gap-1 border-b bg-surface-1/40 px-3 py-1.5 sm:px-4">
@@ -217,6 +229,8 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 	const [editing, setEditing] = useState(false);
 	const [draft, setDraft] = useState(project.name);
 	const [confirmDelete, setConfirmDelete] = useState(false);
+	// Managed folders only: deleting the project never touches files unless this is ticked explicitly.
+	const [deleteFiles, setDeleteFiles] = useState(false);
 	const inputRef = useRef<HTMLInputElement>(null);
 
 	useEffect(() => {
@@ -240,7 +254,7 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 	});
 
 	const del = useMutation({
-		mutationFn: () => api.delete(routes.project(project.id)),
+		mutationFn: () => api.delete(`${routes.project(project.id)}${project.managed && deleteFiles ? "?deleteFiles=true" : ""}`),
 		onSuccess: () => {
 			toast.success(`Deleted ${project.name}`);
 			qc.removeQueries({ queryKey: qk.project(project.id) });
@@ -333,6 +347,13 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 					<Button variant="primary" onClick={() => openDialog({ kind: "create-session", projectId: project.id })}>
 						<Plus /> New session
 					</Button>
+					<Tip label="Open terminal here">
+						<Button asChild variant="outline" size="icon" aria-label="Open terminal here">
+							<Link to="/terminal" search={{ project: project.id }}>
+								<Terminal />
+							</Link>
+						</Button>
+					</Tip>
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
 							<Button variant="outline" size="icon" aria-label="Project actions">
@@ -340,7 +361,7 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent>
-							<DropdownMenuItem disabled={!project.repository} onSelect={() => openDialog({ kind: "delegate-task", projectId: project.id, workspaceId: project.workspaceId })}>
+							<DropdownMenuItem onSelect={() => openDialog({ kind: "delegate-task", projectId: project.id, workspaceId: project.workspaceId })}>
 								<Send /> Delegate a task…
 							</DropdownMenuItem>
 							<DropdownMenuItem danger onSelect={() => setConfirmDelete(true)}>
@@ -366,10 +387,16 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 						{repo.defaultBranch ? <Badge variant="outline">{repo.defaultBranch}</Badge> : null}
 						{repo.accountId ? <span className="hidden font-mono text-2xs text-subtle sm:inline">acct {repo.accountId.slice(0, 8)}</span> : null}
 					</a>
+				) : project.vcs === "none" ? (
+					<span className="inline-flex items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1" title="Sessions, tasks and shared sessions work on the files directly; no repository is needed.">
+						<Folder className="size-3.5" />
+						{project.managed ? "Managed folder" : "Plain folder"}
+						<span className="hidden text-subtle sm:inline">· no Git repository</span>
+					</span>
 				) : (
 					<span className="inline-flex items-center gap-1.5 text-subtle">
 						<GitBranch className="size-3.5" />
-						No repository linked
+						Local Git repository · no GitHub remote linked
 						<span className="hidden sm:inline">
 							· link one from{" "}
 							<Link to="/settings/github" className="text-muted-foreground underline underline-offset-2 hover:text-foreground">
@@ -386,18 +413,35 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 
 			<ConfirmDialog
 				open={confirmDelete}
-				onOpenChange={setConfirmDelete}
+				onOpenChange={(o) => {
+					setConfirmDelete(o);
+					if (!o) setDeleteFiles(false);
+				}}
 				title="Delete project?"
 				description={
 					<>
-						<span className="font-medium text-foreground">{project.name}</span> and its {project.sessionCount} {project.sessionCount === 1 ? "session" : "sessions"} will be removed from CL Agent Mesh. Files on disk are not touched.
+						<span className="font-medium text-foreground">{project.name}</span> and its {project.sessionCount} {project.sessionCount === 1 ? "session" : "sessions"} will be removed from CL Agent Mesh.{" "}
+						{project.managed ? "The folder CL Agent Mesh created for it is kept unless you tick the box below." : "Files on disk are not touched."}
 					</>
 				}
 				confirmLabel="Delete project"
 				danger
 				loading={del.isPending}
 				onConfirm={() => del.mutate()}
-			/>
+			>
+				{project.managed ? (
+					<label className="flex min-h-[44px] cursor-pointer items-start gap-2.5 rounded-lg bg-danger/10 p-3 text-xs text-foreground">
+						<input type="checkbox" checked={deleteFiles} onChange={(e) => setDeleteFiles(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--danger)]" />
+						<span>
+							Also delete the folder and all its files
+							<span className="mt-0.5 block font-mono text-2xs text-muted-foreground" title={project.path}>
+								{project.path}
+							</span>
+							<span className="mt-0.5 block text-danger">This cannot be undone.</span>
+						</span>
+					</label>
+				) : null}
+			</ConfirmDialog>
 		</header>
 	);
 }

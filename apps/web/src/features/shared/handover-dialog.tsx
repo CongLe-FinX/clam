@@ -15,6 +15,7 @@ import { Field } from "@/ui/field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
 import { StatusDot } from "@/ui/status-dot";
 import { remoteSessionUrl } from "./format.ts";
+import { HANDOVER_INTRO, HANDOVER_SEMANTICS, ModeNote, projectShareMode, type ShareMode } from "./mode.tsx";
 import { useCancelTransfer, useHandover, useNodeUiUrl, useSharedDetail, useSharedLive } from "./hooks.ts";
 
 const ANY = "__any__";
@@ -36,7 +37,7 @@ const STEPS: Step[] = [
 	{ phase: "continuing", label: (n) => `${n} is continuing` },
 ];
 
-function Progress({ transfer, onWhich }: { transfer: SharedTransfer; onWhich: number }) {
+function Progress({ transfer, onWhich, files }: { transfer: SharedTransfer; onWhich: number; files: boolean }) {
 	const steps = STEPS.filter((s) => s.phase !== "stopping" || transfer.stopRunning);
 	const node = transfer.toNodeName;
 	const failed = transfer.phase === "failed" || transfer.phase === "cancelled";
@@ -52,7 +53,7 @@ function Progress({ transfer, onWhich }: { transfer: SharedTransfer; onWhich: nu
 						<span className="grid size-5 shrink-0 place-items-center">
 							{done ? <Check className="size-4 text-success" aria-hidden /> : active ? <Loader2 className="size-4 animate-spin text-accent" aria-hidden /> : broke ? <X className="size-4 text-danger" aria-hidden /> : <Circle className="size-3" aria-hidden />}
 						</span>
-						<span>{s.label(node)}</span>
+						<span>{s.phase === "checkpointing" && files ? "Bundle the folder and snapshot all changes" : s.label(node)}</span>
 					</li>
 				);
 			})}
@@ -61,8 +62,8 @@ function Progress({ transfer, onWhich }: { transfer: SharedTransfer; onWhich: nu
 }
 
 /**
- * "Hand over…": pick an agent on another node and move the work to it — the session is shared first when needed, all changes are
- * committed and pushed, the node takes over and this session becomes a read-only copy. The same dialog shows the hand-over progress.
+ * "Hand over…": pick an agent on another machine and move the work to it — the session is shared first when needed, all changes are
+ * committed and pushed, the machine takes over and this session becomes a read-only copy. The same dialog shows the hand-over progress.
  */
 export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { sessionId: string; presetNodeId?: string; onClose: () => void }) {
 	const navigate = useNavigate();
@@ -79,6 +80,7 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 	const detail = useSharedDetail(sharedId).data;
 	useSharedLive(sharedId);
 	const shared = detail?.shared ?? handover.data ?? null;
+	const mode: ShareMode | null = shared ? shared.vcs : project ? projectShareMode(project) : null;
 	const transfer = shared?.transfer ?? null;
 	const cancel = useCancelTransfer(sharedId ?? "");
 	const [again, setAgain] = useState(false);
@@ -106,8 +108,7 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 	const theyAllow = peer ? peer.receivedCapabilities.includes(SHARE) : true;
 	const weAllow = peer ? peer.grantedCapabilities.includes(SHARE) : true;
 	const offline = peer !== undefined && peer.status !== "online";
-	const noRepo = project !== undefined && project.repository === null;
-	const ready = Boolean(peer && !noRepo && !offline && session?.kind === "local" && !session.movedTo);
+	const ready = Boolean(peer && !offline && session?.kind === "local" && !session.movedTo);
 	const noNodes = peers.isSuccess && usable.length === 0;
 
 	const submit = (stop: boolean) => {
@@ -137,7 +138,7 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 	const watchId = shared?.mirrorSessionId ?? shared?.localSessionId ?? null;
 	const openHref = transfer ? (transfer.newSessionUrl ?? (ui ? remoteSessionUrl(ui, transfer.newSessionId) : null)) : null;
 	const acceptHref = ui ? `${ui.replace(/\/+$/, "")}/shared` : null;
-	const target = transfer?.toNodeName ?? peer?.name ?? "the node";
+	const target = transfer?.toNodeName ?? peer?.name ?? "the machine";
 
 	return (
 		<Dialog open onOpenChange={(o) => !o && !handover.isPending && onClose()}>
@@ -147,13 +148,13 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 					<DialogDescription>
 						{showProgress
 							? (transfer?.message ?? "")
-							: "Stop here and let an agent on another node continue the work. Everything this session changed is committed and pushed to a shared branch first — nothing is lost — and this session becomes a read-only copy that links to the new one."}
+							: HANDOVER_INTRO[mode ?? "unknown"]}
 					</DialogDescription>
 				</DialogHeader>
 
 				{showProgress && transfer ? (
 					<div className="scrollbar-thin -mx-1 flex min-h-0 flex-col gap-4 overflow-y-auto px-1">
-						<Progress transfer={transfer} onWhich={phaseIdx(failed ? lastLive.current : transfer.phase)} />
+						<Progress transfer={transfer} files={mode === "files"} onWhich={phaseIdx(failed ? lastLive.current : transfer.phase)} />
 						{transfer.phase === "waiting_accept" ? (
 							<div role="status" className="flex flex-col gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-xs text-muted-foreground">
 								<span className="flex items-start gap-2">
@@ -198,9 +199,9 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 							<div role="status" className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-[13px] text-muted-foreground">
 								<Info className="mt-0.5 size-4 shrink-0" aria-hidden />
 								<span>
-									No node is paired with this one yet.{" "}
+									No machine is paired with this one yet.{" "}
 									<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "invite-node" })}>
-										Invite a node
+										Invite a machine
 									</button>{" "}
 									or{" "}
 									<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "join-node" })}>
@@ -215,7 +216,7 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 								{() => (
 									<Select value={peerId} onValueChange={setPeerId} disabled={noNodes}>
 										<SelectTrigger>
-											<SelectValue placeholder="Choose a node" />
+											<SelectValue placeholder="Choose a machine" />
 										</SelectTrigger>
 										<SelectContent>
 											{usable.map((p) => (
@@ -230,7 +231,7 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 									</Select>
 								)}
 							</Field>
-							<Field label="Agent" hint="Leave on “any” to let that node choose.">
+							<Field label="Agent" hint="Leave on “any” to let that machine choose.">
 								{() => (
 									<Select value={agentKey} onValueChange={setAgentKey} disabled={!peer}>
 										<SelectTrigger>
@@ -253,12 +254,13 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 							</Field>
 						</div>
 
+						{mode ? <ModeNote mode={mode} copy={HANDOVER_SEMANTICS} /> : null}
 						{running ? (
 							<label className="flex min-h-11 cursor-pointer items-start gap-2.5 rounded-lg bg-warning/10 px-3 py-2.5 text-[13px]">
 								<input type="checkbox" checked={stopRunning} onChange={(e) => setStopRunning(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--accent)] coarse:size-5" />
 								<span className="flex flex-col gap-0.5">
 									<span className="font-medium">Stop the current turn and hand over</span>
-									<span className="text-xs text-muted-foreground">The agent is working right now. It is stopped at a safe point, then all its changes are committed and pushed before {peer?.name ?? "the node"} continues. Untick to wait instead — the hand-over is refused while a turn runs.</span>
+									<span className="text-xs text-muted-foreground">The agent is working right now. It is stopped at a safe point, then {mode === "files" ? "the working folder is bundled" : "all its changes are committed and pushed"} before {peer?.name ?? "the machine"} continues. Untick to wait instead — the hand-over is refused while a turn runs.</span>
 								</span>
 							</label>
 						) : null}
@@ -278,7 +280,7 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 							<div role="alert" className="flex items-start gap-2 rounded-lg bg-danger/10 px-3 py-2.5 text-xs text-danger">
 								<ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
 								<span>
-									{peer.name} has not allowed this node to share sessions with it (<code className="font-mono">sessions.share</code>). Ask its owner to grant it; the hand-over will be refused until then.
+									{peer.name} has not allowed this machine to share sessions with it (<code className="font-mono">sessions.share</code>). Ask its owner to grant it; the hand-over will be refused until then.
 								</span>
 							</div>
 						) : null}
@@ -287,7 +289,7 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 								<span className="flex items-start gap-2">
 									<ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
 									<span>
-										{peer.name} is not allowed to share sessions with this node yet (<code className="font-mono">sessions.share</code>). It needs that to take over and to send its updates.
+										{peer.name} is not allowed to share sessions with this machine yet (<code className="font-mono">sessions.share</code>). It needs that to take over and to send its updates.
 									</span>
 								</span>
 								<Button
@@ -296,16 +298,11 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 									variant="outline"
 									className="self-start"
 									loading={updatePeer.isPending}
-									onClick={() => updatePeer.mutate({ id: peer.id, grantedCapabilities: [...peer.grantedCapabilities, SHARE] }, { onSuccess: () => toast.success(`${peer.name} may now share sessions with this node`) })}
+									onClick={() => updatePeer.mutate({ id: peer.id, grantedCapabilities: [...peer.grantedCapabilities, SHARE] }, { onSuccess: () => toast.success(`${peer.name} may now share sessions with this machine`) })}
 								>
 									Grant sessions.share to {peer.name}
 								</Button>
 							</div>
-						) : null}
-						{noRepo ? (
-							<p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
-								This project has no linked GitHub repository. The hand-over goes through a shared branch on GitHub, so link the project's repository first.
-							</p>
 						) : null}
 						{handover.error && !(handover.error instanceof ApiError && handover.error.code === "session_busy") ? (
 							<p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">

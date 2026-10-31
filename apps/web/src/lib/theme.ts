@@ -28,18 +28,33 @@ function apply(): void {
 	document.querySelector('meta[name="theme-color"]')?.setAttribute("content", dark ? "#0b0c0f" : "#f6f6f4");
 }
 
+/** Cross-fades the switch (View Transitions, opacity only) unless reduced motion is requested or unsupported. */
 export function setThemePref(next: ThemePref): void {
-	pref = next;
-	try {
-		localStorage.setItem(KEY, next);
-	} catch {}
-	apply();
-	for (const l of listeners) l();
+	const commit = () => {
+		pref = next;
+		try {
+			localStorage.setItem(KEY, next);
+		} catch {}
+		apply();
+		for (const l of listeners) l();
+	};
+	const doc = document as Document & { startViewTransition?: (cb: () => void) => unknown };
+	const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+	if (doc.startViewTransition && !reduced && resolveTheme(next) !== resolveTheme()) doc.startViewTransition(commit);
+	else commit();
 }
 
 export function toggleTheme(): void {
 	setThemePref(resolveTheme() === "dark" ? "light" : "dark");
 }
+
+const ORDER: readonly ThemePref[] = ["system", "light", "dark"];
+/** System → Light → Dark → System. */
+export function cycleTheme(): void {
+	setThemePref(ORDER[(ORDER.indexOf(pref) + 1) % ORDER.length] ?? "system");
+}
+
+export const THEME_LABEL: Record<ThemePref, string> = { system: "System", light: "Light", dark: "Dark" };
 
 mq?.addEventListener("change", () => {
 	if (pref === "system") {

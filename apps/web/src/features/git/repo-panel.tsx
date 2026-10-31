@@ -129,7 +129,7 @@ export function RepoPanel({ project, status, onShowChanges }: { project: Project
 			</Card>
 
 			<p className="flex items-center gap-1.5 px-1 text-2xs text-subtle">
-				<FolderGit2 aria-hidden className="size-3.5" /> Credentials stay in this node's secret store — never in remote URLs, <code className="font-mono">.git/config</code> or process arguments.
+				<FolderGit2 aria-hidden className="size-3.5" /> Credentials stay in this machine's secret store — never in remote URLs, <code className="font-mono">.git/config</code> or process arguments.
 			</p>
 		</div>
 	);

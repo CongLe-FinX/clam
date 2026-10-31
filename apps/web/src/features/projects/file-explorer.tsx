@@ -1,4 +1,5 @@
 import { type FileEntry, routes } from "@clam/contracts";
+import { Link } from "@tanstack/react-router";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -18,14 +19,21 @@ import {
 	Link2,
 	RefreshCw,
 	Search,
+	Terminal,
+	Upload,
 	X,
 } from "lucide-react";
 import { type KeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { api, errorMessage } from "@/lib/api";
+import { hasFiles } from "@/lib/upload";
+import { UploadDock, useProjectUploads } from "./uploads.tsx";
 import { qk } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Tip } from "@/ui/tooltip";
+
+/** Below this panel width the filter collapses into an icon button. */
+const NARROW_PX = 240;
 
 export interface FileExplorerProps {
 	projectId: string;
@@ -136,6 +144,18 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 	const [activeKey, setActiveKey] = useState<string | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const filterRef = useRef<HTMLInputElement>(null);
+	// In a narrow panel the filter is an icon that expands into the full-width input (no truncated placeholder).
+	const headerRef = useRef<HTMLDivElement>(null);
+	const [narrow, setNarrow] = useState(false);
+	const [filterOpen, setFilterOpen] = useState(false);
+	useEffect(() => {
+		const el = headerRef.current;
+		if (!el) return;
+		const ro = new ResizeObserver(() => setNarrow(el.clientWidth < NARROW_PX));
+		ro.observe(el);
+		return () => ro.disconnect();
+	}, []);
+	const filterShown = !narrow || filterOpen || filter !== "";
 	const treeId = useId();
 	const [coarse] = useState(() => typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches);
 	const rowHeight = coarse ? 36 : 28;
@@ -328,38 +348,119 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 
 	const activeId = activeIndex >= 0 && rows[activeIndex] ? `${treeId}-${activeIndex}` : undefined;
 
+	// Uploads land in the folder of the selection (the folder itself, or a file's parent); the project root by default.
+	const uploads = useProjectUploads(projectId);
+	const fileInput = useRef<HTMLInputElement>(null);
+	const dragDepth = useRef(0);
+	const [dragging, setDragging] = useState(false);
+	const activeRow = activeIndex >= 0 ? rows[activeIndex] : undefined;
+	const targetDir = activeRow?.type === "entry" ? (activeRow.entry.kind === "dir" ? activeRow.entry.path : parentOf(activeRow.entry.path)) : "";
+
 	return (
-		<div className={cn("flex h-full min-h-0 flex-col bg-surface-1", className)}>
-			<div className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
-				<div className="relative min-w-0 flex-1">
-					<Search aria-hidden className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-subtle" />
-					<input
-						ref={filterRef}
-						value={filter}
-						onChange={(e) => setFilter(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Escape") setFilter("");
-							else if (e.key === "ArrowDown") {
-								e.preventDefault();
-								scrollRef.current?.focus();
-								if (rows.length) moveTo(0);
-							}
-						}}
-						placeholder="Filter files"
-						aria-label="Filter loaded files by name"
-						className="h-7 w-full rounded-md bg-surface-2 pl-7 pr-7 text-xs outline-none placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1px_var(--accent)] coarse:h-10"
-					/>
-					{filter ? (
-						<button type="button" aria-label="Clear filter" onClick={() => setFilter("")} className="absolute right-1.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded text-subtle hover:text-foreground coarse:size-8">
-							<X className="size-3" />
-						</button>
-					) : null}
-				</div>
-				<Tip label="Refresh">
-					<Button variant="ghost" size="icon-sm" aria-label="Refresh file tree" onClick={refresh}>
-						<RefreshCw className={cn(refreshing && "animate-spin")} />
-					</Button>
-				</Tip>
+		<div
+			className={cn("relative flex h-full min-h-0 flex-col bg-surface-1", className)}
+			onDragEnter={(e) => {
+				if (!hasFiles(e)) return;
+				e.preventDefault();
+				dragDepth.current++;
+				setDragging(true);
+			}}
+			onDragOver={(e) => {
+				if (!hasFiles(e)) return;
+				e.preventDefault();
+				e.dataTransfer.dropEffect = "copy";
+			}}
+			onDragLeave={(e) => {
+				if (!hasFiles(e)) return;
+				dragDepth.current = Math.max(0, dragDepth.current - 1);
+				if (dragDepth.current === 0) setDragging(false);
+			}}
+			onDrop={(e) => {
+				if (!hasFiles(e)) return;
+				e.preventDefault();
+				dragDepth.current = 0;
+				setDragging(false);
+				uploads.upload(Array.from(e.dataTransfer.files), targetDir);
+			}}
+		>
+			<div ref={headerRef} className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
+				{filterShown ? (
+					<div className="relative min-w-0 flex-1">
+						<Search aria-hidden className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-subtle" />
+						<input
+							ref={filterRef}
+							value={filter}
+							autoFocus={narrow && filterOpen}
+							onChange={(e) => setFilter(e.target.value)}
+							onBlur={() => {
+								if (!filter) setFilterOpen(false);
+							}}
+							onKeyDown={(e) => {
+								if (e.key === "Escape") {
+									setFilter("");
+									setFilterOpen(false);
+								} else if (e.key === "ArrowDown") {
+									e.preventDefault();
+									scrollRef.current?.focus();
+									if (rows.length) moveTo(0);
+								}
+							}}
+							placeholder="Filter files"
+							aria-label="Filter loaded files by name"
+							className="h-7 w-full rounded-md bg-surface-2 pl-7 pr-7 text-base outline-none placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1px_var(--accent)] md:text-xs coarse:h-10"
+						/>
+						{filter ? (
+							<button
+								type="button"
+								aria-label="Clear filter"
+								onClick={() => {
+									setFilter("");
+									setFilterOpen(false);
+								}}
+								className="absolute right-1.5 top-1/2 grid size-5 -translate-y-1/2 place-items-center rounded text-subtle hover:text-foreground coarse:size-8"
+							>
+								<X className="size-3" />
+							</button>
+						) : null}
+					</div>
+				) : (
+					<Tip label="Filter files">
+						<Button variant="ghost" size="icon-sm" aria-label="Filter files" onClick={() => setFilterOpen(true)}>
+							<Search />
+						</Button>
+					</Tip>
+				)}
+				{narrow && filterShown ? null : (
+					<>
+						<Tip label="Refresh">
+							<Button variant="ghost" size="icon-sm" aria-label="Refresh file tree" onClick={refresh}>
+								<RefreshCw className={cn(refreshing && "animate-spin")} />
+							</Button>
+						</Tip>
+						<Tip label={targetDir ? `Upload to /${targetDir}` : "Upload files"}>
+							<Button variant="ghost" size="icon-sm" aria-label="Upload files" onClick={() => fileInput.current?.click()}>
+								<Upload />
+							</Button>
+						</Tip>
+						<Tip label="Open terminal here">
+							<Button asChild variant="ghost" size="icon-sm" aria-label="Open terminal here">
+								<Link to="/terminal" search={{ project: projectId }}>
+									<Terminal />
+								</Link>
+							</Button>
+						</Tip>
+					</>
+				)}
+				<input
+					ref={fileInput}
+					type="file"
+					multiple
+					hidden
+					onChange={(e) => {
+						uploads.upload(Array.from(e.target.files ?? []), targetDir);
+						e.target.value = "";
+					}}
+				/>
 			</div>
 
 			<div
@@ -396,6 +497,12 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 					})}
 				</div>
 			</div>
+			<UploadDock uploads={uploads} />
+			{dragging ? (
+				<div aria-hidden className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl bg-accent-soft text-xs font-medium text-accent shadow-[inset_0_0_0_2px_var(--accent)]">
+					Drop to upload into {targetDir ? `/${targetDir}` : "the project folder"}
+				</div>
+			) : null}
 		</div>
 	);
 }
@@ -434,7 +541,7 @@ const TreeRow = memo(function TreeRow({
 		return (
 			<div role="none" className="relative flex h-full items-center text-2xs italic text-subtle" style={{ paddingLeft: pad + 20 }}>
 				{guides}
-				Empty
+				{row.depth === 0 ? "Empty — drop files here" : "Empty"}
 			</div>
 		);
 	}

@@ -1,0 +1,2 @@
+{"type":"tool_execution_end","toolCallId":"toolu_01NdWWYsjAacZKnPwgeBXAAb","toolName":"ask","result":{"content":[{"type":"text","text":"Ask tool was cancelled by the user"}],"details":{}},"isError":true}
+{"type":"prompt_result","id":"r79qj33","agentInvoked":true,"status":"aborted","sessionSettled":true}

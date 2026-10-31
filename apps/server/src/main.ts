@@ -87,6 +87,8 @@ async function main(): Promise<void> {
 		}, SHUTDOWN_DEADLINE_MS);
 		deadline.unref();
 		try {
+			ctx.terminals.stop();
+			await ctx.browser.stop();
 			await app.close();
 			await ctx.tasks.stop();
 			await network.close();

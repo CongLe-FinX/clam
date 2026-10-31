@@ -40,7 +40,12 @@ describe("parseHostToolCall", () => {
 		expect(parseHostToolCall("mesh_agents", undefined).ok).toBe(true);
 		expect(parseHostToolCall("mesh_delegate", { node: " n ", title: " T ", instructions: " do it " })).toEqual({
 			ok: true,
-			call: { name: "mesh_delegate", args: { node: "n", title: "T", instructions: "do it", deliverAs: "branch" } },
+			call: { name: "mesh_delegate", args: { node: "n", title: "T", instructions: "do it" } },
+		});
+		// deliverAs has no default here: the sender picks `branch` for a project linked to a repository, else `files`
+		expect(parseHostToolCall("mesh_delegate", { node: "n", title: "T", instructions: "i", deliverAs: "files", inputPaths: [" notes.txt "] })).toEqual({
+			ok: true,
+			call: { name: "mesh_delegate", args: { node: "n", title: "T", instructions: "i", deliverAs: "files", inputPaths: ["notes.txt"] } },
 		});
 		expect(parseHostToolCall("mesh_delegate", { node: "n", agent: "a", title: "T", instructions: "i", deliverAs: "summary", baseBranch: "dev", maxCostUsd: 3 })).toEqual({
 			ok: true,

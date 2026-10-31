@@ -1,3 +1,4 @@
+import { type MentionCandidate, parseMentions } from "@clam/contracts";
 import { formatAuthor, type InjectionAuthor } from "./injection.ts";
 
 /**
@@ -83,73 +84,6 @@ export function orderGroupMessages<T extends OrderedMessage>(messages: readonly 
 }
 
 // ------------------------------------------------------------------ mentions
-
-/** An active member node with its agent, as the mention parser and the addressing rules see it. */
-export interface MentionCandidate {
-	nodeId: string;
-	nodeName: string;
-	agentId: string | null;
-	agentName: string | null;
-}
-
-export interface MentionResult {
-	/** `@all` was written. */
-	all: boolean;
-	/** Agents mentioned by agent name or node name (one per node, in order of first mention). */
-	agents: MessageTarget[];
-}
-
-const WORD = /[\p{L}\p{N}_]/u;
-
-function boundaryAfter(text: string, index: number): boolean {
-	const next = text[index];
-	if (next === undefined) return true;
-	if (WORD.test(next)) return false;
-	return !(next === "-" && WORD.test(text[index + 1] ?? ""));
-}
-
-/** `OMP Agent` is mentioned as `@omp agent`, `@omp-agent`, `@omp_agent` or `@ompagent`; case does not matter. */
-function aliases(name: string): string[] {
-	const lower = name.trim().toLowerCase();
-	if (lower === "") return [];
-	return [...new Set([lower, lower.replace(/\s+/g, "-"), lower.replace(/\s+/g, "_"), lower.replace(/\s+/g, "")])];
-}
-
-/**
- * `@AgentName` (every agent with that name: ambiguity addresses them all), `@NodeName` (that node's agent) and `@all`,
- * case-insensitive. The longest name wins at each `@`; an `@` glued to a word (an e-mail address) and an unknown name stay
- * plain text. Candidates without an agent can only be matched by `@all`.
- */
-export function parseMentions(text: string, candidates: readonly MentionCandidate[]): MentionResult {
-	const byAlias = new Map<string, Map<string, MessageTarget>>();
-	for (const c of candidates) {
-		if (!c.agentId) continue;
-		for (const name of [c.agentName, c.nodeName]) {
-			for (const alias of aliases(name ?? "")) {
-				let targets = byAlias.get(alias);
-				if (!targets) byAlias.set(alias, (targets = new Map()));
-				targets.set(c.nodeId, { nodeId: c.nodeId, agentId: c.agentId });
-			}
-		}
-	}
-	const known = [...byAlias.keys()].sort((a, b) => b.length - a.length);
-	const found = new Map<string, MessageTarget>();
-	let all = false;
-	const lower = text.toLowerCase();
-	for (let at = lower.indexOf("@"); at !== -1; at = lower.indexOf("@", at + 1)) {
-		if (at > 0 && WORD.test(lower[at - 1] as string)) continue;
-		const start = at + 1;
-		if (lower.startsWith("all", start) && boundaryAfter(lower, start + 3)) {
-			all = true;
-			continue;
-		}
-		const alias = known.find((a) => lower.startsWith(a, start) && boundaryAfter(lower, start + a.length));
-		if (!alias) continue;
-		for (const target of byAlias.get(alias)?.values() ?? []) if (!found.has(target.nodeId)) found.set(target.nodeId, target);
-	}
-	return { all, agents: [...found.values()] };
-}
-
 function sameTo(to: MessageTo): MessageTo {
 	return { mode: to.mode, agents: to.mode === "agents" ? to.agents.map((a) => ({ nodeId: a.nodeId, agentId: a.agentId })) : [] };
 }

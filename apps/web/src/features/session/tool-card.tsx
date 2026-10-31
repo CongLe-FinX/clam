@@ -6,6 +6,7 @@ import { cn, formatDuration } from "@/lib/utils";
 import { Tip } from "@/ui/tooltip";
 import { isBusy, type SessionStream, type ToolRec, useStreamMeta, useToolRec } from "./stream-store.ts";
 import { prettyJson, summarizeArgs, toolIcon } from "./tool-meta.tsx";
+import { ompToolSurface } from "./omp/tool-surfaces.tsx";
 
 export interface ToolBlock {
 	id: string;
@@ -129,11 +130,13 @@ export const ToolCard = memo(function ToolCard({ stream, block }: { stream: Sess
 	const summary = preparing ? "" : summarizeArgs(args);
 	const mesh = preparing || !isMeshTool(name) ? null : meshSummary(name, args, rec);
 	const bodyId = `tool-${block.id}`;
+	const Surface = preparing ? null : ompToolSurface(name);
+	if (Surface) return <Surface stream={stream} block={block} rec={rec} status={status} args={args} />;
 	return (
 		<div
 			data-tool-status={status}
 			className={cn(
-				"overflow-hidden rounded-lg bg-surface-1 shadow-[inset_0_0_0_1px_var(--border)] transition-shadow",
+				"max-w-3xl overflow-hidden rounded-lg bg-surface-1 shadow-[inset_0_0_0_1px_var(--border)] transition-shadow",
 				status === "error" && "shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--danger)_40%,transparent)]",
 				selected && "shadow-[inset_0_0_0_1px_var(--accent)]",
 			)}
@@ -158,7 +161,7 @@ export const ToolCard = memo(function ToolCard({ stream, block }: { stream: Sess
 						type="button"
 						aria-label="Inspect tool call"
 						onClick={() => stream.selectTool(block.id)}
-						className="grid size-7 shrink-0 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground coarse:size-10"
+						className="grid size-7 shrink-0 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground coarse:size-11"
 					>
 						<PanelRight className="size-3.5" />
 					</button>

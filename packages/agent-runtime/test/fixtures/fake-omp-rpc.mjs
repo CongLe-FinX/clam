@@ -403,7 +403,8 @@ export async function runRpc(argv, env) {
 	//   @@fake-tool <toolName> <json-args>   host_tool_call (emitted even for unregistered names) awaiting host_tool_result;
 	//                                        `{{taskId}}` in the JSON is replaced by the first `tsk_...` token of the prompt
 	//   @@fake-sh <command>                  `sh -c` in the session cwd, reported as tool "bash"
-	// The turn's final assistant text has one `FAKE_TOOL_RESULT <name>: <result>` line per directive:
+	//   @@fake-final <text>                  the turn's final assistant text, instead of the FAKE_TOOL_RESULT lines
+	// Without `@@fake-final` the turn's final assistant text has one `FAKE_TOOL_RESULT <name>: <result>` line per directive:
 	// `<toolName>: [ERROR ]<text>` for host tools, `sh: exit=<code> <stdout>` for shell runs.
 	// An `abort` command while host calls are pending emits `host_tool_cancel` for each and ends the turn as aborted.
 	const BUILTIN_TOOLS = ["read", "write", "edit", "bash", "grep", "find", "task", "web_search"];
@@ -417,6 +418,7 @@ export async function runRpc(argv, env) {
 		const fill = (value) => value.replaceAll("{{taskId}}", taskId ?? "{{taskId}}");
 		const items = [];
 		let parallel = false;
+		let final;
 		for (const line of text.split("\n")) {
 			const trimmed = line.trim();
 			if (trimmed === "@@fake-parallel") {
@@ -428,10 +430,15 @@ export async function runRpc(argv, env) {
 				items.push({ kind: "tool", toolName: tool[1], label: tool[1], raw: fill(tool[2] ?? "{}") });
 				continue;
 			}
+			const finalText = /^@@fake-final\s+(.+)$/.exec(trimmed);
+			if (finalText) {
+				final = finalText[1];
+				continue;
+			}
 			const sh = /^@@fake-sh\s+(.+)$/.exec(trimmed);
 			if (sh) items.push({ kind: "sh", toolName: "bash", label: "sh", command: fill(sh[1]) });
 		}
-		return { items, parallel };
+		return { items, parallel, final };
 	}
 
 	function runShell(command) {
@@ -487,7 +494,7 @@ export async function runRpc(argv, env) {
 	}
 
 	/** One assistant message with a toolCall block per directive, their executions, then the tool results. */
-	async function hostToolTurn(items, parallel, runMessages) {
+	async function hostToolTurn(items, parallel, final, runMessages) {
 		const entries = items.map((item, index) => {
 			const entry = { ...item, toolCallId: `call_fake_h${index + 1}`, args: {}, parseError: undefined };
 			if (item.kind === "sh") {
@@ -582,7 +589,7 @@ export async function runRpc(argv, env) {
 			const outcome = outcomes[index];
 			return `FAKE_TOOL_RESULT ${entry.label}: ${entry.kind === "tool" && outcome.isError ? "ERROR " : ""}${outcome.text}`;
 		});
-		return { last: await streamText(wordDeltas(lines.join("\n"))), aborted: false };
+		return { last: await streamText(wordDeltas(final ?? lines.join("\n"))), aborted: false };
 	}
 
 	function track(promise) {
@@ -739,6 +746,159 @@ export async function runRpc(argv, env) {
 		return message;
 	}
 
+	// --- ask dialog + subagents ---------------------------------------------------------------------------------
+	// Frames mirror what omp 18.14 emits (captured from the real binary). `__ask__` raises the two-question `ask` request, `__ask_timeout__`
+	// the same with a short timeout, `__subagents__` spawns Alpha (finishes by itself) and Beta (runs until cancelled or steered to finish).
+	let askDialog = false;
+	let subLevel = "off";
+	const subagents = new Map();
+
+	const ASK_QUESTIONS = [
+		{ id: "db", question: "Which database?", header: "Database", options: [{ label: "Postgres", description: "Relational" }, { label: "SQLite", description: "Embedded", preview: "```sql\nselect 1;\n```" }], recommended: 1 },
+		{ id: "features", question: "Which features?", header: "Features", options: [{ label: "Auth" }, { label: "Billing" }, { label: "Search" }], multi: true },
+	];
+
+	function readSubagentFile(file, fromByte = 0) {
+		let start = Math.max(0, Math.trunc(Number(fromByte) || 0));
+		const text = existsSync(file) ? readFileSync(file, "utf8") : "";
+		const size = Buffer.byteLength(text);
+		let reset = false;
+		if (start > size) {
+			start = 0;
+			reset = true;
+		}
+		const buffer = Buffer.from(text).subarray(start);
+		const lastNewline = buffer.lastIndexOf(0x0a);
+		const complete = lastNewline >= 0 ? buffer.subarray(0, lastNewline + 1).toString() : "";
+		const entries = complete.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+		return { sessionFile: file, fromByte: start, nextByte: start + Buffer.byteLength(complete), reset, entries, messages: entries.filter((e) => e.type === "message").map((e) => e.message) };
+	}
+
+	function startSubagent(name, index, parentToolCallId, autoFinishAfter) {
+		const dir = join(sessionDir, "subagents");
+		mkdirSync(dir, { recursive: true });
+		const sessionFile = join(dir, `${name}.jsonl`);
+		const line = (entry) => appendFileSync(sessionFile, `${JSON.stringify(entry)}\n`);
+		writeFileSync(sessionFile, "");
+		let entryCount = 0;
+		const addMessage = (message) => line({ type: "message", id: `${name}-${++entryCount}`, parentId: null, timestamp: new Date().toISOString(), message });
+		const sub = {
+			status: "running",
+			sessionFile,
+			ticks: 0,
+			timer: undefined,
+			progress() {
+				return {
+					index,
+					id: name,
+					agent: "task",
+					agentSource: "bundled",
+					status: sub.status,
+					task: `Complete assignment thoroughly:\n\nRun echo ${name}`,
+					assignment: `Run echo ${name}`,
+					description: `Echo ${name}`,
+					lastIntent: `Running echo ${name}`,
+					...(sub.status === "running" ? { currentTool: "bash", currentToolArgs: `echo ${name}` } : {}),
+					recentTools: sub.ticks > 1 ? [{ tool: "bash", args: `echo ${name}`, argsKey: "command", intent: `Running echo ${name}`, isError: false, endMs: Date.now() }] : [],
+					recentOutput: sub.ticks > 2 ? [`${name} says hi`] : [],
+					toolCount: sub.ticks,
+					requests: sub.ticks,
+					tokens: sub.ticks * 1000,
+					cost: sub.ticks * 0.004,
+					durationMs: sub.ticks * 40,
+					modelOverride: ["fake/alpha"],
+					resolvedModel: "fake/alpha:low",
+					contextTokens: 1200,
+					contextWindow: 200000,
+				};
+			},
+			snapshot() {
+				return { id: name, index, agent: "task", agentSource: "bundled", description: `Echo ${name}`, status: sub.status, sessionFile, lastUpdate: Date.now(), parentToolCallId, progress: sub.progress() };
+			},
+			frame(type) {
+				if (subLevel === "off") return;
+				if (type === "progress") emit({ type: "subagent_progress", payload: { index, agent: "task", agentSource: "bundled", task: `Run echo ${name}`, parentToolCallId, assignment: `Run echo ${name}`, detached: true, progress: sub.progress(), sessionFile } });
+				else emit({ type: "subagent_lifecycle", payload: { id: name, agent: "task", parentToolCallId, detached: true, agentSource: "bundled", status: type, ...(type !== "started" ? { description: `Echo ${name}` } : {}), sessionFile, index } });
+			},
+			finish(status) {
+				if (sub.status !== "running") return;
+				clearInterval(sub.timer);
+				sub.status = status;
+				addMessage({ role: "assistant", content: [{ type: "text", text: `${name} ${status}` }], timestamp: Date.now(), stopReason: "stop" });
+				sub.frame("progress");
+				sub.frame(status);
+				sub.done?.();
+			},
+			steer(message) {
+				addMessage({ role: "user", content: [{ type: "text", text: message }], attribution: "user", timestamp: Date.now() });
+				if (/finish/i.test(message)) sub.finish("completed");
+			},
+		};
+		subagents.set(name, sub);
+		const done = new Promise((resolve) => {
+			sub.done = resolve;
+		});
+		addMessage({ role: "user", content: [{ type: "text", text: `Complete assignment thoroughly:\n\nRun echo ${name}` }], attribution: "agent", timestamp: Date.now() });
+		sub.frame("started");
+		sub.timer = setInterval(() => {
+			sub.ticks++;
+			if (sub.ticks === 2) addMessage({ role: "assistant", content: [{ type: "toolCall", id: `call_${name}`, name: "bash", arguments: { command: `echo ${name}` }, intent: `Running echo ${name}` }], timestamp: Date.now(), stopReason: "toolUse" });
+			sub.frame("progress");
+			if (autoFinishAfter !== undefined && sub.ticks >= autoFinishAfter) sub.finish("completed");
+		}, 40);
+		return done;
+	}
+
+	async function runAskTool(timeoutMs) {
+		const toolCall = { type: "toolCall", id: "call_fake_ask", name: "ask", arguments: { questions: ASK_QUESTIONS }, intent: "Gathering preferences" };
+		const callMessage = assistantMessage([toolCall], "toolUse");
+		forward({ type: "message_start", message: callMessage });
+		await pause();
+		record(callMessage);
+		forward({ type: "message_end", message: callMessage });
+		let result;
+		if (args.mode !== "rpc-ui") {
+			result = { content: [{ type: "text", text: "Tool ask not found" }], details: { isError: true, error: "Tool ask not found" } };
+			forward({ type: "tool_execution_start", toolCallId: toolCall.id, toolName: "ask", args: toolCall.arguments, intent: toolCall.intent });
+		} else if (askDialog) {
+			const uiId = emitUiRequest({ method: "ask", questions: ASK_QUESTIONS, ...(timeoutMs ? { timeout: timeoutMs } : {}) });
+			forward({ type: "tool_execution_start", toolCallId: toolCall.id, toolName: "ask", args: toolCall.arguments, intent: toolCall.intent });
+			let response;
+			if (timeoutMs) {
+				response = await Promise.race([waitForUi(uiId), sleep(timeoutMs).then(() => ({ timedOut: true }))]);
+				if (response.timedOut) {
+					uiWaiters.delete(uiId);
+					emit({ type: "extension_ui_request", id: `${uiId}-cancel`, method: "cancel", targetId: uiId });
+					response = { answers: ASK_QUESTIONS.map((q) => ({ id: q.id, selectedOptions: [q.options[q.recommended ?? 0].label] })) };
+				}
+			} else {
+				response = await waitForUi(uiId);
+			}
+			log({ kind: "ask_answers", response });
+			const results = response.cancelled
+				? []
+				: ASK_QUESTIONS.map((q, i) => ({ id: q.id, question: q.question, options: q.options.map((o) => o.label), multi: q.multi === true, ...response.answers[i] }));
+			const text = response.cancelled ? "User cancelled the question" : `User answers:\n${results.map((r) => `${r.id}: ${r.customInput ?? r.selectedOptions.join(", ")}`).join("\n")}`;
+			result = { content: [{ type: "text", text }], details: { results } };
+		} else {
+			forward({ type: "tool_execution_start", toolCallId: toolCall.id, toolName: "ask", args: toolCall.arguments, intent: toolCall.intent });
+			const picks = [];
+			for (const q of ASK_QUESTIONS) {
+				const uiId = emitUiRequest({ method: "select", title: q.question, options: q.options.map((o) => o.label), optionDetails: q.options.map((o) => (o.description ? { description: o.description } : {})) });
+				const response = await waitForUi(uiId);
+				picks.push(`${q.id}: ${response.value ?? "cancelled"}`);
+			}
+			result = { content: [{ type: "text", text: `User answers:\n${picks.join("\n")}` }], details: { results: [] } };
+		}
+		const isError = result.details.isError === true;
+		forward({ type: "tool_execution_end", toolCallId: toolCall.id, toolName: "ask", result, isError });
+		const toolResult = { role: "toolResult", toolCallId: toolCall.id, toolName: "ask", content: result.content, details: result.details, isError, timestamp: Date.now() };
+		forward({ type: "message_start", message: toolResult });
+		record(toolResult);
+		forward({ type: "message_end", message: toolResult });
+		return { callMessage, toolResult, text: result.content[0].text };
+	}
+
 	async function executePrompt(id, text) {
 		const runMessages = [];
 		let status = "completed";
@@ -831,7 +991,7 @@ export async function runRpc(argv, env) {
 			runMessages.push(last);
 			forward({ type: "turn_end", message: last, toolResults: [] });
 		} else if (hostDirectives.items.length > 0) {
-			const turn = await hostToolTurn(hostDirectives.items, hostDirectives.parallel, runMessages);
+			const turn = await hostToolTurn(hostDirectives.items, hostDirectives.parallel, hostDirectives.final, runMessages);
 			last = turn.last;
 			runMessages.push(last);
 			forward({ type: "turn_end", message: last, toolResults: [] });
@@ -847,6 +1007,19 @@ export async function runRpc(argv, env) {
 			const response = await waitForUi(uiId);
 			const chosen = response.cancelled ? "cancelled" : (response.value ?? String(response.confirmed));
 			last = await streamText(wordDeltas(`FAKE: approval ${chosen}`));
+			runMessages.push(last);
+			forward({ type: "turn_end", message: last, toolResults: [] });
+		} else if (text === "__ask__" || text === "__ask_timeout__") {
+			const asked = await runAskTool(text === "__ask_timeout__" ? Number(env.FAKE_OMP_ASK_TIMEOUT_MS ?? 400) : 0);
+			runMessages.push(asked.callMessage, asked.toolResult);
+			forward({ type: "turn_end", message: asked.callMessage, toolResults: [asked.toolResult] });
+			forward({ type: "turn_start" });
+			last = await streamText(wordDeltas(`FAKE: ${asked.text.replaceAll("\n", " | ")}`));
+			runMessages.push(last);
+			forward({ type: "turn_end", message: last, toolResults: [] });
+		} else if (text === "__subagents__") {
+			await Promise.all([startSubagent("Alpha", 0, "call_fake_task", 3), startSubagent("Beta", 1, "call_fake_task")]);
+			last = await streamText(wordDeltas("FAKE: team done"));
 			runMessages.push(last);
 			forward({ type: "turn_end", message: last, toolResults: [] });
 		} else if (text === "__big__") {
@@ -1038,6 +1211,54 @@ export async function runRpc(argv, env) {
 			case "get_available_models":
 				ok(id, type, { models: MODELS });
 				return;
+			case "set_ask_dialog": {
+				if (env.FAKE_OMP_NO_ASK_DIALOG !== undefined) {
+					fail(id, type, "Unknown command: set_ask_dialog");
+					return;
+				}
+				askDialog = command.enabled === true;
+				ok(id, type, { enabled: askDialog });
+				return;
+			}
+			case "set_subagent_subscription": {
+				if (!["off", "progress", "events"].includes(command.level)) {
+					fail(id, type, `Invalid subagent subscription level: ${command.level}`);
+					return;
+				}
+				subLevel = command.level;
+				ok(id, type, { level: subLevel });
+				return;
+			}
+			case "get_subagents": {
+				ok(id, type, { subagents: [...subagents.values()].filter((s) => s.status === "running").map((s) => s.snapshot()) });
+				return;
+			}
+			case "get_subagent_messages": {
+				const sub = subagents.get(command.subagentId);
+				if (!sub) {
+					fail(id, type, `Unknown subagent or session file unavailable: ${command.subagentId}`);
+					return;
+				}
+				ok(id, type, readSubagentFile(sub.sessionFile, command.fromByte));
+				return;
+			}
+			case "cancel_subagent": {
+				const sub = subagents.get(command.subagentId);
+				const cancelled = sub?.status === "running";
+				if (cancelled) sub.finish("aborted");
+				ok(id, type, { cancelled });
+				return;
+			}
+			case "steer_subagent": {
+				const sub = subagents.get(command.subagentId);
+				if (sub?.status !== "running") {
+					fail(id, type, `Subagent not running: ${command.subagentId}`);
+					return;
+				}
+				sub.steer(command.message);
+				ok(id, type);
+				return;
+			}
 			case "set_host_tools": {
 				if (!Array.isArray(command.tools)) {
 					fail(id, type, "set_host_tools requires a tools array");
@@ -1164,6 +1385,47 @@ export async function runRpc(argv, env) {
 				run = { id, message: text };
 				ok(id, type, { agentInvoked: true });
 				track(runLoop(run));
+				return;
+			}
+			case "handoff": {
+				// Like the real command: refused while a response is in progress or when there is nothing to summarise. The document is
+				// deterministic: the last user prompts of the journal. FAKE_OMP_HANDOFF=null answers `null` (the user cancelled),
+				// FAKE_OMP_HANDOFF=summary-message answers `{}` and leaves the document as a `compactionSummary` message only.
+				if (run !== undefined) {
+					fail(id, type, "Cannot hand off while a response is in progress");
+					return;
+				}
+				if (messages.length < 2) {
+					fail(id, type, "Nothing to hand off (no messages yet)");
+					return;
+				}
+				if (env.FAKE_OMP_HANDOFF === "null") {
+					ok(id, type, null);
+					return;
+				}
+				const prompts = messages
+					.filter((m) => m.role === "user")
+					.slice(-3)
+					.map((m) => m.content.filter((b) => b.type === "text").map((b) => b.text).join(" ").replace(/\s+/g, " ").trim().slice(0, 200));
+				const document = [
+					"# Handoff",
+					"",
+					`The conversation has ${messages.length} messages. Latest requests:`,
+					...prompts.map((p) => `- ${p}`),
+					command.customInstructions ? `\nExtra instructions: ${command.customInstructions}` : "",
+				]
+					.filter((line, i, all) => line !== "" || all[i - 1] !== "")
+					.join("\n")
+					.trim();
+				messages.push({ role: "compactionSummary", summary: document, tokensBefore: contextUsage().tokens, timestamp: Date.now() });
+				persist();
+				if (env.FAKE_OMP_HANDOFF === "summary-message") {
+					ok(id, type, {});
+					return;
+				}
+				const savedPath = join(sessionDir, `handoff-${messages.length}.md`);
+				writeFileSync(savedPath, `${document}\n`);
+				ok(id, type, { savedPath });
 				return;
 			}
 			default:

@@ -327,9 +327,10 @@ describe("0004_tasks", () => {
 		const db = openDatabase({ file: ":memory:" });
 		expect(columns(db, "tasks")).toEqual([
 			"id", "direction", "peer_id", "workspace_id", "project_id", "title", "description", "status", "epoch", "repo_url", "repo_branch", "repo_commit",
-			"deliver_as", "constraints", "sender_node_id", "sender_node_name", "sender_agent_id", "sender_agent_name", "sender_session_id",
+			"deliver_as", "input_files", "constraints", "sender_node_id", "sender_node_name", "sender_agent_id", "sender_agent_name", "sender_session_id",
 			"executor_node_id", "executor_node_name", "executor_agent_id", "executor_agent_name", "executor_session_id", "reason", "result", "cost",
 			"retry_of", "correlation_id", "last_event_seq", "exec_state", "notified_status", "created_at", "updated_at", "started_at", "finished_at",
+			"fenced", "highest_seen_epoch",
 		]);
 		expect(columns(db, "task_events")).toEqual(["task_id", "seq", "type", "summary", "payload", "created_at"]);
 		expect(columns(db, "task_messages")).toEqual([
@@ -386,8 +387,8 @@ describe("0004_tasks", () => {
 		cpSync(resolveMigrationsFolder(), older, { recursive: true });
 		const journalPath = join(older, "meta", "_journal.json");
 		const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: Array<{ tag: string }> };
-		expect(journal.entries.map((e) => e.tag)).toEqual(expect.arrayContaining(["0004_tasks", "0005_shared"]));
-		journal.entries = journal.entries.filter((e) => e.tag !== "0004_tasks" && e.tag !== "0005_shared");
+		expect(journal.entries.map((e) => e.tag)).toEqual(expect.arrayContaining(["0004_tasks", "0005_shared", "0006_nogit"]));
+		journal.entries.length = journal.entries.findIndex((e) => e.tag === "0004_tasks"); // truncate at the cut: later migrations must not be applied either
 		writeFileSync(journalPath, JSON.stringify(journal));
 
 		const before = openDatabase({ file, migrationsFolder: older });
@@ -415,8 +416,8 @@ describe("0005_shared", () => {
 		const db = openDatabase({ file: ":memory:" });
 		expect(columns(db, "agent_sessions").slice(-3)).toEqual(["kind", "shared_session_id", "moved_to"]);
 		expect(columns(db, "shared_sessions")).toEqual([
-			"id", "workspace_id", "title", "goal", "repo_url", "branch", "base_branch", "base_commit", "epoch", "driver_node_id", "driver_node_name",
-			"local_role", "state", "local_session_id", "mirror_session_id", "local_project_id", "agent_message_limit", "rescue_branch",
+			"id", "workspace_id", "title", "goal", "vcs", "repo_url", "branch", "base_branch", "base_commit", "epoch", "driver_node_id", "driver_node_name",
+			"local_role", "state", "local_session_id", "mirror_session_id", "local_project_id", "agent_message_limit", "rescue_branch", "rescue_files",
 			"last_checkpoint_seq", "meta", "created_at", "updated_at",
 		]);
 		expect(columns(db, "shared_participants")).toEqual([
@@ -428,11 +429,11 @@ describe("0005_shared", () => {
 			"created_at", "hlc", "origin_seq", "delivery", "injected_session_id", "read_at", "received_at",
 		]);
 		expect(columns(db, "shared_checkpoints")).toEqual([
-			"shared_session_id", "seq", "epoch", "node_id", "branch", "commit", "pushed", "snapshot_sha256", "snapshot_size", "snapshot_messages",
+			"shared_session_id", "seq", "epoch", "node_id", "branch", "commit", "pushed", "files", "files_path", "snapshot_sha256", "snapshot_size", "snapshot_messages",
 			"snapshot_path", "model", "delivered_to", "note", "created_at",
 		]);
 		expect(columns(db, "shared_invites")).toEqual([
-			"id", "shared_session_id", "from_node_id", "from_node_name", "from_agent_id", "from_agent_name", "title", "goal", "repo_url", "repo_branch", "workspace_id",
+			"id", "shared_session_id", "from_node_id", "from_node_name", "from_agent_id", "from_agent_name", "title", "goal", "vcs", "repo_url", "repo_branch", "workspace_id",
 			"agent_id", "epoch", "driver_ui_url", "model", "state", "created_at", "decided_at",
 		]);
 		expect(columns(db, "shared_mirror_messages")).toEqual(["mirror_session_id", "message_id", "position", "message", "updated_at"]);
@@ -516,8 +517,8 @@ describe("0005_shared", () => {
 		cpSync(resolveMigrationsFolder(), older, { recursive: true });
 		const journalPath = join(older, "meta", "_journal.json");
 		const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: Array<{ tag: string }> };
-		expect(journal.entries.at(-1)?.tag).toBe("0005_shared");
-		journal.entries.pop();
+		expect(journal.entries.map((e) => e.tag)).toEqual(expect.arrayContaining(["0005_shared", "0006_nogit"]));
+		journal.entries.length = journal.entries.findIndex((e) => e.tag === "0005_shared"); // truncate at the cut: later migrations must not be applied either
 		writeFileSync(journalPath, JSON.stringify(journal));
 
 		const before = openDatabase({ file, migrationsFolder: older });
@@ -549,7 +550,7 @@ describe("0005_shared", () => {
 		cpSync(resolveMigrationsFolder(), older, { recursive: true });
 		const journalPath = join(older, "meta", "_journal.json");
 		const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: Array<{ tag: string }> };
-		journal.entries = journal.entries.filter((e) => !["0004_tasks", "0005_shared"].includes(e.tag));
+		journal.entries.length = journal.entries.findIndex((e) => e.tag === "0004_tasks"); // truncate at the cut: later migrations must not be applied either
 		writeFileSync(journalPath, JSON.stringify(journal));
 		const before = openDatabase({ file, migrationsFolder: older });
 		before.$client.prepare("insert into peers (id, name, fingerprint, public_key, key_id, url) values ('node_b', 'B', 'f', 'k', 'k', 'https://b.example')").run();
@@ -562,5 +563,161 @@ describe("0005_shared", () => {
 		expect(db.select().from(peers).get()).toMatchObject({ id: "node_b", autoAcceptTasks: false });
 		db.$client.close();
 		expect(readdirSync(dir).filter((n) => n.startsWith("clam.db.pre-migrate-") && n.endsWith(".bak"))).toHaveLength(1);
+	});
+});
+
+describe("0006_nogit", () => {
+	const row = (db: ReturnType<typeof openDatabase>, sql: string, ...args: unknown[]) => db.$client.prepare(sql).get(...args);
+
+	it("adds projects.managed (default false) and relaxes the repository columns of tasks and shared sessions", () => {
+		const db = openDatabase({ file: ":memory:" });
+		expect(columns(db, "projects")).toContain("managed");
+		db.insert(node).values({ id: "n1", name: "n", publicKey: "k", fingerprint: "f" }).run();
+		db.insert(workspaces).values({ id: "w1", name: "w", ownerNodeId: "n1" }).run();
+		db.insert(projects).values({ id: "p1", workspaceId: "w1", name: "p", path: "/tmp/p" }).run();
+		db.insert(projects).values({ id: "p2", workspaceId: "w1", name: "m", path: "/tmp/m", managed: true }).run();
+		expect(db.select().from(projects).all().map((p) => p.managed)).toEqual([false, true]);
+
+		db.insert(tasks)
+			.values({ id: "tsk_ng", direction: "outgoing", peerId: "node_b", workspaceId: "w1", title: "T", senderNodeId: "a", senderNodeName: "A", executorNodeId: "b", executorNodeName: "B", correlationId: "c", deliverAs: "files", inputFiles: { artifactId: "art_1", sha256: "a".repeat(64), size: 3, fileCount: 1 } })
+			.run();
+		expect(db.select().from(tasks).get()).toMatchObject({ repoUrl: null, repoBranch: null, inputFiles: { artifactId: "art_1", fileCount: 1 } });
+
+		db.insert(sharedSessions).values({ id: "shs_f", workspaceId: "w1", title: "T", vcs: "files", driverNodeId: "a", driverNodeName: "A", localRole: "driver" }).run();
+		expect(db.select().from(sharedSessions).get()).toMatchObject({ vcs: "files", repoUrl: null, branch: null, rescueFiles: null });
+		db.insert(sharedCheckpoints).values({ sharedSessionId: "shs_f", seq: 1, epoch: 1, nodeId: "a", files: { sha256: "b".repeat(64), size: 9, fileCount: 2 }, filesPath: "shs_f/1.files.tar.gz" }).run();
+		expect(db.select().from(sharedCheckpoints).get()).toMatchObject({ branch: null, commit: null, files: { fileCount: 2 }, filesPath: "shs_f/1.files.tar.gz" });
+		db.insert(sharedInvites).values({ id: "inv_f", sharedSessionId: "shs_f", fromNodeId: "a", fromNodeName: "A", title: "T", vcs: "files", workspaceId: "w1", epoch: 1 }).run();
+		expect(db.select().from(sharedInvites).get()).toMatchObject({ vcs: "files", repoUrl: null, repoBranch: null });
+		db.$client.close();
+	});
+
+	it("keeps every task, event, message, artifact and shared-session child row when the tables are rebuilt (foreign keys off while migrating)", () => {
+		const file = join(dir, "clam.db");
+		const older = mkdtempSync(join(dir, "older-"));
+		cpSync(resolveMigrationsFolder(), older, { recursive: true });
+		const journalPath = join(older, "meta", "_journal.json");
+		const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: Array<{ tag: string }> };
+		expect(journal.entries.findIndex((e) => e.tag === "0006_nogit")).toBeGreaterThan(0);
+		journal.entries.length = journal.entries.findIndex((e) => e.tag === "0006_nogit"); // truncate at the cut: later migrations must not be applied either
+		writeFileSync(journalPath, JSON.stringify(journal));
+
+		const before = openDatabase({ file, migrationsFolder: older });
+		expect(columns(before, "projects")).not.toContain("managed");
+		const raw = before.$client;
+		raw.prepare("insert into node (id, name, public_key, fingerprint) values ('n1', 'n', 'k', 'f')").run();
+		raw.prepare("insert into workspaces (id, name, owner_id) values ('w1', 'w', 'n1')").run();
+		raw.prepare("insert into projects (id, workspace_id, name, path) values ('p1', 'w1', 'p', '/tmp/p')").run();
+		raw.prepare("insert into peers (id, name, fingerprint, public_key, key_id, url) values ('node_b', 'B', 'f', 'k', 'k', 'https://b.example')").run();
+		raw.prepare(
+			"insert into tasks (id, direction, peer_id, workspace_id, project_id, title, repo_url, sender_node_id, sender_node_name, executor_node_id, executor_node_name, correlation_id) values ('tsk_1', 'outgoing', 'node_b', 'w1', 'p1', 'T', 'https://github.com/o/r', 'a', 'A', 'b', 'B', 'c')",
+		).run();
+		raw.prepare("insert into task_events (task_id, seq, type, summary) values ('tsk_1', 1, 'status', 'offered')").run();
+		raw.prepare("insert into task_messages (id, task_id, author_kind, author_node_id, author_node_name, kind, text, created_at) values ('msg_1', 'tsk_1', 'human', 'a', 'A', 'note', 'hi', 'x')").run();
+		raw.prepare("insert into artifacts (id, task_id, name, media_type, size, sha256, storage_path) values ('art_1', 'tsk_1', 'x', 't', 1, 's', 'p')").run();
+		raw.prepare("insert into shared_sessions (id, workspace_id, title, repo_url, branch, driver_node_id, driver_node_name, local_role) values ('shs_1', 'w1', 'T', 'https://github.com/o/r', 'clam/shared/x', 'a', 'A', 'driver')").run();
+		raw.prepare("insert into shared_participants (shared_session_id, node_id, node_name, role, state) values ('shs_1', 'a', 'A', 'driver', 'active')").run();
+		raw.prepare("insert into shared_messages (id, shared_session_id, author_kind, author_node_id, author_node_name, kind, text, created_at, hlc) values ('smg_1', 'shs_1', 'human', 'a', 'A', 'chat', 'hi', 'x', '000000000000001-00000')").run();
+		raw.prepare("insert into shared_checkpoints (shared_session_id, seq, epoch, node_id, branch) values ('shs_1', 1, 1, 'a', 'clam/shared/x')").run();
+		raw.prepare("insert into shared_invites (id, shared_session_id, from_node_id, from_node_name, title, repo_url, repo_branch, workspace_id, epoch) values ('inv_1', 'shs_1', 'a', 'A', 'T', 'https://github.com/o/r', 'b', 'w1', 1)").run();
+		raw.close();
+
+		const db = openDatabase({ file });
+		expect(db.select().from(tasks).get()).toMatchObject({ id: "tsk_1", projectId: "p1", repoUrl: "https://github.com/o/r", deliverAs: "branch", inputFiles: null });
+		expect(db.select().from(taskEvents).all()).toHaveLength(1);
+		expect(db.select().from(taskMessages).all()).toHaveLength(1);
+		expect(db.select().from(artifacts).all()).toHaveLength(1);
+		expect(db.select().from(sharedSessions).get()).toMatchObject({ id: "shs_1", vcs: "git", repoUrl: "https://github.com/o/r", branch: "clam/shared/x" });
+		expect(db.select().from(sharedParticipants).all()).toHaveLength(1);
+		expect(db.select().from(sharedMessages).all()).toHaveLength(1);
+		expect(db.select().from(sharedCheckpoints).get()).toMatchObject({ branch: "clam/shared/x", files: null, filesPath: null });
+		expect(db.select().from(sharedInvites).get()).toMatchObject({ vcs: "git", repoUrl: "https://github.com/o/r", repoBranch: "b" });
+		expect(row(db, "select count(*) as n from pragma_foreign_key_check")).toEqual({ n: 0 });
+		// Enforcement is back on and the rebuilt tables still cascade.
+		expect(db.$client.pragma("foreign_keys", { simple: true })).toBe(1);
+		db.delete(tasks).where(eq(tasks.id, "tsk_1")).run();
+		expect(db.select().from(taskEvents).all()).toEqual([]);
+		expect(db.select().from(artifacts).all()).toEqual([]);
+		db.delete(sharedSessions).where(eq(sharedSessions.id, "shs_1")).run();
+		expect(db.select().from(sharedCheckpoints).all()).toEqual([]);
+		expect(db.select().from(sharedMessages).all()).toEqual([]);
+		db.$client.close();
+	});
+});
+
+describe("0009_handoff", () => {
+	const handoffRow = (id: string, extra: Record<string, unknown> = {}) => ({
+		id,
+		kind: "task",
+		role: "source",
+		state: "preparing",
+		peerId: "node_c",
+		subjectId: "tsk_1",
+		title: "T",
+		workspaceId: "w1",
+		sourceNodeId: "node_b",
+		sourceNodeName: "B",
+		targetNodeId: "node_c",
+		targetNodeName: "C",
+		fromEpoch: 0,
+		toEpoch: 1,
+		correlationId: "corr",
+		...extra,
+	});
+
+	it("creates the handoff tables, adds the task fence columns and enforces one live handoff per (subject, epoch, role)", () => {
+		const db = openDatabase({ file: ":memory:" });
+		expect(columns(db, "handoffs")).toEqual([
+			"id", "kind", "role", "state", "peer_id", "subject_id", "title", "workspace_id", "project_id", "source_node_id", "source_node_name", "source_agent_id",
+			"source_agent_name", "source_session_id", "target_node_id", "target_node_name", "target_agent_id", "target_agent_name", "target_session_id", "from_epoch",
+			"to_epoch", "vcs", "include_transcript", "manifest", "manifest_sha256", "conversation_summary", "environment", "setup_fingerprint", "failure_code",
+			"failure_detail", "failure_step", "expires_at", "deadline_at", "ack_at", "fencing_token", "correlation_id", "meta", "created_at", "updated_at",
+		]);
+		expect(columns(db, "handoff_steps")).toEqual(["handoff_id", "n", "name", "state", "detail", "at"]);
+		expect(columns(db, "handoff_events")).toEqual(["handoff_id", "seq", "at", "node_id", "state", "summary"]);
+		expect(columns(db, "handoff_setup")).toEqual(["id", "handoff_id", "ord", "command", "cwd", "purpose", "state", "exit_code", "output_tail", "started_at", "finished_at"]);
+		expect(columns(db, "handoff_artifacts")).toEqual(["handoff_id", "artifact_id", "name", "kind", "sha256", "size", "path", "created_at"]);
+		expect(columns(db, "tasks").slice(-2)).toEqual(["fenced", "highest_seen_epoch"]);
+
+		const raw = db.$client;
+		const insert = (r: ReturnType<typeof handoffRow>) =>
+			raw
+				.prepare(
+					"insert into handoffs (id, kind, role, state, peer_id, subject_id, title, workspace_id, source_node_id, source_node_name, target_node_id, target_node_name, from_epoch, to_epoch, correlation_id) values (@id, @kind, @role, @state, @peerId, @subjectId, @title, @workspaceId, @sourceNodeId, @sourceNodeName, @targetNodeId, @targetNodeName, @fromEpoch, @toEpoch, @correlationId)",
+				)
+				.run(r);
+		insert(handoffRow("hnd_1"));
+		// A competing handoff for the same (task, epoch, role) cannot exist while the first is live ...
+		expect(() => insert(handoffRow("hnd_2"))).toThrow(/UNIQUE/);
+		// ... the same epoch on the other role is another node's row ...
+		insert(handoffRow("hnd_target", { role: "target", state: "received" }));
+		// ... and an attempt that ended without consuming the epoch frees it again.
+		raw.prepare("update handoffs set state = 'rejected' where id = 'hnd_1'").run();
+		insert(handoffRow("hnd_2"));
+		raw.prepare("update handoffs set state = 'reclaimed' where id = 'hnd_2'").run();
+		expect(() => insert(handoffRow("hnd_3"))).toThrow(/UNIQUE/); // reclaimed keeps the tombstone epoch
+		db.$client.close();
+	});
+
+	it("migrates a database that stopped at 0008: tasks keep their rows and become unfenced", () => {
+		const file = join(dir, "clam.db");
+		const older = mkdtempSync(join(dir, "older-"));
+		cpSync(resolveMigrationsFolder(), older, { recursive: true });
+		const journalPath = join(older, "meta", "_journal.json");
+		const journal = JSON.parse(readFileSync(journalPath, "utf8")) as { entries: Array<{ tag: string }> };
+		journal.entries.length = journal.entries.findIndex((e) => e.tag === "0009_handoff");
+		writeFileSync(journalPath, JSON.stringify(journal));
+		const before = openDatabase({ file, migrationsFolder: older });
+		before.$client.prepare("insert into node (id, name, public_key, fingerprint) values ('n1', 'n', 'k', 'f')").run();
+		before.$client.prepare("insert into workspaces (id, name, owner_id) values ('w1', 'w', 'n1')").run();
+		before.$client
+			.prepare("insert into tasks (id, direction, peer_id, workspace_id, title, sender_node_id, sender_node_name, executor_node_id, executor_node_name, correlation_id) values ('tsk_1', 'incoming', 'node_a', 'w1', 'T', 'a', 'A', 'b', 'B', 'c')")
+			.run();
+		before.$client.close();
+
+		const db = openDatabase({ file });
+		expect(db.select().from(tasks).get()).toMatchObject({ id: "tsk_1", fenced: false, highestSeenEpoch: 0 });
+		expect(db.$client.prepare("select count(*) as n from handoffs").get()).toEqual({ n: 0 });
+		db.$client.close();
 	});
 });

@@ -81,7 +81,7 @@ export default function GitWorkbench({ projectId, sessionId, className }: GitWor
 				className={cn("h-full", className)}
 				icon={FolderGit2}
 				title="Not a Git repository"
-				description="This project's directory has no .git folder. Initialize a repository there, or clone a GitHub repository as a new project."
+				description="This project is a plain folder — no repository is needed. Sessions, tasks and shared sessions work with its files as they are. To use Git here, initialize a repository in the folder or clone a GitHub repository as a new project."
 			/>
 		);
 	}

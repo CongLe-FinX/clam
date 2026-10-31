@@ -128,7 +128,7 @@ export function useRevokePeer() {
 		onSuccess: (peer) => {
 			qc.setQueryData<Peer[]>(qk.peers, (d) => replaceById(d, peer));
 			void qc.invalidateQueries({ queryKey: qk.directory });
-			toast.success(`${peer.name} was revoked`, { description: "It can no longer reach this node." });
+			toast.success(`${peer.name} was revoked`, { description: "It can no longer reach this machine." });
 		},
 		onError: (e) => toast.error("Could not revoke the peer", { description: errorMessage(e) }),
 	});

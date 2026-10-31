@@ -3,6 +3,7 @@ import { wire, FORMAT } from "@clam/agent-network";
 import type { Capability } from "@clam/contracts";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ApiError } from "../http/errors.ts";
+import { contentDisposition } from "../http/file-response.ts";
 import { digestHeader } from "../shared/snapshots.ts";
 import type { SharedService } from "../shared/service.ts";
 import { runIdempotent, type IdempotencyStore } from "./idempotency.ts";
@@ -73,6 +74,11 @@ export function registerSharedWireRoutes(api: FastifyInstance, deps: SharedWireD
 
 	api.post<{ Params: IdParams }>("/shared/:id/mirror", pre, async (request): Promise<wire.SharedMirrorAccepted> => shared.mirror.receive(peerOf(request), sharedId(request.params), bodyOf(wire.SharedMirrorRequest, request)));
 
+	/** A person on a participant machine answers a question/approval of the driver's agent. Idempotent by the signed `Idempotency-Key`: a retry after a lost response replays the stored 200 instead of reporting `already_answered`. */
+	api.post<{ Params: IdParams }>("/shared/:id/answer", pre, (request, reply) =>
+		idempotent(request, reply, async () => ({ status: 200, body: await shared.requests.receiveAnswer(peerOf(request), sharedId(request.params), bodyOf(wire.SharedAnswerRequest, request)) })),
+	);
+
 	api.post<{ Params: IdParams }>("/shared/:id/checkpoints", pre, (request, reply) =>
 		idempotent(request, reply, async () => {
 			shared.checkpoints.receiveNotice(peerOf(request), sharedId(request.params), bodyOf(wire.SharedCheckpointNotice, request));
@@ -98,6 +104,34 @@ export function registerSharedWireRoutes(api: FastifyInstance, deps: SharedWireD
 			.header("Content-Length", file.size)
 			.header("Content-Digest", digestHeader(file.sha256))
 			.header("Content-Disposition", 'attachment; filename="session-snapshot.tar"')
+			.send(createReadStream(file.path));
+	});
+
+	/** Files mode: the folder bundle of a checkpoint, streamed as stored; verified like the snapshot (size and sha-256 from the checkpoint notice). */
+	api.get<{ Params: IdParams & { seq: string } }>("/shared/:id/files/:seq", pre, async (request, reply) => {
+		const id = sharedId(request.params);
+		const participant = shared.store.participant(id, peerOf(request));
+		if (!participant || participant.state !== "active") throw ApiError.notFound("Folder bundle");
+		const file = shared.files.bundleFile(id, seqOf(request.params.seq));
+		return reply
+			.header("Content-Type", "application/octet-stream")
+			.header("Content-Length", file.size)
+			.header("Content-Digest", digestHeader(file.sha256))
+			.header("Content-Disposition", 'attachment; filename="working-folder.tar.gz"')
+			.send(createReadStream(file.path));
+	});
+
+	/** A file posted in the group chat, streamed as stored (content-addressed); the receiver verifies size and sha-256 against the message's metadata. Any active member may fetch it, from any member that holds it. */
+	api.get<{ Params: IdParams & { attId: string } }>("/shared/:id/attachments/:attId", pre, async (request, reply) => {
+		const id = sharedId(request.params);
+		const participant = shared.store.participant(id, peerOf(request));
+		if (!participant || participant.state !== "active" || !FORMAT.id.test(request.params.attId)) throw ApiError.notFound("Attachment");
+		const file = shared.attachments.wireFile(id, request.params.attId);
+		return reply
+			.header("Content-Type", "application/octet-stream")
+			.header("Content-Length", file.size)
+			.header("Content-Digest", digestHeader(file.sha256))
+			.header("Content-Disposition", contentDisposition(file.name, "attachment"))
 			.send(createReadStream(file.path));
 	});
 

@@ -1,6 +1,6 @@
 import type { Peer } from "@clam/contracts";
 import { Link, useParams } from "@tanstack/react-router";
-import { Check, ChevronLeft, Network, Pencil, Send, ShieldOff, X } from "lucide-react";
+import { Check, ChevronLeft, ExternalLink, Globe, Network, Pencil, Send, ShieldOff, Terminal, X } from "lucide-react";
 import { useState } from "react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { KeyValue } from "@/features/settings/components/section";
@@ -16,9 +16,10 @@ import { PageContainer } from "@/ui/page";
 import { Skeleton } from "@/ui/skeleton";
 import { StatusDot } from "@/ui/status-dot";
 import { Switch } from "@/ui/switch";
+import { Tip } from "@/ui/tooltip";
 import { CapabilityChecklist, CapabilityChips } from "./capabilities";
-import { CopyBlock, CopyIconButton, PeerStatusBadge } from "./components";
-import { formatFingerprint } from "./format";
+import { CopyIconButton, PeerStatusBadge } from "./components";
+import { FingerprintCompare, FingerprintIcon } from "./fingerprint";
 import { useRevokePeer, useUpdatePeer } from "./hooks";
 
 export default function PeerPage() {
@@ -29,7 +30,7 @@ export default function PeerPage() {
 	return (
 		<PageContainer>
 			<Link to="/network/nodes" className="-mb-2 inline-flex min-h-9 items-center gap-1 self-start text-[13px] text-muted-foreground outline-none hover:text-foreground coarse:min-h-11">
-				<ChevronLeft className="size-4" /> Connected nodes
+				<ChevronLeft className="size-4" /> Connected machines
 			</Link>
 			{peers.isPending ? (
 				<div aria-busy className="flex flex-col gap-3">
@@ -37,15 +38,15 @@ export default function PeerPage() {
 					<Skeleton className="h-48" />
 				</div>
 			) : peers.error ? (
-				<EmptyState icon={Network} title="Could not load this node" description={errorMessage(peers.error)} />
+				<EmptyState icon={Network} title="Could not load this machine" description={errorMessage(peers.error)} />
 			) : !peer ? (
 				<EmptyState
 					icon={Network}
-					title="Node not found"
-					description="This node is not paired with you (any more)."
+					title="Machine not found"
+					description="This machine is not paired with you (any more)."
 					action={
 						<Button asChild variant="outline" size="sm">
-							<Link to="/network/nodes">Back to connected nodes</Link>
+							<Link to="/network/nodes">Back to connected machines</Link>
 						</Button>
 					}
 				/>
@@ -56,21 +57,48 @@ export default function PeerPage() {
 	);
 }
 
+/** The peer's own web UI at `/browser`; nothing is proxied through this machine. */
+function peerBrowserUrl(apiBaseUrl: string): string | null {
+	try {
+		const { origin } = new URL(apiBaseUrl);
+		return origin === "null" ? null : `${origin}/browser`;
+	} catch {
+		return null;
+	}
+}
+
+/** The peer's own web UI at `/terminal`: its own shell, its own sign-in; nothing is relayed through this machine. */
+function peerTerminalUrl(apiBaseUrl: string): string | null {
+	try {
+		const { origin } = new URL(apiBaseUrl);
+		return origin === "null" ? null : `${origin}/terminal`;
+	} catch {
+		return null;
+	}
+}
+
 function PeerDetail({ peer }: { peer: Peer }) {
 	const [confirmRevoke, setConfirmRevoke] = useState(false);
 	const openDialog = useUi((s) => s.openDialog);
 	const revoke = useRevokePeer();
 	const update = useUpdatePeer();
 	const revoked = peer.status === "revoked";
+	const browserUrl = peerBrowserUrl(peer.url);
+	const terminalUrl = peerTerminalUrl(peer.url);
 
 	return (
 		<>
 			<header className="flex flex-wrap items-start justify-between gap-3">
-				<div className="flex min-w-0 flex-col gap-1.5">
-					<NameEditor peer={peer} disabled={revoked} />
-					<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-						<PeerStatusBadge status={peer.status} />
-						<span>paired {relativeTime(peer.pairedAt)}</span>
+				<div className="flex min-w-0 items-center gap-3.5">
+					<FingerprintIcon fingerprint={peer.fingerprint} size={56} className="hidden sm:block" />
+					<div className="flex min-w-0 flex-col gap-1.5">
+						<NameEditor peer={peer} disabled={revoked} />
+						<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+							<PeerStatusBadge status={peer.status} />
+							<span>paired {relativeTime(peer.pairedAt)}</span>
+							<span aria-hidden>·</span>
+							<span>last seen {peer.lastSeenAt ? relativeTime(peer.lastSeenAt) : "never"}</span>
+						</div>
 					</div>
 				</div>
 				{revoked ? null : (
@@ -78,18 +106,49 @@ function PeerDetail({ peer }: { peer: Peer }) {
 						<Button variant="primary" onClick={() => openDialog({ kind: "delegate-task", peerId: peer.id })}>
 							<Send /> Delegate a task
 						</Button>
+						{terminalUrl ? (
+							<Button asChild variant="outline">
+								<a href={terminalUrl} target="_blank" rel="noopener noreferrer">
+									<Terminal /> Open {peer.name}&apos;s Terminal <ExternalLink className="opacity-60" />
+								</a>
+							</Button>
+						) : (
+							<Tip label="This machine has no public address">
+								<span tabIndex={0} className="inline-flex">
+									<Button variant="outline" disabled>
+										<Terminal /> Open {peer.name}&apos;s Terminal
+									</Button>
+								</span>
+							</Tip>
+						)}
+						{browserUrl ? (
+							<Button asChild variant="outline">
+								<a href={browserUrl} target="_blank" rel="noopener noreferrer">
+									<Globe /> Open {peer.name}&apos;s Browser <ExternalLink className="opacity-60" />
+								</a>
+							</Button>
+						) : (
+							<Tip label="This machine has no public address">
+								<span tabIndex={0} className="inline-flex">
+									<Button variant="outline" disabled>
+										<Globe /> Open {peer.name}&apos;s Browser
+									</Button>
+								</span>
+							</Tip>
+						)}
 						<Button variant="outline" className="text-danger" onClick={() => setConfirmRevoke(true)}>
 							<ShieldOff /> Revoke
 						</Button>
 					</div>
 				)}
 			</header>
+			{revoked ? null : <p className="-mt-2 text-xs text-subtle">Opens that machine&apos;s own UI — you sign in there. Its Terminal and Browser must be switched on by its owner.</p>}
 
 			{revoked ? (
 				<div role="status" className="rounded-xl bg-danger/10 p-3.5 text-[13px] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--danger)_30%,transparent)]">
-					<strong className="text-danger">{peer.revokedBy === "remote" ? "This node revoked you." : "You revoked this node."}</strong>{" "}
+					<strong className="text-danger">{peer.revokedBy === "remote" ? "This machine revoked you." : "You revoked this machine."}</strong>{" "}
 					<span className="text-muted-foreground">
-						{peer.revokedAt ? `${relativeTime(peer.revokedAt)}. ` : ""}It cannot reach this node and no tasks flow either way. To connect again, pair with a fresh invitation.
+						{peer.revokedAt ? `${relativeTime(peer.revokedAt)}. ` : ""}It cannot reach this machine and no tasks flow either way. To connect again, pair with a fresh invitation.
 					</span>
 				</div>
 			) : null}
@@ -101,12 +160,12 @@ function PeerDetail({ peer }: { peer: Peer }) {
 							<CardTitle>Identity</CardTitle>
 						</CardHeader>
 						<CardContent className="flex flex-col gap-3 pt-3">
-							<CopyBlock label="Fingerprint" value={peer.fingerprint} display={formatFingerprint(peer.fingerprint)} />
+							<FingerprintCompare label="Fingerprint" fingerprint={peer.fingerprint} />
 							<dl className="divide-y">
-								<KeyValue label="Node ID" mono>
+								<KeyValue label="Machine ID" mono>
 									<span className="inline-flex items-center gap-1">
 										{peer.id}
-										<CopyIconButton value={peer.id} label="Copy node ID" />
+										<CopyIconButton value={peer.id} label="Copy machine ID" />
 									</span>
 								</KeyValue>
 								<KeyValue label="URL" mono>
@@ -149,14 +208,14 @@ function PeerDetail({ peer }: { peer: Peer }) {
 				<div className="flex min-w-0 flex-col gap-4">
 					<Card>
 						<CardHeader className="flex-col gap-1">
-							<CardTitle>Tasks from this node</CardTitle>
+							<CardTitle>Tasks from this machine</CardTitle>
 							<CardDescription>What happens when {peer.name} delegates work to one of your agents.</CardDescription>
 						</CardHeader>
 						<CardContent className="pt-3">
 							<label className="flex cursor-pointer items-start gap-3 text-[13px] coarse:min-h-11">
-								<Switch checked={peer.autoAcceptTasks} disabled={revoked} onCheckedChange={(v) => update.mutate({ id: peer.id, autoAcceptTasks: v })} aria-label="Auto-accept tasks from this node" className="mt-0.5" />
+								<Switch checked={peer.autoAcceptTasks} disabled={revoked} onCheckedChange={(v) => update.mutate({ id: peer.id, autoAcceptTasks: v })} aria-label="Auto-accept tasks from this machine" className="mt-0.5" />
 								<span className="flex flex-col gap-0.5">
-									<span className="font-medium">Auto-accept tasks from this node</span>
+									<span className="font-medium">Auto-accept tasks from this machine</span>
 									<span className="text-xs text-muted-foreground">
 										A task starts right away when exactly one of your projects is linked to its GitHub repository. Otherwise — or when this is off — it waits for you to accept it. The agent then works on your machine under your approval settings.
 									</span>
@@ -166,16 +225,16 @@ function PeerDetail({ peer }: { peer: Peer }) {
 					</Card>
 					<Card>
 						<CardHeader className="flex-col gap-1">
-							<CardTitle>What this node may do on yours</CardTitle>
-							<CardDescription>Changes apply immediately, on the next request this node sends.</CardDescription>
+							<CardTitle>What this machine may do on yours</CardTitle>
+							<CardDescription>Changes apply immediately, on the next request this machine sends.</CardDescription>
 						</CardHeader>
 						<CardContent className="pt-3">
-							<CapabilityChecklist value={peer.grantedCapabilities} disabled={revoked} onChange={(next) => update.mutate({ id: peer.id, grantedCapabilities: next })} />
+							<CapabilityChecklist value={peer.grantedCapabilities} peerName={peer.name} disabled={revoked} onChange={(next) => update.mutate({ id: peer.id, grantedCapabilities: next })} />
 						</CardContent>
 					</Card>
 					<Card>
 						<CardHeader className="flex-col gap-1">
-							<CardTitle>What it allows you to do on its node</CardTitle>
+							<CardTitle>What it allows you to do on its machine</CardTitle>
 							<CardDescription>Set by {peer.name}; read-only here.</CardDescription>
 						</CardHeader>
 						<CardContent className="pt-3">
@@ -195,7 +254,7 @@ function PeerDetail({ peer }: { peer: Peer }) {
 				loading={revoke.isPending}
 				description={
 					<>
-						This takes effect <strong>immediately</strong>: {peer.name} can no longer call this node, its capabilities are removed and its agents disappear from your directory. It is notified on a best-effort basis. You cannot undo it — to connect again you must pair with a new invitation.
+						This takes effect <strong>immediately</strong>: {peer.name} can no longer call this machine, its capabilities are removed and its agents disappear from your directory. It is notified on a best-effort basis. You cannot undo it — to connect again you must pair with a new invitation.
 					</>
 				}
 				onConfirm={() => revoke.mutate(peer.id, { onSettled: () => setConfirmRevoke(false) })}
@@ -216,7 +275,7 @@ function NameEditor({ peer, disabled }: { peer: Peer; disabled: boolean }) {
 					<Button
 						variant="ghost"
 						size="icon-sm"
-						aria-label="Rename node"
+						aria-label="Rename machine"
 						onClick={() => {
 							setName(peer.name);
 							setEditing(true);
@@ -240,7 +299,7 @@ function NameEditor({ peer, disabled }: { peer: Peer; disabled: boolean }) {
 				save();
 			}}
 		>
-			<Input autoFocus value={name} maxLength={64} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setEditing(false)} className="w-64 max-w-full" aria-label="Node name" />
+			<Input autoFocus value={name} maxLength={64} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Escape" && setEditing(false)} className="w-64 max-w-full" aria-label="Machine name" />
 			<Button type="submit" variant="ghost" size="icon-sm" aria-label="Save name">
 				<Check />
 			</Button>
@@ -260,7 +319,7 @@ function SharedWorkspaces({ peer }: { peer: Peer }) {
 			</CardHeader>
 			<CardContent className="pt-3">
 				{peer.workspaceIds.length === 0 ? (
-					<p className="text-[13px] text-subtle">No workspace is shared with this node.</p>
+					<p className="text-[13px] text-subtle">No workspace is shared with this machine.</p>
 				) : (
 					<ul className="flex flex-col gap-1">
 						{peer.workspaceIds.map((id) => {
@@ -294,7 +353,7 @@ function PeerAgents({ peer }: { peer: Peer }) {
 			</CardHeader>
 			<CardContent className="flex flex-col gap-2 pt-3">
 				{directory.isPending ? <Skeleton className="h-10" /> : null}
-				{directory.isSuccess && agents.length === 0 ? <p className="text-[13px] text-subtle">{peer.status === "revoked" ? "Agents of revoked nodes are not listed." : "No agents reported yet."}</p> : null}
+				{directory.isSuccess && agents.length === 0 ? <p className="text-[13px] text-subtle">{peer.status === "revoked" ? "Agents of revoked machines are not listed." : "No agents reported yet."}</p> : null}
 				{agents.map((a) => (
 					<div key={a.agentId} className="flex items-center gap-2.5 text-[13px]">
 						<StatusDot status={a.status} />

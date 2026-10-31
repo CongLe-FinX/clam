@@ -1,18 +1,21 @@
-import type { SharedInvite, SharedSession, SharedSessionDetail, SharedTopicEvent } from "@clam/contracts";
+import type { SharedInvite, SharedMessagesPage, SharedSession, SharedSessionDetail, SharedTopicEvent } from "@clam/contracts";
 import type { FastifyBaseLogger } from "fastify";
 import { ApiError } from "../http/errors.ts";
 import type { ServerContext } from "../context.ts";
 import { readNodeSettings } from "../services/settings.ts";
 import type { NewOutboxItem } from "../tasks/store.ts";
+import { AttachmentService } from "./attachments.ts";
 import { CheckpointService } from "./checkpoints.ts";
 import { DiscussionService } from "./discussion.ts";
 import { EpochService } from "./epochs.ts";
+import { SharedFilesService } from "./files.ts";
 import { SharedHostTools } from "./host-tools.ts";
 import { DEFAULT_SHARED_OPTIONS, type ChangedInfo, type SharedHub, type SharedOptions } from "./hub.ts";
 import { MirrorService } from "./mirror.ts";
 import { SHARED_OUTBOX_KINDS, sharedOutboxHandlers } from "./outbox.ts";
+import { RequestService } from "./requests.ts";
 import { SharingService } from "./sharing.ts";
-import { SharedStore, type InviteRow } from "./store.ts";
+import { decodeMessageCursor, MESSAGES_PAGE_DEFAULT, SharedStore, type InviteRow } from "./store.ts";
 import { SharedViews } from "./views.ts";
 import { TransferService } from "./transfers.ts";
 
@@ -32,10 +35,13 @@ export class SharedService implements SharedHub {
 	readonly views: SharedViews;
 	readonly sharing: SharingService;
 	readonly discussion: DiscussionService;
+	readonly attachments: AttachmentService;
 	readonly mirror: MirrorService;
+	readonly requests: RequestService;
 	readonly checkpoints: CheckpointService;
 	readonly epochs: EpochService;
 	readonly transfers: TransferService;
+	readonly files: SharedFilesService;
 	readonly hostTools: SharedHostTools;
 	private hostToolsRegistered = false;
 
@@ -50,10 +56,13 @@ export class SharedService implements SharedHub {
 		// Units only keep the hub; none may call another unit from its constructor.
 		this.sharing = new SharingService(this);
 		this.discussion = new DiscussionService(this);
+		this.attachments = new AttachmentService(this);
 		this.mirror = new MirrorService(this);
+		this.requests = new RequestService(this);
 		this.checkpoints = new CheckpointService(this);
 		this.epochs = new EpochService(this);
 		this.transfers = new TransferService(this);
+		this.files = new SharedFilesService(this);
 		this.hostTools = new SharedHostTools(this);
 	}
 
@@ -82,7 +91,9 @@ export class SharedService implements SharedHub {
 		this.ctx.sessions.setRemoveGuard((row) => this.sharing.removeGuard(row));
 		this.ctx.sessions.setPromptGuard((row) => this.transfers.guardPrompt(row));
 		this.discussion.start();
+		this.attachments.start();
 		this.mirror.start();
+		this.requests.start();
 		this.checkpoints.start();
 		this.epochs.start();
 		this.transfers.recover();
@@ -93,8 +104,10 @@ export class SharedService implements SharedHub {
 		await this.transfers.stop();
 		await this.epochs.stop();
 		await this.checkpoints.stop();
+		this.requests.stop();
 		await this.mirror.stop();
 		this.discussion.stop();
+		this.attachments.stop();
 	}
 
 	// ------------------------------------------------------------------ the hub
@@ -139,8 +152,14 @@ export class SharedService implements SharedHub {
 		return this.store.active().map((row) => this.views.shared(row));
 	}
 
-	detail(id: string): SharedSessionDetail {
-		return this.views.detail(this.store.get(id));
+	detail(id: string, options: { messageLimit?: number | undefined } = {}): SharedSessionDetail {
+		return this.views.detail(this.store.get(id), options);
+	}
+
+	/** One page of the group log, newest first by page and ascending inside it; `before` is a cursor an earlier page returned (400 when it is not one). */
+	messages(id: string, query: { before?: string | undefined; limit?: number | undefined }): SharedMessagesPage {
+		const row = this.store.get(id);
+		return this.views.messagesPage(row, { before: query.before === undefined ? undefined : decodeMessageCursor(query.before), limit: query.limit ?? MESSAGES_PAGE_DEFAULT });
 	}
 
 	invites(): SharedInvite[] {

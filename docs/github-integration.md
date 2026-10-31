@@ -169,26 +169,48 @@ Verified by the T2 smoke (process table sampled every 15 ms during clone and dur
 
 ## 9. `.clmesh/` layout (versioned in the repo)
 
-M2 implements the **bootstrap only**: `POST /projects/:id/clmesh/init` (`initClmesh` in `@clam/git-engine`) creates `.clmesh/README.md` and `.clmesh/config.json` (`{ "projectId", "schema": 1, "version": 1, "workspaceId" }`, recursively sorted keys, 2-space indent). Both contents pass `scanForSecrets` first (a hit writes nothing and answers `422 git_secret_detected`); existing files are never overwritten (`skipped`); the files are written but **not committed** — the user (or agent) reviews and commits them like any change, and the response carries the fresh `GitStatus`. The scanner combines provider-specific token rules (GitHub, AWS, Slack, Stripe, Anthropic/OpenAI/Google/npm/SendGrid keys, private-key blocks, URL credentials, bearer tokens, generic `password|secret|token = …` assignments with placeholder filtering) with a high-entropy detector; excerpts in findings are redacted. The remaining files below (memory, plans, tasks, handoffs, context) are written by M4–M7 through the same scanner.
+M2 implements the **bootstrap only**: `POST /projects/:id/clmesh/init` (`initClmesh` in `@clam/git-engine`) creates `.clmesh/README.md` and `.clmesh/config.json` (`{ "projectId", "schema": 1, "version": 1, "workspaceId" }`, recursively sorted keys, 2-space indent). Both contents pass `scanForSecrets` first (a hit writes nothing and answers `422 git_secret_detected`); existing files are never overwritten (`skipped`); the files are written but **not committed** — the user (or agent) reviews and commits them like any change, and the response carries the fresh `GitStatus`. The scanner combines provider-specific token rules (GitHub, AWS, Slack, Stripe, Anthropic/OpenAI/Google/npm/SendGrid keys, private-key blocks, URL credentials, bearer tokens, generic `password|secret|token = …` assignments with placeholder filtering) with a high-entropy detector; excerpts in findings are redacted. The context files are written by M6 through the same scanner; tasks and handoffs are planned.
 
 `.clmesh/` is the only directory CL Agent Mesh writes into the shared repository. Everything there is reviewable text and **must be safe to publish**:
 
 ```
 .clmesh/
-  README.md                     explains the directory; created on first export
-  config.json                   { "version": 1, "workspaceId": "...", "projectId": "...", "schema": 1 }
-  memory/
-    project.md                  approved project memory (shareable contexts only)
-    decisions/<yyyy-mm-dd>-<slug>.md
-  plans/
-    <taskId>.md                 agent plans and remaining TODOs
-  tasks/
-    <taskId>.json               task snapshot: title, status, owner node/epoch, links (no conversations)
-  handoffs/
-    <handoffId>.json            handoff manifest (schema in handoff-protocol.md; no secrets)
+  README.md                     explains the directory; created by the first export (or `POST /projects/:id/clmesh/init`)
+  config.json                   { "projectId": "...", "schema": 1, "version": 1, "workspaceId": "..." }
+  memory/<slug>.md              shareable contexts of type memory        — M6, implemented
+  decisions/<yyyy-mm-dd>-<slug>.md                       decision (dated by the context's creation)
+  plans/<slug>.md                                        plan
+  notes/<slug>.md                                        note
+  summaries/<slug>.md                                    summary
   context/
-    index.json                  { contextId, version, sha256, path } for context sync
+    index.json                  { "contexts": [{ id, path, sha256, version }], "schema": 1 } — sorted keys, ONE ENTRY PER LINE (mergeable)
+  tasks/<taskId>.json           task snapshot: title, status, owner node/epoch, links (no conversations)   — planned
+  handoffs/<handoffId>.json     handoff manifest (schema in handoff-protocol.md; no secrets)                — planned (M7)
 ```
+
+**Context export and import (M6, implemented).** Contexts reach the repository through two calls on a **git project** (a plain-folder project answers `409 not_a_git_project`; its contexts still sync to the other nodes of the workspace without any repository, [protocol §5.9](./agent-network-protocol.md#59-post-contextsync--contextsync)). Code: `apps/server/src/context/clmesh.ts` (files, scanner, working tree), `packages/context-engine/src/clmesh.ts` (paths, front matter, index — pure).
+
+* `POST /api/local/projects/:id/context/export` → `ContextExportResult {written, unchanged, removed, refused, status}`. Writes the **shareable** contexts of the project's workspace that belong to this project **or to the whole workspace** (`scope: project | workspace` in the front matter); private contexts and tombstones are never written. **Working tree only: it never stages and never commits** — the response carries the fresh `GitStatus` and the user (or an agent) reviews and commits like any change. It creates `README.md`/`config.json` if missing (`initClmesh`), writes each file atomically (temp + rename; `.clmesh` and its subdirectories must be real directories, never links) and removes the files of contexts that are no longer shareable or were deleted (`removed`; git history keeps them, as it always will). Every file is rendered first and passed through `scanForSecrets`: a hit **refuses that context** — nothing is written for it, `refused` names the context, the path, the rule and the line (never the secret) — and the other contexts are still written. A file keeps its path across renames (`contexts.git_path`); two contexts with one title get the id's last six characters appended.
+* **File format.** Front matter then the canonical markdown body; strings are JSON-quoted so a title can never break the block:
+
+```
+---
+id: ctx_0123456789abcdef
+type: memory
+title: "Coding style"
+version: 2
+sha256: <64 hex over title + body>
+base: 1:<sha256 of the previous version>
+scope: project
+shareable: true
+author: "human@Node A"
+updated: 2026-10-31T10:00:00.000Z
+---
+
+Use tabs. No semicolons.
+```
+
+* `POST /api/local/projects/:id/context/import` → `ContextImportResult {created, updated, unchanged, conflicts, skipped[]}`. Reads `memory|decisions|plans|notes|summaries/*.md` (regular files only, ≤ 1 MiB; links are not followed) — typically right after a pull — through the **same rules as a peer's push**: a file that still hashes to its `sha256` is that version (newer → the context is created or moves forward, older or equal → unchanged); a file **edited by hand** is a new version based on the version named in its front matter (it fast-forwards when that is the local head; when the local context has moved on since, it is a **conflict** — reported in `conflicts`, resolved by a person, never merged). `skipped` lists, with the reason, files with bad front matter or a type that does not match their directory, files that trip the secret scanner (imports are scanned too: a teammate's pasted token is not copied into every node), contexts of another workspace, and contexts that are private on this node. A context deleted locally is not brought back by an older file. Imported or updated contexts are then synced to the peers like any other change.
 
 Rules: no credentials, tokens, plaintext secrets, private conversation history, OMP session files, absolute local paths (paths are stored project-relative), hostnames of private tunnels beyond what the user opted to share, or temporary runtime data. Every file is written through a **secret scanner** (token/regex patterns + high-entropy detector) and refused on a hit. Writes are normal commits on the current branch (or a dedicated `clam/state` branch if configured) — never force-pushed. Merge conflicts in `.clmesh/` follow normal Git; JSON files are written with sorted keys and one entry per line to keep diffs mergeable. Add `.clmesh/` to `.gitattributes` with `merge=union` only for append-style indexes. The node-local state (sessions, outbox, secrets) lives in `<dataDir>`, never in the repo.
 

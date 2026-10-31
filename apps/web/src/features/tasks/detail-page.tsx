@@ -1,14 +1,14 @@
 import type { Task, TaskDetail } from "@clam/contracts";
 import { Link, useParams } from "@tanstack/react-router";
-import { ArrowRight, ChevronLeft, ExternalLink, ListChecks, MessagesSquare, OctagonAlert, RotateCw, SearchX, SquareTerminal, TriangleAlert, XCircle } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { ArrowRight, ChevronLeft, ExternalLink, ListChecks, MessagesSquare, OctagonAlert, RotateCw, SearchX, SquareTerminal, TriangleAlert, Waypoints, XCircle } from "lucide-react";
+import { lazy, type ReactNode, Suspense, useState } from "react";
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { useKeyboardInset } from "@/features/session/use-keyboard-inset";
 import { KeyValue } from "@/features/settings/components/section";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
 import { ApiError, errorMessage } from "@/lib/api";
 import { useProjects } from "@/lib/queries";
-import { cn, formatCost, formatDuration, relativeTime } from "@/lib/utils";
+import { cn, formatBytes, formatCost, formatDuration, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
@@ -23,6 +23,8 @@ import { APPROVAL_MODES, isTerminal, ownParty, repoSlug } from "./format.ts";
 import { useCancelTask, useRetryTask, useTask, useTaskLive } from "./hooks.ts";
 import { ResultCard } from "./result-card.tsx";
 import { Timeline } from "./timeline.tsx";
+
+const HandOffDialog = lazy(() => import("@/features/handoff/hand-off-dialog.tsx"));
 
 export default function TaskDetailPage() {
 	const { taskId } = useParams({ strict: false }) as { taskId?: string };
@@ -114,7 +116,7 @@ function TaskView({ detail }: { detail: TaskDetail }) {
 
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-background" style={kbInset > 0 ? { paddingBottom: kbInset } : undefined}>
-			<div className="flex h-12 shrink-0 items-center gap-1 border-b bg-surface-1 px-2 pt-safe">
+			<div className="flex h-[calc(3rem+env(safe-area-inset-top))] shrink-0 items-center gap-1 border-b bg-surface-1 px-2 pt-safe coarse:h-[calc(3.5rem+env(safe-area-inset-top))]">
 				<Button asChild variant="ghost" size="icon" aria-label="Back to tasks">
 					<Link to="/tasks">
 						<ChevronLeft />
@@ -175,11 +177,14 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
 
 function Header({ task }: { task: Task }) {
 	const [cancelOpen, setCancelOpen] = useState(false);
+	const [handOffOpen, setHandOffOpen] = useState(false);
 	const retry = useRetryTask(task.id);
 	const own = ownParty(task);
 	const offeredHere = task.direction === "incoming" && task.status === "offered";
 	const canCancel = !isTerminal(task.status) && !offeredHere;
 	const canRetry = task.direction === "outgoing" && (task.status === "failed" || task.status === "rejected" || task.status === "cancelled");
+	// Executor side only: the machine running the task can hand it over while it is in flight.
+	const canHandOff = task.direction === "incoming" && (task.status === "running" || task.status === "blocked");
 
 	return (
 		<Card>
@@ -190,7 +195,7 @@ function Header({ task }: { task: Task }) {
 					<Badge variant="outline" title="Ownership epoch (fencing token)">
 						epoch {task.epoch}
 					</Badge>
-					<Badge variant="outline">{task.deliverAs === "branch" ? "delivers a branch" : "delivers a summary"}</Badge>
+					<Badge variant="outline">{task.deliverAs === "branch" ? "delivers a branch" : task.deliverAs === "files" ? "delivers files" : "delivers a summary"}</Badge>
 					{task.direction === "outgoing" ? <DeliveryMark state={task.delivery.state} /> : null}
 				</div>
 				<h2 className="text-lg font-semibold leading-snug tracking-tight">{task.title}</h2>
@@ -223,9 +228,19 @@ function Header({ task }: { task: Task }) {
 							<XCircle /> Cancel task
 						</Button>
 					) : null}
+					{canHandOff ? (
+						<Button size="sm" variant="outline" onClick={() => setHandOffOpen(true)}>
+							<Waypoints /> Hand off…
+						</Button>
+					) : null}
 				</div>
 			</CardContent>
 			{cancelOpen ? <CancelDialog task={task} onClose={() => setCancelOpen(false)} /> : null}
+			{handOffOpen ? (
+				<Suspense fallback={null}>
+					<HandOffDialog task={task} onClose={() => setHandOffOpen(false)} />
+				</Suspense>
+			) : null}
 		</Card>
 	);
 }
@@ -241,7 +256,7 @@ function CancelDialog({ task, onClose }: { task: Task; onClose: () => void }) {
 					<DialogDescription>
 						{task.direction === "outgoing"
 							? `${task.executor.nodeName} stops the run. Work already committed on a task branch is kept there.`
-							: "The run on this node is stopped. Work already done stays in the project; nothing is deleted."}
+							: "The run on this machine is stopped. Work already done stays in the project; nothing is deleted."}
 					</DialogDescription>
 				</DialogHeader>
 				<Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} maxLength={2000} aria-label="Reason (optional)" placeholder="Reason (optional)" className="resize-none" />
@@ -263,7 +278,7 @@ function Notices({ task }: { task: Task }) {
 	if (task.direction === "outgoing" && task.delivery.state === "pending") {
 		items.push(
 			<Notice key="pending" tone="warning" icon={TriangleAlert}>
-				<strong>Not delivered yet.</strong> {task.executor.nodeName} has not received this task. It stays queued on this node and is sent when the node is reachable
+				<strong>Not delivered yet.</strong> {task.executor.nodeName} has not received this task. It stays queued on this machine and is sent when the machine is reachable
 				{task.delivery.attempts > 0 ? ` (attempt ${task.delivery.attempts}${task.delivery.lastError ? `: ${task.delivery.lastError}` : ""})` : ""}.
 			</Notice>,
 		);
@@ -271,7 +286,7 @@ function Notices({ task }: { task: Task }) {
 	if (task.direction === "outgoing" && task.delivery.state === "failed") {
 		items.push(
 			<Notice key="failed-delivery" tone="danger" icon={TriangleAlert}>
-				<strong>Delivery failed.</strong> {task.delivery.lastError ?? "The node did not accept the task."}
+				<strong>Delivery failed.</strong> {task.delivery.lastError ?? "The machine did not accept the task."}
 			</Notice>,
 		);
 	}
@@ -293,12 +308,18 @@ function Notices({ task }: { task: Task }) {
 	return items.length > 0 ? <div className="flex flex-col gap-2.5">{items}</div> : null;
 }
 
+const DELIVER_DESCRIPTION = {
+	branch: "A task branch pushed to GitHub (patch attached if the push is refused)",
+	files: "The changed files, returned as a bundle to preview and apply",
+	summary: "A written summary only",
+} as const;
+
 // ───────────────────────── details ─────────────────────────
 
 function MetaCard({ task }: { task: Task }) {
 	const projects = useProjects();
 	const project = projects.data?.find((p) => p.id === task.projectId);
-	const slug = repoSlug(task.repo.url);
+	const slug = task.repo ? repoSlug(task.repo.url) : null;
 	const c = task.constraints;
 	const approval = c.approvalMode ? APPROVAL_MODES.find((m) => m.value === c.approvalMode)?.label : undefined;
 	const duration = task.startedAt ? Date.parse(task.finishedAt ?? new Date().toISOString()) - Date.parse(task.startedAt) : null;
@@ -309,7 +330,7 @@ function MetaCard({ task }: { task: Task }) {
 			</CardHeader>
 			<CardContent className="pt-1">
 				<dl className="divide-y">
-					<KeyValue label="Project (this node)">
+					<KeyValue label="Project (this machine)">
 						{project ? (
 							<Link to="/projects/$projectId" params={{ projectId: project.id }} className="text-accent hover:underline">
 								{project.name}
@@ -318,16 +339,29 @@ function MetaCard({ task }: { task: Task }) {
 							<span className="text-subtle">{task.projectId ? "Unknown project" : "Not chosen yet"}</span>
 						)}
 					</KeyValue>
-					<KeyValue label="Repository">
-						<a href={task.repo.url} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-accent hover:underline">
-							{slug ?? task.repo.url} <ExternalLink className="size-3" aria-hidden />
-						</a>
-					</KeyValue>
-					<KeyValue label="Base branch" mono>
-						{task.repo.branch ?? <span className="font-sans text-subtle">repository default</span>}
-						{task.repo.commit ? <span className="ml-2 text-subtle">@ {task.repo.commit.slice(0, 8)}</span> : null}
-					</KeyValue>
-					<KeyValue label="Deliver as">{task.deliverAs === "branch" ? "A task branch pushed to GitHub (patch attached if the push is refused)" : "A written summary only"}</KeyValue>
+					{task.repo ? (
+						<>
+							<KeyValue label="Repository">
+								<a href={task.repo.url} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-accent hover:underline">
+									{slug ?? task.repo.url} <ExternalLink className="size-3" aria-hidden />
+								</a>
+							</KeyValue>
+							<KeyValue label="Base branch" mono>
+								{task.repo.branch ?? <span className="font-sans text-subtle">repository default</span>}
+								{task.repo.commit ? <span className="ml-2 text-subtle">@ {task.repo.commit.slice(0, 8)}</span> : null}
+							</KeyValue>
+						</>
+					) : (
+						<KeyValue label="Repository">
+							<span className="text-subtle">No repository — folder task</span>
+						</KeyValue>
+					)}
+					{task.inputFiles ? (
+						<KeyValue label="Input files">
+							{task.inputFiles.fileCount} {task.inputFiles.fileCount === 1 ? "file" : "files"} · {formatBytes(task.inputFiles.size)}
+						</KeyValue>
+					) : null}
+					<KeyValue label="Deliver as">{DELIVER_DESCRIPTION[task.deliverAs]}</KeyValue>
 					<KeyValue label="Constraints">
 						{c.maxCostUsd === undefined && !approval && !c.deadline ? (
 							<span className="text-subtle">None</span>

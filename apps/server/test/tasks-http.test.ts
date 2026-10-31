@@ -241,7 +241,7 @@ describe("artifact download", () => {
 		const binary = await a.ctx.tasks.artifacts.add(taskId, { name: "blob.bin", mediaType: "application/octet-stream", bytes });
 		const unlisted = await a.ctx.tasks.artifacts.add(taskId, { name: "secret-notes.txt", mediaType: "text/plain", bytes: Buffer.from("not part of the result") });
 		const entry = (row: { id: string; name: string; sha256: string; size: number }) => ({ artifactId: row.id, name: row.name, sha256: row.sha256, size: row.size });
-		const result: TaskResult = { summary: "done", autoCompleted: false, branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [entry(stored), entry(binary)] };
+		const result: TaskResult = { summary: "done", autoCompleted: false, branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [entry(stored), entry(binary)], files: null };
 		a.ctx.tasks.store.update(taskId, { result });
 		b.ctx.tasks.store.update(taskId, { result });
 

@@ -83,6 +83,8 @@ export interface WsHandshake {
 /** Minimal client frames: masked text out, unmasked frames in (text/close). */
 export class RawWs {
 	readonly texts: string[] = [];
+	/** Binary frames received, in order. */
+	readonly binaries: Buffer[] = [];
 	closeCode: number | null = null;
 	ended = false;
 	private buffer = Buffer.alloc(0);
@@ -125,17 +127,37 @@ export class RawWs {
 			const payload = this.buffer.subarray(offset, offset + length);
 			this.buffer = this.buffer.subarray(offset + length);
 			if (opcode === 0x1) this.texts.push(payload.toString("utf8"));
+			if (opcode === 0x2) this.binaries.push(Buffer.from(payload));
 			if (opcode === 0x8) this.closeCode = payload.length >= 2 ? payload.readUInt16BE(0) : 1005;
 			this.wake();
 		}
 	}
 
 	send(message: unknown): void {
-		const payload = Buffer.from(JSON.stringify(message), "utf8");
+		this.frame(0x1, Buffer.from(JSON.stringify(message), "utf8"));
+	}
+
+	/** One masked binary frame (terminal input). */
+	sendBinary(data: Buffer | string): void {
+		this.frame(0x2, Buffer.from(data));
+	}
+
+	private frame(opcode: number, payload: Buffer): void {
 		const mask = randomBytes(4);
-		const header = payload.length < 126 ? Buffer.from([0x81, 0x80 | payload.length]) : Buffer.from([0x81, 0x80 | 126, payload.length >> 8, payload.length & 0xff]);
+		const first = 0x80 | opcode;
+		const header = payload.length < 126 ? Buffer.from([first, 0x80 | payload.length]) : Buffer.from([first, 0x80 | 126, payload.length >> 8, payload.length & 0xff]);
 		const masked = Buffer.from(payload.map((byte, i) => byte ^ mask[i % 4]!));
 		this.socket.write(Buffer.concat([header, mask, masked]));
+	}
+
+	/** The last few binary frames, decoded: cheap to poll while a large stream is still arriving. */
+	get tail(): string {
+		return Buffer.concat(this.binaries.slice(-4)).toString("utf8");
+	}
+
+	/** Everything received as binary frames, decoded. */
+	get output(): string {
+		return Buffer.concat(this.binaries).toString("utf8");
 	}
 
 	async until(done: () => boolean, what: string, timeoutMs = 5_000): Promise<void> {

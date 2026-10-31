@@ -39,6 +39,7 @@ erDiagram
   workspaces ||--o{ contexts : owns
   projects ||--o{ contexts : owns
   contexts ||--o{ context_snapshots : versions
+  contexts ||--o{ context_replicas : "acknowledged by peers"
   projects ||--o{ git_sync_states : tracks
   agent_sessions ||--o{ provider_usage : "accounted in"
   peers ||--o{ peer_agents : exposes
@@ -114,9 +115,10 @@ PK `(workspace_id, member_id)`. `member_id` is the node id of the owner or of a 
 | `path` | text | NOT NULL — absolute local working directory |
 | `repository_id` | text | NULL — GitHub repo id (spec `repository_id`); deliberately **not** an FK so a project keeps its link when the cached repo row is evicted |
 | `repository` | text | NULL — JSON `RepositoryRef` (owner, name, externalId, htmlUrl, defaultBranch, accountId) |
+| `managed` | integer (boolean) | NOT NULL DEFAULT 0 — CL Agent Mesh created the folder under `<dataDir>/projects/<id>` (the user gave no path); only such a folder is ever deleted with the project, and only on request (`DELETE …?deleteFiles=true`) — *0006* |
 | `created_at`, `updated_at` | text | NOT NULL |
 
-Index `projects_workspace_idx(workspace_id)`.
+Index `projects_workspace_idx(workspace_id)`. **`Project.vcs` (`git`/`none`) is not stored:** it is derived live from the folder (a `.git` entry at its root), so `git init` or removing the repository is reflected immediately.
 
 ### 2.6 `agents`
 
@@ -236,7 +238,7 @@ Indexes on `created_at` and `type`.
 
 > **Authoritative definition:** `packages/database/src/schema.ts` and `packages/database/migrations/*.sql` win over this document; fix the document in the same change when they diverge.
 
-`git_sync_states` (M2), the network tables (M3, §3.1) and the task tables (M4, §3.2) are implemented too; not yet: `handoffs`, `contexts`, `context_snapshots`, FTS5.
+`git_sync_states` (M2), the network tables (M3, §3.1), the task tables (M4, §3.2), the context tables with FTS5 (M6, §3.3) and the handoff tables (M7, §3.4) are implemented too.
 
 ---
 
@@ -485,6 +487,20 @@ shared_mirror_state(                      -- participant: where the mirror strea
 * **Outbox (M4) reuse**: no new outbox table. Shared kinds `shared.invite | decision | message | checkpoint | snapshot_ack | driver | membership` are rows of `outbox`; `task_id` carries the ordering key `<sharedId>:<peerId>` and `ref_id` the entity (invite id, message id, `<sharedId>:<seq>`).
 * **Files** are not in the database: snapshots live at `<dataDir>/shared/<shared id>/snapshots/<seq>.tar` (0600, directories 0700), referenced by `shared_checkpoints.snapshot_path`.
 
+### 3.2b Work without git — migration `0006_nogit` (implemented)
+
+SQLite cannot relax a `NOT NULL`, so the migration rebuilds the four tables whose repository columns become nullable (see §5 for how the runner keeps child rows). Every existing row keeps its values (`vcs` defaults to `git`, the new JSON columns to NULL).
+
+| Table | Change |
+| --- | --- |
+| `projects` | `managed` boolean (§2.5). `vcs` is **derived**, not stored. |
+| `tasks` | `repo_url` is now NULL-able: a task without a git repository (`deliver_as` `summary` without a linked repo, or `files`) has no repo columns. `deliver_as` also takes `files`. New `input_files` (JSON `{artifactId, sha256, size, fileCount}`, NULL = none): on the **sender** the bundle is stored as one of the task's `artifacts` rows (`input-files.tar.gz`); on the **executor** it is the announcement the sender made, and the downloaded copy is an `artifacts` row under the same id. The result bundle of a `files` task is `result.files` inside the existing `result` JSON (an `artifacts` row on the executor, cached on the sender under the executor's artifact id). The executor-private base manifest lives in `<dataDir>/artifacts/<taskId>/.base-manifest.json`, not in the database. |
+| `shared_sessions` | `vcs` (`git` default / `files`); `repo_url`, `branch` NULL-able (files mode has neither); `rescue_files` JSON `{path, sha256, size, fileCount, paths[≤200], epoch, at}` — the former driver's work after its last checkpoint (or the local versions a forced takeover replaced), bundled; the file is under `<dataDir>/shared/<id>/rescue/`; `meta.appliedFilesSeq` records the checkpoint whose bundle this node last made or applied. |
+| `shared_invites` | `vcs`; `repo_url`, `repo_branch` NULL-able. |
+| `shared_checkpoints` | `branch` NULL-able; `files` JSON `{sha256, size, fileCount}` (metadata on every node), `files_path` (relative to `<dataDir>/shared`, 0600; NULL = this node does not hold the bundle). Files mode: `commit` NULL and `pushed` false. |
+
+Files outside the database: folder bundles `<dataDir>/shared/<id>/files/<seq>.tar.gz`, `synced-manifest.json` (the manifest of the folder as this node last made or applied a checkpoint bundle — the base that separates local edits from shared changes) and `rescue/<epoch>-<label>.tar.gz`.
+
 ### 3.3 Context and Git sync — M2 / M6
 
 ```
@@ -502,47 +518,104 @@ git_sync_states(                                   -- M2 (migration 0002_git, im
 
 `git_sync_states` is a **cache of observed Git state**, never the source of truth. The server upserts the row of the project's *current branch* whenever it reads status or finishes a fetch / pull / push (`apps/server/src/services/git-service.ts`): `last_fetched_at` comes from `FETCH_HEAD`'s mtime, `last_pushed_at` / `last_pulled_at` are set only by a successful push / fast-forward pull. Rows disappear with their project (`ON DELETE CASCADE`). Per-project commit-identity overrides are stored in `settings` under `git.identity.<projectId>`, and the numeric GitHub user id (needed for the `<id>+<login>@users.noreply.github.com` address) under `github.userId.<connectionId>`.
 
+#### Context — migration `0007_context` (M6, implemented)
+
 ```
-contexts(                                          -- M6
-  id text PK, workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
-  project_id text REFERENCES projects(id) ON DELETE CASCADE,   -- NULL = workspace-level memory
-  type text NOT NULL,        -- memory | plan | decision | summary
-  title text NOT NULL, shareable integer NOT NULL DEFAULT 0,   -- only shareable=1 may be written to .clmesh/
+contexts(                                          -- the HEAD of every context (title/body denormalised for FTS5)
+  seq integer PRIMARY KEY AUTOINCREMENT,           -- the FTS5 rowid; an explicit INTEGER PRIMARY KEY because a plain rowid may change on VACUUM
+  id text NOT NULL UNIQUE,                         -- ctx_<16 hex>
+  workspace_id text NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  project_id text REFERENCES projects(id) ON DELETE CASCADE,   -- local project; NULL = workspace-wide, or a synced context whose project does not exist here (see project_key)
+  project_key text,                                -- cross-node project identity: github:<owner>/<name> (linked repository, lowercase) | name:<project name> | NULL (workspace-wide)
+  origin_node_id text NOT NULL,                    -- the node that created it (only it may stop sharing it)
+  type text NOT NULL,                              -- memory | plan | decision | summary | note
+  title text NOT NULL, body text NOT NULL,         -- head text; '' for a tombstone
+  shareable integer NOT NULL DEFAULT 0,            -- only shareable contexts leave the node (peer sync, .clmesh/)
+  deleted_at text,                                 -- tombstone of a deleted shareable context (hidden everywhere; kept so the deletion replicates)
+  version integer NOT NULL, sha256 text NOT NULL,  -- the head version
+  author text NOT NULL,                            -- JSON ContextAuthor of the head
+  conflict text,                                   -- JSON: the competing version of another node while in conflict
+  git_path text,                                   -- path under .clmesh/ of the last export/import
   created_at text NOT NULL, updated_at text NOT NULL)
-  INDEX(workspace_id, project_id, type)
+  INDEX(workspace_id, project_id, type), INDEX(workspace_id, project_key), INDEX(workspace_id, shareable)
 
-context_snapshots(                                 -- M6
+context_snapshots(                                 -- every immutable version (own, received from peers, competing versions of a conflict)
   id text PK, context_id text NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
-  version integer NOT NULL, body text NOT NULL, sha256 text NOT NULL,
-  git_path text,             -- path under .clmesh/ when exported
-  created_by text, created_at text NOT NULL,
-  UNIQUE(context_id, version))
+  version integer NOT NULL, sha256 text NOT NULL,  -- (version, sha256) IS the version: the same text written as the same number is the same version
+  title text NOT NULL, body text NOT NULL, deleted integer NOT NULL DEFAULT 0,   -- deleted = tombstone version
+  base text,                                       -- JSON {version, sha256}: the version this was edited from (NULL for version 1)
+  merged text NOT NULL DEFAULT '[]',               -- JSON [{version, sha256}]: versions this one resolves (conflict resolution)
+  ancestors text NOT NULL DEFAULT '[]',            -- JSON ["<version>:<sha256>", …] nearest first, at most 256: decides fast-forward vs conflict without the history
+  author text NOT NULL, origin_node_id text NOT NULL, git_path text, created_at text NOT NULL,
+  UNIQUE(context_id, version, sha256), INDEX(context_id, sha256))
 
-context_fts  -- FTS5 virtual table over context_snapshots.body + contexts.title (external-content, triggers keep it in sync)
+context_replicas(                                  -- the head a peer node last acknowledged for a context
+  context_id text NOT NULL REFERENCES contexts(id) ON DELETE CASCADE,
+  peer_id text NOT NULL REFERENCES peers(id) ON DELETE CASCADE,
+  version integer NOT NULL, sha256 text NOT NULL,
+  state text NOT NULL DEFAULT 'holds',             -- holds | behind | ahead | conflict (the peer's answer relative to OUR head; reset to 'behind' whenever our head moves)
+  updated_at text NOT NULL, PRIMARY KEY (context_id, peer_id), INDEX(peer_id))
+
+context_fts  -- FTS5 external-content table over contexts.title/body (content='contexts', content_rowid='seq', unicode61 remove_diacritics 2, prefix '2 3 4'); three triggers keep it in step
 ```
 
-### 3.4 Handoffs — M7
+* **`context_fts` is custom SQL**, appended to the generated `migrations/0007_context.sql`: drizzle cannot express FTS5 tables, and because the snapshot (`meta/0007_snapshot.json`) never mentions them `drizzle-kit generate` neither drops nor recreates them. The triggers index only live contexts (`WHEN … deleted_at IS NULL`); an FTS5 external-content `'delete'` must receive exactly the values that were indexed, which is why `contexts_fts_au` deletes with the OLD values and re-inserts the NEW ones only for a live row. Only the HEAD of each context is indexed (searching old versions would return stale text); the earlier plan of indexing `context_snapshots.body` was dropped. Search is bm25 with the title weighing eight times the body.
+* **Versions are immutable.** An edit inserts a snapshot and moves the head columns of `contexts` in one transaction. A deleted shareable context keeps its row (`deleted_at`) and a tombstone snapshot; the text of its older snapshots is blanked (hashes stay, lineage checks still work). A private context is hard-deleted (cascade).
+* **Lineage, not clocks.** `base`/`merged`/`ancestors` let a receiver tell a fast-forward (its head is in the incoming ancestry) from concurrent work without holding the history; a resolution of a conflict lists both versions it resolves, so it fast-forwards everywhere ([agent-network-protocol.md §5.9](./agent-network-protocol.md#59-post-contextsync--contextsync)).
+* **Project identity.** Local project ids differ per node, so a project-level context carries `project_key`; the receiving node binds it to its own project with the same key and keeps `project_id` NULL (shown as workspace-wide) while it has none.
+* `context_replicas` is a cache of what peers acknowledged (so `Context.sync.syncedTo` and the next push are cheap); losing it only costs one have-index round per peer.
+
+### 3.4 Handoffs — M7 (implemented, migration `0009_handoff`)
+
+Defined in `packages/database/src/schema-handoff.ts`. Each node keeps its **own side** of a handoff: one `handoffs` row per `(handoff, role)`, `role = source | target`, with its own state machine from `@clam/handoff-engine` ([handoff-protocol.md §3](./handoff-protocol.md#3-state-machines)). `kind = session` rows record an M5 shared-session hand-over/takeover so the Handoff Center shows it.
 
 ```
 handoffs(
-  id text PK, task_id text NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  source_node text NOT NULL, target_node text NOT NULL,
-  role text NOT NULL,            -- source | target (a node stores its own side)
-  status text NOT NULL,          -- states in handoff-protocol.md
-  epoch integer NOT NULL,        -- the NEW ownership epoch this handoff would establish
-  manifest text NOT NULL, manifest_sha256 text NOT NULL,   -- JSON, no secrets
-  target_session_id text,        -- new local agent_sessions.id on the target
-  failure_code text, failure_detail text,
-  ack_at text, created_at text NOT NULL, updated_at text NOT NULL,
-  deadline_at text)
-  INDEX(task_id); INDEX(status); UNIQUE(task_id, epoch)
+  id text PK,                         -- hnd_<ULID>, chosen by the source; the wire idempotency key of the handoff
+  kind text NOT NULL,                 -- task | session
+  role text NOT NULL,                 -- source | target
+  state text NOT NULL,                -- engine state of THIS side (handoff-protocol.md §3)
+  peer_id text NOT NULL,              -- the other node of this side (target for a source row, source for a target row)
+  subject_id text NOT NULL,           -- M4 task id (kind task) / shared session id (kind session)
+  title text NOT NULL, workspace_id text NOT NULL, project_id text,   -- project_id: the task's project (source) / the restored or chosen project (target)
+  source_node_id/_name, source_agent_id/_name, source_session_id,
+  target_node_id/_name, target_agent_id/_name, target_session_id,
+  from_epoch integer NOT NULL, to_epoch integer NOT NULL,             -- to_epoch = from_epoch + 1
+  vcs text NOT NULL DEFAULT 'none',   -- git | files | none: how the files travel
+  include_transcript integer NOT NULL DEFAULT 0,
+  manifest text, manifest_sha256 text,        -- sealed manifest as built (source) / as received (target); JSON, no secrets
+  conversation_summary text, environment text, setup_fingerprint text,
+  failure_code text, failure_detail text, failure_step integer,
+  expires_at text, deadline_at text, ack_at text,   -- offer lifetime, restore deadline (accept → ack, extendable), durable ack time
+  fencing_token text,                 -- <taskId>:<epoch>:<sig> signed by the target
+  correlation_id text NOT NULL, meta text NOT NULL DEFAULT '{}',   -- meta: node-private bookkeeping (work folder, restore branch, setup report, ...)
+  created_at text NOT NULL, updated_at text NOT NULL)
+  UNIQUE (subject_id, to_epoch, role) WHERE state NOT IN ('prepare_failed','rejected','expired','cancelled','failed')
+  INDEX(role, state); INDEX(peer_id); INDEX(subject_id)
 
-handoff_steps(                   -- durable step log used for crash recovery
-  handoff_id text NOT NULL REFERENCES handoffs(id) ON DELETE CASCADE,
-  step integer NOT NULL, name text NOT NULL, state text NOT NULL,  -- pending | done | failed
-  detail text, completed_at text,
-  PRIMARY KEY (handoff_id, step))
+handoff_steps(                        -- the ten target steps (§4), durable: a restart resumes at the first step that is not done
+  handoff_id → handoffs ON DELETE CASCADE, n integer, name text, state text,   -- pending | running | done | failed | skipped
+  detail text, at text, PRIMARY KEY (handoff_id, n))
+
+handoff_events(                       -- the timeline of this side; seq is gap-free per handoff
+  handoff_id → handoffs ON DELETE CASCADE, seq integer, at text, node_id text, state text, summary text,
+  PRIMARY KEY (handoff_id, seq))
+
+handoff_setup(                        -- commands the target wants to run (step 5)
+  id text PK, handoff_id → handoffs ON DELETE CASCADE, ord integer, command text, cwd text,
+  purpose text,                       -- install | setup | check
+  state text,                         -- pending_approval | approved | denied | running | succeeded | failed | skipped
+  exit_code integer, output_tail text, started_at text, finished_at text)
+
+handoff_artifacts(                    -- files of a handoff held on this node (folder bundle, working-tree patch, base manifest, opt-in transcript pack)
+  handoff_id → handoffs ON DELETE CASCADE, artifact_id text, name text, kind text, sha256 text, size integer, path text, created_at text,
+  PRIMARY KEY (handoff_id, artifact_id))
+
+tasks + fenced integer NOT NULL DEFAULT 0          -- this node released the task (or saw a higher epoch): its sessions are never started/resumed/prompted again
+tasks + highest_seen_epoch integer NOT NULL DEFAULT 0   -- boot fence scan (§8.1)
 ```
+
+Deviations from the original plan: `UNIQUE(task_id, epoch)` is a **partial** unique index on `(subject_id, to_epoch, role)` — a handoff that ended without consuming the epoch (rejected, expired, cancelled, failed, prepare_failed) frees it for the next attempt, while `reclaimed` (the tombstone epoch) keeps it. `handoff_steps` carries `n/at` instead of `step/completed_at`. `task_assignments`/`task_checkpoints` are not tables: the executor's agent and project stay columns of `tasks`, and a checkpoint is the handoff's manifest + artifacts. Ownership is `tasks.epoch` (the epoch this node owns) + `tasks.highest_seen_epoch` + `tasks.fenced` instead of an `owner_epoch` column.
 
 ### 3.5 Usage — M1 (done) → M9 (analytics)
 
@@ -561,18 +634,19 @@ M1 already ships `provider_usage` (per-model rows with provenance `source`) and 
 | agents | `agents` | M1 |
 | agent_sessions | `agent_sessions` | M1 |
 | tasks | `tasks` | M4 (implemented) |
-| task_assignments | columns of `tasks` (`executor_agent_id`, `project_id`) | M4 (table deferred to M7) |
+| task_assignments | columns of `tasks` (`executor_agent_id`, `project_id`) | M4 (no table; see §3.4) |
 | task_events | `task_events` | M4 (implemented) |
-| task_checkpoints | `task_checkpoints` | M7 |
-| handoffs | `handoffs` (+ `handoff_steps`) | M7 |
-| contexts | `contexts` | M6 |
-| context_snapshots | `context_snapshots` | M6 |
+| task_checkpoints | not a table: the handoff manifest + `handoff_artifacts` | M7 (implemented) |
+| handoffs | `handoffs` (+ `handoff_steps`, `handoff_events`, `handoff_setup`, `handoff_artifacts`) | M7 (implemented, §3.4) |
+| contexts | `contexts` | M6 (implemented, §3.3) |
+| context_snapshots | `context_snapshots` | M6 (implemented) |
+| *(added, M6)* | `context_replicas`, `context_fts` (FTS5) | M6 (implemented) |
 | github_connections | `github_connections` | M1 |
 | github_repositories | `github_repositories` | M1 |
 | git_sync_states | `git_sync_states` | M2 |
 | *(added, M5)* | `shared_sessions`, `shared_participants`, `shared_invites`, `shared_messages`, `shared_checkpoints`, `shared_mirror_messages`, `shared_mirror_state` | M5 (implemented, §3.2a) |
 | provider/usage tables (spec line truncated at "provide…") | `provider_usage`, `usage_buckets` | M1 |
-| *(added)* | `settings`, `node_events` (M1), `peers`, `peer_agents`, `pairing_invitations`, `pairing_requests`, `pairing_joins`, `nonce_log`, `network_events` (M3), `task_messages`, `outbox`, `idempotency_records`, `artifacts` (M4), `handoff_steps` (M7) | as listed |
+| *(added)* | `settings`, `node_events` (M1), `peers`, `peer_agents`, `pairing_invitations`, `pairing_requests`, `pairing_joins`, `nonce_log`, `network_events` (M3), `task_messages`, `outbox`, `idempotency_records`, `artifacts` (M4), `handoff_steps`, `handoff_events`, `handoff_setup`, `handoff_artifacts` (M7) | as listed |
 
 ---
 
@@ -585,7 +659,7 @@ M1 already ships `provider_usage` (per-model rows with provenance `source`) and 
 1. Create the parent directory, open the file, set `journal_mode=WAL`, `foreign_keys=ON`, `busy_timeout` (5 s), `synchronous=NORMAL`.
 2. Decide whether migrations are pending **on an existing non-empty database**: the journal (`migrations/meta/_journal.json`) has an entry newer than the last row of drizzle's `__drizzle_migrations` ledger (or there is no ledger yet). A brand-new file is never backed up.
 3. If so, take a consistent snapshot with `VACUUM INTO '<file>.pre-migrate-<UTC timestamp>.bak'` (it includes WAL contents, never overwrites an existing file, keeps the newest 3). If the snapshot fails the migration is **not attempted**. Snapshots sit **next to the database file** (`<dataDir>/clam.db.pre-migrate-….bak`).
-4. Apply pending migrations through drizzle's migrator (`migrate`). On failure the connection is closed and boot aborts with the error; the snapshot is untouched.
+4. Apply pending migrations through drizzle's migrator (`migrate`) **with `foreign_keys` switched OFF** around it (SQLite ignores that pragma inside a transaction, which is where the migrator runs, so it is set by `openDatabase` itself): a table rebuild (`CREATE __new_x` → copy → `DROP x` → rename, how SQLite relaxes a `NOT NULL`) would otherwise cascade-delete every child row of the dropped table. Afterwards `PRAGMA foreign_key_check` must not report more violations than before (else boot aborts and the snapshot is the way back) and enforcement is switched back ON. On failure the connection is closed and boot aborts with the error; the snapshot is untouched. A generated `INSERT … SELECT` of a rebuild must only name columns the old table has (drizzle-kit gets this wrong when a rebuild also adds a column; `0006` was corrected by hand).
 
 **Not implemented:** a downgrade guard (refusing to start when the database records a migration newer than the binary knows). Until it exists, running an older build against a newer database is unsupported.
 
@@ -606,10 +680,13 @@ M1 already ships `provider_usage` (per-model rows with provenance `source`) and 
 | M3 | `0003_network` (implemented; the pre-migration backup still covers it, and `migrations.test.ts` upgrades a database made by the previous build) | `peers`, `peer_agents`, `pairing_invitations`, `pairing_requests`, `pairing_joins`, `nonce_log`, `network_events`; `workspace_members` gains `permissions`/`granted_by`/`revoked_at`; tunnel config in `settings` (`network.tunnel`) |
 | M4 | `0004_tasks` (implemented; `migrations.test.ts` upgrades a database that stopped at `0003` and checks the pre-migrate snapshot) | `tasks`, `task_events`, `task_messages`, `outbox`, `idempotency_records`, `artifacts`; `peers.auto_accept_tasks`. `task_assignments`/`task_checkpoints` move to M7 |
 | M5 | `0005_shared` (implemented; additive) | `shared_sessions`, `shared_participants`, `shared_invites`, `shared_messages`, `shared_checkpoints`, `shared_mirror_messages`, `shared_mirror_state`; `agent_sessions` gains `kind`, `shared_session_id`, `moved_to` |
-| M6 | `0006_context` | `contexts`, `context_snapshots`, `context_fts` |
-| M7 | `0007_handoff` | `handoffs`, `handoff_steps`; `tasks.owner_epoch` enforced |
-| M8 | `0008_orchestration` | plan/dependency edges between tasks (e.g. `task_dependencies`) |
-| M9 | `0009_usage_history` | extends `provider_usage` / `usage_buckets` with quota snapshots and budgets as needed |
+| M5+ (no-git work) | `0006_nogit` (implemented; rebuilds `tasks`, `shared_sessions`, `shared_invites`, `shared_checkpoints`; `migrations.test.ts` upgrades a database that stopped at `0005` with task/shared child rows and proves none is lost) | `projects.managed`; `tasks.repo_url` nullable + `tasks.input_files`; `shared_sessions` / `shared_invites` `vcs` + nullable repo/branch; `shared_checkpoints.branch` nullable + `files`, `files_path`; `shared_sessions.rescue_files` |
+| M6+ (chats) | `0008_chats` (implemented; plain `ALTER TABLE` + `CREATE TABLE`) | `projects.origin` (`user` default / `chat`); `shared_attachments` (`id`, `shared_session_id` → cascade, `message_id` NULL until posted, `name`, `mime_type`, `size`, `sha256`, `origin_node_id`, `stored` bool = this node holds the bytes in `<dataDir>/attachments/<sha256>`, `copied_path` = where this node's agent got a copy, `created_at`) |
+| M6 | `0007_context` (implemented; plain `CREATE TABLE`s plus custom FTS5 SQL; `packages/database/test/context-migration.test.ts` upgrades a database that stopped at `0006` and checks the pre-migration backup) | `contexts`, `context_snapshots`, `context_replicas`, `context_fts` (+ 3 triggers) |
+| M7 | `0009_handoff` (implemented; plain `CREATE TABLE`s + `ALTER TABLE tasks ADD`; `migrations.test.ts` upgrades a database that stopped at `0008`) | `handoffs` (partial unique `(subject_id, to_epoch, role)`), `handoff_steps`, `handoff_events`, `handoff_setup`, `handoff_artifacts`; `tasks.fenced`, `tasks.highest_seen_epoch` |
+| Chat (rich output) | `0010_turn_outputs` (implemented; plain `CREATE TABLE`) | `turn_outputs` (`id`, `session_id` → `agent_sessions` cascade, `project_id`, `anchor_message_id` / `anchor_timestamp` = the turn's last assistant message, `started_at` / `ended_at` epoch ms, `files` JSON = the capped `TurnOutputFile[]` the turn created or modified in the project folder, `truncated`, `created_at`; index `(session_id, ended_at)`). Written by `TurnOutputService` (`apps/server/src/services/turn-outputs.ts`), served by `GET /sessions/:id/outputs`, pushed as the `turn_outputs` session event. |
+| M8 | `0011_orchestration` (number moves up: `0010` is taken by `turn_outputs`) | plan/dependency edges between tasks (e.g. `task_dependencies`) |
+| M9 | `0012_usage_history` | extends `provider_usage` / `usage_buckets` with quota snapshots and budgets as needed |
 | M10 | — | none required: `agents.runtime` is validated by contracts, not a SQL CHECK |
 
 (The exact tag numbers are assigned by drizzle-kit at generation time; the table shows the intended grouping.)

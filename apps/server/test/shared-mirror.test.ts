@@ -124,7 +124,7 @@ describe("live streaming", () => {
 });
 
 describe("read-only", () => {
-	it("every write to the mirror is refused: prompt, abort, model, thinking, restart, answering a request", async () => {
+	it("every write to the mirror is refused: prompt, abort, model, thinking, restart; an answer is forwarded to the driver, which refuses what is not pending", async () => {
 		const { mirrorId } = await mirrored();
 		const before = shape(await transcript(pair.b, mirrorId));
 		const refused: Array<[string, { status: number; body: { error: { code: string } } }]> = [
@@ -134,12 +134,15 @@ describe("read-only", () => {
 			["model", await api(pair.b).post(`/sessions/${mirrorId}/model`, { selector: "anthropic/claude-sonnet" })],
 			["thinking", await api(pair.b).post(`/sessions/${mirrorId}/thinking`, { level: "high" })],
 			["restart", await api(pair.b).post(`/runtime/${mirrorId}/restart`)],
-			["ui response", await api(pair.b).post(`/sessions/${mirrorId}/ui-response`, { requestId: "ui-1", value: true })],
 		];
+		// (answers are the one thing a mirror forwards: see shared-answers.test.ts)
 		for (const [what, res] of refused) {
 			expect(res.status, what).toBe(409);
 			expect(res.body.error.code, what).toBe("session_read_only");
 		}
+		const ghost = await api(pair.b).post<{ error: { code: string } }>(`/sessions/${mirrorId}/ui-response`, { requestId: "ui-1", value: true });
+		expect(ghost.status).toBe(409);
+		expect(ghost.body.error.code).toBe("request_closed");
 		// nothing was sent to a runtime, nothing was added, nothing was started
 		expect(shape(await transcript(pair.b, mirrorId))).toEqual(before);
 		expect((await api(pair.b).get<Array<{ sessionId: string }>>("/runtime")).body.some((r) => r.sessionId === mirrorId)).toBe(false);

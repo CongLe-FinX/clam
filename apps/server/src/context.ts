@@ -6,13 +6,18 @@ import type { NodeIdentity } from "@clam/node-identity";
 import type { SecretStore } from "@clam/secret-store";
 import type { FastifyBaseLogger } from "fastify";
 import type { AccessService } from "./auth/service.ts";
+import type { BrowserService } from "./browser/service.ts";
+import type { ContextService } from "./context/service.ts";
 import type { NetworkService } from "./network/types.ts";
 import type { AutostartManager } from "./services/autostart.ts";
 import type { GitService } from "./services/git-service.ts";
 import type { HostToolRegistry } from "./services/host-tool-registry.ts";
 import type { SessionService } from "./services/session-service.ts";
+import type { TerminalService } from "./terminal/service.ts";
+import type { TurnOutputService } from "./services/turn-outputs.ts";
 import type { TaskService } from "./tasks/service.ts";
 import type { SharedService } from "./shared/service.ts";
+import type { HandoffService } from "./handoff/service.ts";
 
 export interface ServerConfig {
 	dataDir: string;
@@ -88,16 +93,26 @@ export interface ServerContext {
 	network: NetworkService;
 	/** Agent sessions (CRUD, prompts, runtime access); one instance shared by the routes and the task engine. */
 	sessions: SessionService;
+	/** Files each agent turn created or modified in its project folder (stored per turn, pushed as `turn_outputs`); started with the session service. */
+	turnOutputs: TurnOutputService;
 	/** Git operations on projects, serialized per project; one instance shared by the routes and the task engine. */
 	gitService: GitService;
 	/** Host tools of every OMP runtime, composed of per-feature sets (the task engine registers the `mesh_*` set). */
 	hostTools: HostToolRegistry;
 	/** Owner access to this node's UI through its domain: password, session cookie, login throttling (`auth/`). One instance serves both listeners. */
 	access: AccessService;
+	/** The machine's own terminals (real PTYs). Loopback UI always; through the domain only when switched on + step-up (`AccessService.assertTool`). Stopped with the server. */
+	terminals: TerminalService;
+	/** The machine's own browser: a headless Chromium on this machine streamed to the UI (`browser/`). Loopback UI always; through the domain only when switched on (`AccessService.assertTool`). Closed with the server. */
+	browser: BrowserService;
 	/** Task engine (M4): delegation, execution, discussion, outbox, mirror. */
 	tasks: TaskService;
 	/** Shared sessions (M5): driver/participants, mirror, shared thread, checkpoints, takeover. Starts and stops with the task engine. */
 	shared: SharedService;
+	/** Workspace/project context (M6): memory, plans, decisions; peer sync, `.clmesh/`, agent tools. Starts and stops with the task engine. */
+	contexts: ContextService;
+	/** Handoffs (M7): move an in-flight task to another node (manifest, restore, dependency setup, durable ack, fencing) and record shared-session hand-overs. Starts and stops with the task engine. */
+	handoffs: HandoffService;
 	startedAt: Date;
 }
 

@@ -289,7 +289,7 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 		let finished = false;
 
 		async function poll(): Promise<void> {
-			if (polling || finished) return;
+			if (polling || finished || s.cancelled) return;
 			polling = true;
 			try {
 				let ready = 0;
@@ -302,7 +302,8 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 				} catch {
 					return; // metrics server not up (yet) or momentarily unreachable
 				}
-				if (finished) return;
+				// A stop drains cloudflared's connections before it exits; that must not surface as "reconnecting".
+				if (finished || s.cancelled) return;
 				if (ready > 0 && publicUrl) {
 					if (readySince === null) readySince = Date.now();
 					setState({

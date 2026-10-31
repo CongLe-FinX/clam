@@ -22,7 +22,7 @@ export const HOST_TOOL_DEFINITIONS: readonly HostToolSpec[] = [
 		name: "mesh_delegate",
 		label: "Mesh: delegate task",
 		description:
-			"Delegate a task to an agent on another node. The task is created from this session's project (same repository) and offered to the target node, where a human or policy accepts it. Returns the new taskId and its status immediately; it does not wait for the work. Use mesh_task to check progress, mesh_message to discuss. Give complete, self-contained instructions: the executor has no access to this conversation. Results arrive later as a message beginning [CL Agent Mesh] — end your turn rather than polling.",
+			"Delegate a task to an agent on another node. The task is created from this session's project (with a linked GitHub repository the executor works on the same repository; otherwise it gets its own folder, plus any input files you name) and offered to the target node, where a human or policy accepts it. Returns the new taskId and its status immediately; it does not wait for the work. Use mesh_task to check progress, mesh_message to discuss. Give complete, self-contained instructions: the executor has no access to this conversation. Results arrive later as a message beginning [CL Agent Mesh] — end your turn rather than polling.",
 		parameters: {
 			type: "object",
 			properties: {
@@ -32,8 +32,14 @@ export const HOST_TOOL_DEFINITIONS: readonly HostToolSpec[] = [
 				instructions: { type: "string", description: "Full instructions for the executing agent (max 50000 chars)." },
 				deliverAs: {
 					type: "string",
-					enum: ["summary", "branch"],
-					description: "'branch' (default): changes are committed and pushed to a work branch. 'summary': no git changes, answer in text.",
+					enum: ["summary", "branch", "files"],
+					description:
+						"'branch' (default for a project linked to a GitHub repository): changes are committed and pushed to a work branch. 'files' (default otherwise): the executor works in its own folder and CL Agent Mesh returns the files it created or changed; you or a human apply them to a project. 'summary': no file changes, answer in text.",
+				},
+				inputPaths: {
+					type: "array",
+					items: { type: "string" },
+					description: "Optional project-relative files or folders of this session's project to send along as input (copied to the executor's folder before it starts; works with or without git).",
 				},
 				baseBranch: { type: "string", description: "Branch to base the work on. Defaults to the project's current branch." },
 				maxCostUsd: { type: "number", description: "Optional cost ceiling in USD for the executor." },
@@ -101,7 +107,8 @@ export type HostToolCall =
 				agent?: string;
 				title: string;
 				instructions: string;
-				deliverAs: "summary" | "branch";
+				deliverAs?: "summary" | "branch" | "files";
+				inputPaths?: string[];
 				baseBranch?: string;
 				maxCostUsd?: number;
 			};
@@ -132,7 +139,8 @@ const SCHEMAS = {
 			agent: opt("mesh_delegate", "agent", 200),
 			title: req("mesh_delegate", "title", 200),
 			instructions: req("mesh_delegate", "instructions", 50000),
-			deliverAs: z.enum(["summary", "branch"], { error: "mesh_delegate: deliverAs must be 'summary' or 'branch'" }).default("branch"),
+			deliverAs: z.enum(["summary", "branch", "files"], { error: "mesh_delegate: deliverAs must be 'summary', 'branch' or 'files'" }).optional(),
+			inputPaths: z.array(z.string({ error: "mesh_delegate: inputPaths must be strings" }).trim().min(1).max(1000), { error: "mesh_delegate: inputPaths must be an array of project-relative paths" }).max(500).optional(),
 			baseBranch: opt("mesh_delegate", "baseBranch"),
 			maxCostUsd: z
 				.number({ error: "mesh_delegate: maxCostUsd must be a number" })

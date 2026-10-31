@@ -232,12 +232,19 @@ export type TaskMessageKind = z.infer<typeof TaskMessageKind>;
 export const CreateTaskRequest = z.object({
 	taskId: WireId,
 	workspaceId: z.string().min(1).max(128),
-	projectRef: z.object({
-		/** The task's GitHub repository; the executor maps it to one of its local projects. */
-		repoUrl: z.string().min(1).max(2048),
-		branch: z.string().min(1).max(255).nullish(),
-		commit: z.string().min(1).max(64).nullish(),
-	}),
+	/**
+	 * The task's GitHub repository; the executor maps it to one of its local projects. Absent for a task without a git
+	 * repository (`deliverAs` summary/files): the executor then works in a folder of its own. Required for `deliverAs: branch`.
+	 */
+	projectRef: z
+		.object({
+			repoUrl: z.string().min(1).max(2048),
+			branch: z.string().min(1).max(255).nullish(),
+			commit: z.string().min(1).max(64).nullish(),
+		})
+		.nullish(),
+	/** Input files (a folder bundle the sender holds): the executor downloads it with `GET /tasks/:id/inputs/:artifactId` before the agent starts. */
+	inputFiles: z.object({ artifactId: WireId, sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().positive(), fileCount: Count }).nullish(),
 	title: z.string().min(1).max(200),
 	description: z.string().max(50_000),
 	targetAgentId: z.string().min(1).max(128).optional(),
@@ -318,14 +325,19 @@ export const SharedInviteRequest = z.object({
 	title: z.string().min(1).max(200),
 	/** What the work is about (shown to the invited user and used to brief the joining agent). */
 	goal: z.string().max(50_000).default(""),
-	repo: z.object({
-		/** The shared session's GitHub repository; the invited node maps it to one of its local projects. */
-		url: z.string().min(1).max(2048),
-		/** The shared branch the driver commits checkpoints to (`clam/shared/…`). */
-		branch: z.string().min(1).max(255),
-		baseBranch: z.string().min(1).max(255).nullish(),
-		baseCommit: z.string().min(1).max(64).nullish(),
-	}),
+	/** How the working files travel: a shared git branch (default) or folder bundles with no repository (`files`). */
+	vcs: z.enum(["git", "files"]).default("git"),
+	/** git mode (required then): the shared session's repository and branch; absent in files mode. */
+	repo: z
+		.object({
+			/** The shared session's GitHub repository; the invited node maps it to one of its local projects. */
+			url: z.string().min(1).max(2048),
+			/** The shared branch the driver commits checkpoints to (`clam/shared/…`). */
+			branch: z.string().min(1).max(255),
+			baseBranch: z.string().min(1).max(255).nullish(),
+			baseCommit: z.string().min(1).max(64).nullish(),
+		})
+		.nullish(),
 	epoch: z.number().int().positive(),
 	/** The agent on the invited node the driver asked for; absent = the invited node chooses. */
 	targetAgentId: z.string().min(1).max(128).optional(),
@@ -363,6 +375,16 @@ export const SharedMessageTo = z.object({
 });
 export type SharedMessageTo = z.infer<typeof SharedMessageTo>;
 
+/** Metadata of a file posted in the group chat (the bytes travel separately, content-addressed by `sha256`). */
+export const SharedAttachmentWire = z.object({
+	id: WireId,
+	name: z.string().min(1).max(255),
+	mimeType: z.string().min(1).max(255),
+	size: z.number().int().nonnegative().max(2 * 1024 * 1024 * 1024),
+	sha256: Fingerprint,
+});
+export type SharedAttachmentWire = z.infer<typeof SharedAttachmentWire>;
+
 /**
  * One message of the group chat of a shared session, as sent by its origin (`POST /shared/:id/messages`, any member node →
  * every other) and as served by the catch-up pull (`POST /shared/:id/messages/sync`, which may relay the messages of any
@@ -370,17 +392,22 @@ export type SharedMessageTo = z.infer<typeof SharedMessageTo>;
  * (1, 2, 3 …, the unit of the catch-up cursor); `hlc` is the hybrid logical clock stamp (`<15 digits ms>-<5 digits counter>`).
  * The log order is `(hlc, origin.nodeId, messageId)`.
  */
-export const SharedMessageRequest = z.object({
-	messageId: WireId,
-	epoch: z.number().int().positive(),
-	kind: SharedMessageKind,
-	body: z.string().min(1).max(20_000),
-	author: z.object({ kind: z.enum(["human", "agent", "system"]), agentId: z.string().max(128).nullish(), agentName: z.string().max(128).nullish() }),
-	to: SharedMessageTo,
-	origin: z.object({ nodeId: NodeId, nodeName: Name, seq: z.number().int().positive() }),
-	hlc: z.string().regex(/^\d{15}-\d{5}$/),
-	createdAt: IsoDate,
-});
+export const SharedMessageRequest = z
+	.object({
+		messageId: WireId,
+		epoch: z.number().int().positive(),
+		kind: SharedMessageKind,
+		/** Empty only for a message that carries files. */
+		body: z.string().max(20_000),
+		author: z.object({ kind: z.enum(["human", "agent", "system"]), agentId: z.string().max(128).nullish(), agentName: z.string().max(128).nullish() }),
+		to: SharedMessageTo,
+		origin: z.object({ nodeId: NodeId, nodeName: Name, seq: z.number().int().positive() }),
+		hlc: z.string().regex(/^\d{15}-\d{5}$/),
+		createdAt: IsoDate,
+		/** Files posted with the message: metadata only, the bytes are fetched from any member with `GET /shared/:id/attachments/:attachmentId`. Absent = none. */
+		attachments: z.array(SharedAttachmentWire).max(20).default([]),
+	})
+	.refine((m) => m.body.length > 0 || m.attachments.length > 0, { message: "a message needs a body or a file" });
 export type SharedMessageRequest = z.infer<typeof SharedMessageRequest>;
 
 /** What a node holds per origin: `{ <origin node id>: highest sequence N such that it has 1..N }`. */
@@ -403,9 +430,10 @@ export const SharedMessagesSyncResponse = z.object({
 export type SharedMessagesSyncResponse = z.infer<typeof SharedMessagesSyncResponse>;
 
 /**
- * Runtime events of the driving session mirrored to participants (the subset of `SessionEvent` a read-only copy needs;
- * approvals and questions that need the driver's human are not mirrored). Message/state payloads are validated by the
- * receiver against the contracts schemas before they are applied.
+ * Runtime events of the driving session mirrored to participants (the subset of `SessionEvent` a copy needs). The enum is
+ * CLOSED on purpose: an old node refuses a batch with an unknown type, so pending questions and approvals do not get an event
+ * type of their own — they travel inside the `state` (`SessionLiveState.requests`), whose unknown key an old node strips.
+ * Message/state payloads are validated by the receiver against the contracts schemas before they are applied.
  */
 export const SharedMirrorEvent = z.object({ type: z.enum(["state", "agent_start", "agent_end", "message_start", "message_delta", "message_end", "message_removed", "tool_start", "tool_update", "tool_end", "prompt_result", "settled", "notice"]) }).passthrough();
 export type SharedMirrorEvent = z.infer<typeof SharedMirrorEvent>;
@@ -441,13 +469,43 @@ export type SharedMirrorRequest = z.infer<typeof SharedMirrorRequest>;
 export const SharedMirrorAccepted = z.object({ applied: z.boolean(), lastSeq: Count });
 export type SharedMirrorAccepted = z.infer<typeof SharedMirrorAccepted>;
 
-/** `POST /shared/:id/checkpoints` (driver → participant): a checkpoint exists; the snapshot is downloaded with `GET /shared/:id/snapshots/:seq`. */
+/**
+ * `POST /shared/:id/answer` (participant → driver): a person on a participant machine answers a question or approval the
+ * driver's agent is waiting for. `requestId` is the id carried by the replicated request (`SessionLiveState.requests.pending`);
+ * `epoch` is the shared session epoch the participant saw (an older one answers `409 stale_epoch`: the driver changed and
+ * the question belongs to a runtime that no longer exists). Exactly one of `value` (confirm → boolean, select/input/editor →
+ * string, `null` cancels) and `answers` (`ask`: one entry per question, in order) is set; the driver validates it with the
+ * same rules as a local answer. The first answer wins: any later one answers `409 already_answered` with `details.answeredBy`.
+ */
+export const SharedAnswerRequest = z
+	.object({
+		epoch: z.number().int().positive(),
+		requestId: z.string().min(1).max(200),
+		value: z.union([z.boolean(), z.string().max(100_000), z.null()]).optional(),
+		answers: z
+			.array(z.object({ id: z.string().min(1).max(200), selectedOptions: z.array(z.string().max(4000)).max(200), customInput: z.string().max(100_000).optional() }))
+			.max(50)
+			.optional(),
+	})
+	.refine((body) => (body.value === undefined) !== (body.answers === undefined), { message: "send exactly one of value and answers" });
+export type SharedAnswerRequest = z.infer<typeof SharedAnswerRequest>;
+
+export const SharedAnswerAccepted = z.object({ ok: z.literal(true), outcome: z.enum(["answered", "cancelled"]) });
+export type SharedAnswerAccepted = z.infer<typeof SharedAnswerAccepted>;
+
+/**
+ * `POST /shared/:id/checkpoints` (driver → participant): a checkpoint exists; the snapshot is downloaded with
+ * `GET /shared/:id/snapshots/:seq` and, in files mode, the folder bundle with `GET /shared/:id/files/:seq`.
+ */
 export const SharedCheckpointNotice = z.object({
 	seq: z.number().int().positive(),
 	epoch: z.number().int().positive(),
-	branch: z.string().min(1).max(255),
+	/** git mode: the shared branch and commit; absent in files mode. */
+	branch: z.string().min(1).max(255).nullish(),
 	commit: z.string().min(1).max(64).nullish(),
 	pushed: z.boolean(),
+	/** files mode: the bundle of the driver's working folder at this checkpoint. */
+	files: z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().positive(), fileCount: Count }).nullish(),
 	snapshot: z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().positive(), messageCount: Count }).nullish(),
 	model: z.string().max(200).nullish(),
 	note: z.string().max(500).nullish(),
@@ -455,8 +513,16 @@ export const SharedCheckpointNotice = z.object({
 });
 export type SharedCheckpointNotice = z.infer<typeof SharedCheckpointNotice>;
 
-/** `POST /shared/:id/checkpoints/:seq/ack` (participant → driver): the snapshot was downloaded, verified and stored. */
-export const SharedCheckpointAck = z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().positive() });
+/**
+ * `POST /shared/:id/checkpoints/:seq/ack` (participant → driver): everything the checkpoint announced (the snapshot and, in
+ * files mode, the folder bundle) was downloaded, verified and stored. `sha256`/`size` are the snapshot's (absent when the
+ * checkpoint has none); `files` is the bundle's (files mode).
+ */
+export const SharedCheckpointAck = z.object({
+	sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+	size: z.number().int().positive().optional(),
+	files: z.object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().int().positive() }).optional(),
+});
 export type SharedCheckpointAck = z.infer<typeof SharedCheckpointAck>;
 
 /** `POST /shared/:id/driver` (new driver → every other participant): the driver role moved (takeover or transfer). */
@@ -506,7 +572,9 @@ export const SharedStateResponse = z.object({
 	workspaceId: z.string().max(128),
 	epoch: z.number().int().positive(),
 	driverNodeId: NodeId,
-	branch: z.string().max(255),
+	/** git mode; null/absent in files mode. */
+	branch: z.string().max(255).nullish(),
+	vcs: z.enum(["git", "files"]).default("git"),
 	/** The driving session on the driver, when this node is the driver. */
 	driverSessionId: z.string().max(128).nullish(),
 	driverUiUrl: z.string().max(2048).nullish(),
@@ -523,6 +591,115 @@ export const SharedStateResponse = z.object({
 			}),
 		)
 		.max(256),
-	lastCheckpoint: z.object({ seq: z.number().int().positive(), epoch: z.number().int().positive(), commit: z.string().nullish(), pushed: z.boolean(), snapshotSha256: z.string().nullish() }).nullish(),
+	lastCheckpoint: z.object({ seq: z.number().int().positive(), epoch: z.number().int().positive(), commit: z.string().nullish(), pushed: z.boolean(), snapshotSha256: z.string().nullish(), filesSha256: z.string().nullish() }).nullish(),
 });
 export type SharedStateResponse = z.infer<typeof SharedStateResponse>;
+
+// ---------------------------------------------------------------- handoffs (M7, docs/agent-network-protocol.md §5.10–5.12, docs/handoff-protocol.md)
+
+/**
+ * Wire payloads of `/api/v1/handoffs*` (kind `task`; a `session` handoff is only a local record of an M5 hand-over). One capability,
+ * `handoff.receive`, checked on the RECEIVING node against what it granted the caller, for every call and in both directions
+ * (source → target: offer, artifacts, cancel; target → source: accept, ack, progress/failure). The manifest travels as raw JSON: the
+ * target hashes the document AS DELIVERED (`manifestSha256`) and validates it with `@clam/handoff-engine`.
+ */
+const Sha256 = z.string().regex(/^[0-9a-f]{64}$/);
+
+/** `POST /handoffs` (source → target). 201/200 `{handoffId, state: "received"}`; `409 stale_epoch` when `fromEpoch` is not the epoch the target knows. */
+export const HandoffOfferRequest = z.object({
+	handoffId: WireId,
+	taskId: WireId,
+	fromEpoch: z.number().int().nonnegative(),
+	toEpoch: z.number().int().positive(),
+	manifest: z.record(z.string(), z.unknown()),
+	manifestSha256: Sha256,
+	expiresAt: IsoDate,
+});
+export type HandoffOfferRequest = z.infer<typeof HandoffOfferRequest>;
+
+export const HandoffOfferAccepted = z.object({ handoffId: WireId, state: z.literal("received") });
+export type HandoffOfferAccepted = z.infer<typeof HandoffOfferAccepted>;
+
+/** `POST /handoffs/:id/accept` (target → source). The answer carries the restore deadline the source computed (accept → ack). */
+export const HandoffAcceptRequest = z.object({ epoch: z.number().int().positive(), targetAgentId: z.string().max(128).nullish(), targetAgentName: z.string().max(128).nullish(), acceptedAt: IsoDate });
+export type HandoffAcceptRequest = z.infer<typeof HandoffAcceptRequest>;
+
+export const HandoffAcceptResponse = z.object({ handoffId: WireId, state: z.enum(["accepted", "rejected"]), reason: z.string().max(2000).optional(), deadlineAt: IsoDate.optional() });
+export type HandoffAcceptResponse = z.infer<typeof HandoffAcceptResponse>;
+
+/**
+ * `POST /handoffs/:id/ack` (target → source): sent only after steps 1–7 succeeded and the acknowledgement row is durable on the target.
+ * `fencingToken` = `<taskId>:<epoch>:<sig>` signed by the target's node key over `taskId|epoch|handoffId|manifestSha256`.
+ */
+export const HandoffAckRequest = z.object({
+	epoch: z.number().int().positive(),
+	targetSessionId: z.string().min(1).max(128),
+	manifestSha256: Sha256,
+	validation: z.object({ gitCommit: z.string().nullish(), workspaceClean: z.boolean(), depsOk: z.boolean() }),
+	ackedAt: IsoDate,
+	fencingToken: z.string().min(1).max(1024),
+});
+export type HandoffAckRequest = z.infer<typeof HandoffAckRequest>;
+
+export const HandoffAckResponse = z.object({ handoffId: WireId, state: z.literal("acked"), fencingToken: z.string(), sourceLastEventSeq: z.number().int().nonnegative() });
+export type HandoffAckResponse = z.infer<typeof HandoffAckResponse>;
+
+/**
+ * `POST /handoffs/:id/state` (both directions). target → source: `rejected`, `failed` (+ `failure`), `cancelled`, progress states
+ * (`persisted` … `session_created`), `owner`, `resumed`, `completed`. source → target: `cancelled` (abort), `reclaimed`, `extended`
+ * (carries the new `deadlineAt`), `expired`. Idempotent per `(state, epoch)`.
+ */
+export const HandoffStateRequest = z.object({
+	epoch: z.number().int().nonnegative(),
+	state: z.string().min(1).max(32),
+	summary: z.string().max(2000).optional(),
+	failure: z.object({ code: z.string().max(64), detail: z.string().max(2000), step: z.number().int().nullish() }).optional(),
+	deadlineAt: IsoDate.optional(),
+	targetSessionId: z.string().max(128).nullish(),
+	at: IsoDate,
+});
+export type HandoffStateRequest = z.infer<typeof HandoffStateRequest>;
+
+export const HandoffStateAccepted = z.object({ handoffId: WireId, state: z.string(), accepted: z.literal(true) });
+export type HandoffStateAccepted = z.infer<typeof HandoffStateAccepted>;
+
+/** `GET /handoffs/:id`: this node's side of the handoff (the authoritative answer for a restarting/reconciling peer). */
+export const HandoffStatusResponse = z.object({
+	handoffId: WireId,
+	/** The answering node's role. */
+	role: z.enum(["source", "target"]),
+	state: z.string(),
+	taskId: WireId,
+	fromEpoch: z.number().int().nonnegative(),
+	toEpoch: z.number().int().positive(),
+	/** The epoch the answering node holds for the task right now. */
+	taskEpoch: z.number().int().nonnegative(),
+	manifestSha256: Sha256.nullish(),
+	deadlineAt: IsoDate.nullish(),
+	ackAt: IsoDate.nullish(),
+	targetSessionId: z.string().nullish(),
+	fencingToken: z.string().nullish(),
+	failure: z.object({ code: z.string(), detail: z.string(), step: z.number().int().nullish() }).nullish(),
+	lastEventSeq: z.number().int().nonnegative().nullish(),
+});
+export type HandoffStatusResponse = z.infer<typeof HandoffStatusResponse>;
+
+/**
+ * `POST /tasks/:id/executor` (new executor → the task's SENDER, capability `tasks.receive` granted by the sender): the task continues
+ * on the caller at `epoch`. The sender verifies `fencingToken` against the caller's pinned key and follows the new executor.
+ */
+export const TaskExecutorChange = z.object({
+	epoch: z.number().int().positive(),
+	handoffId: WireId,
+	manifestSha256: Sha256,
+	fencingToken: z.string().min(1).max(1024),
+	/** The node the caller took the task from. */
+	fromNodeId: NodeId,
+	agentId: z.string().max(128).nullish(),
+	agentName: z.string().max(128).nullish(),
+	sessionId: z.string().max(128).nullish(),
+	/** The last event seq of the previous executor; the new executor's events continue at `eventSeqBase + 1`. */
+	eventSeqBase: z.number().int().nonnegative(),
+	at: IsoDate,
+});
+export type TaskExecutorChange = z.infer<typeof TaskExecutorChange>;

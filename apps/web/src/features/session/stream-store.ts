@@ -1,4 +1,4 @@
-import type { MessagesPage, PendingUiRequest, RuntimeStatus, SessionEvent, SessionLiveState, UiMessage } from "@clam/contracts";
+import type { AgentSession, MessagesPage, PendingUiRequest, RuntimeStatus, SessionEvent, SessionLiveState, SessionOutputsPage, TurnOutputs, UiMessage } from "@clam/contracts";
 import { routes } from "@clam/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useSyncExternalStore } from "react";
@@ -8,6 +8,7 @@ import { clearInitialPrompt, initialPromptClientId, peekInitialPrompt } from "@/
 import { qk } from "@/lib/queries";
 import { newClientId } from "@/lib/utils";
 import { ws } from "@/lib/ws";
+import { PAGE_SIZE, takePreloaded } from "./preload.ts";
 
 // ───────────────────────────── public types ─────────────────────────────
 
@@ -22,6 +23,8 @@ export interface ToolRec {
 	/** Latest partial output while running. */
 	preview?: string;
 	result?: string;
+	/** Structured result of the `todo` and `ask` tools (`UiMessage.toolDetails`). */
+	details?: unknown;
 	/** Local receipt times (ms). Undefined for tools only known from history. */
 	startedAt?: number;
 	endedAt?: number;
@@ -100,7 +103,6 @@ export const isBusy = (m: StreamMeta): boolean => m.agentRunning || m.live?.runt
 
 // ───────────────────────────── helpers ─────────────────────────────
 
-const PAGE_SIZE = 60;
 const MAX_LOG = 1500;
 const MAX_BUFFER = 5000;
 
@@ -175,6 +177,12 @@ export class SessionStream {
 	private ac: AbortController | null = null;
 	private invalidateTimer: ReturnType<typeof setTimeout> | null = null;
 	private abortTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Files each agent turn produced (by output id) and the assistant row each strip is shown under. */
+	private outputs = new Map<string, TurnOutputs>();
+	private rowOutputs = new Map<string, readonly TurnOutputs[]>();
+	private outL = new Map<string, Set<Listener>>();
+	/** Rows that arrived live. The enter animation plays once for them; virtualizer remounts must never replay it. */
+	private liveRows = new Set<string>();
 
 	constructor(
 		readonly sessionId: string,
@@ -211,12 +219,20 @@ export class SessionStream {
 	subscribeRec = (key: string, cb: Listener): (() => void) => addKeyed(this.msgL, key, cb);
 	getTool = (id: string): ToolRec | undefined => this.tools.get(id);
 	subscribeTool = (id: string, cb: Listener): (() => void) => addKeyed(this.toolL, id, cb);
+	getRowOutputs = (key: string): readonly TurnOutputs[] | undefined => this.rowOutputs.get(key);
+	subscribeRowOutputs = (key: string, cb: Listener): (() => void) => addKeyed(this.outL, key, cb);
+	isLiveRow = (key: string): boolean => this.liveRows.has(key);
+	/** The row has been shown: it must not animate again when it remounts. */
+	seenRow = (key: string): void => {
+		this.liveRows.delete(key);
+	};
 
 	private setMeta(patch: Partial<StreamMeta>): void {
 		this.meta = { ...this.meta, ...patch };
 		fire(this.metaL);
 	}
 	private emitOrder(): void {
+		this.reindexOutputs();
 		fire(this.orderL);
 	}
 
@@ -263,15 +279,31 @@ export class SessionStream {
 
 	private async loadInitial(signal: AbortSignal): Promise<void> {
 		this.setMeta({ historyStatus: this.meta.historyStatus === "ready" ? "ready" : "loading" });
+		const applyPage = (page: MessagesPage): void => {
+			this.mergeHistory(page.messages);
+			if (!this.hasLoadedOlder) this.cursor = page.nextCursor;
+			this.setMeta({ historyStatus: "ready", historyError: null, total: page.total, hasOlder: this.cursor !== null });
+		};
+		let settled = false;
+		// A hover/focus preload paints the conversation immediately; the fresh fetch below then closes any gap before attach.
+		const pre = takePreloaded(this.sessionId);
+		if (pre) {
+			void pre.page.then((page) => {
+				if (!settled && !signal.aborted) applyPage(page);
+			}, () => undefined);
+			void pre.outputs.then((page) => {
+				if (!settled && !signal.aborted) this.mergeOutputs(page.outputs);
+			}, () => undefined);
+		}
 		const history = api
 			.get<MessagesPage>(routes.sessionMessages(this.sessionId), { limit: PAGE_SIZE }, { signal })
 			.then((page) => {
-				this.mergeHistory(page.messages);
-				if (!this.hasLoadedOlder) this.cursor = page.nextCursor;
-				this.setMeta({ historyStatus: "ready", historyError: null, total: page.total, hasOlder: this.cursor !== null });
+				settled = true;
+				applyPage(page);
 			})
 			.catch((e) => {
-				if (signal.aborted) return;
+				if (signal.aborted || this.meta.historyStatus === "ready") return;
+				settled = true;
 				this.setMeta({ historyStatus: "error", historyError: e });
 			})
 			.finally(() => {
@@ -280,7 +312,7 @@ export class SessionStream {
 			});
 		const state = this.fetchState(signal);
 		void this.fetchUiRequests(signal);
-		await Promise.allSettled([history, state]);
+		await Promise.allSettled([history, state, this.loadOutputs(signal)]);
 	}
 	private hasLoadedOlder = false;
 
@@ -335,6 +367,7 @@ export class SessionStream {
 			}
 			void this.fetchUiRequests(undefined, true);
 			try {
+				void this.loadOutputs();
 				const page = await api.get<MessagesPage>(routes.sessionMessages(this.sessionId), { limit: PAGE_SIZE });
 				if (!streaming) this.finalizeStreaming();
 				this.mergeHistory(page.messages);
@@ -431,8 +464,96 @@ export class SessionStream {
 	}
 
 	private append(key: string): void {
+		if (this.buffer === null && this.replayAt === null) {
+			this.liveRows.add(key);
+			if (this.liveRows.size > 64) this.liveRows.delete(this.liveRows.values().next().value as string);
+		}
 		this.order = [...this.order, key];
 		this.emitOrder();
+	}
+
+	// ── turn outputs
+
+	private async loadOutputs(signal?: AbortSignal): Promise<void> {
+		try {
+			const page = await api.get<SessionOutputsPage>(routes.sessionOutputs(this.sessionId), undefined, { signal });
+			if (!signal?.aborted) this.mergeOutputs(page.outputs);
+		} catch {
+			/* The strip is an enhancement of the transcript: it appears when the next turn ends or after the next reload. */
+		}
+	}
+
+	private mergeOutputs(list: readonly TurnOutputs[]): void {
+		let changed = false;
+		for (const o of list) {
+			const prev = this.outputs.get(o.id);
+			if (prev && prev.endedAt === o.endedAt && prev.truncated === o.truncated && prev.files.length === o.files.length) continue;
+			this.outputs.set(o.id, o);
+			changed = true;
+		}
+		while (this.outputs.size > 1000) this.outputs.delete(this.outputs.keys().next().value as string);
+		if (changed) this.reindexOutputs();
+	}
+
+	/**
+	 * Decide which assistant row shows each turn's file strip: the row whose id is the anchor message, else the assistant row
+	 * with the anchor's timestamp (ids change after a runtime restart), else the last assistant row at or before the turn's end.
+	 * Only rows whose listener set actually changed are notified, so a strip update re-renders one row.
+	 */
+	private reindexOutputs(): void {
+		if (this.outputs.size === 0 && this.rowOutputs.size === 0) return;
+		let assistants: Array<{ key: string; ts: number }> | null = null;
+		const rows = (): Array<{ key: string; ts: number }> => {
+			if (!assistants) {
+				assistants = [];
+				for (const k of this.order) {
+					const r = this.recs.get(k);
+					if (r?.msg.role === "assistant") assistants.push({ key: k, ts: r.msg.timestamp });
+				}
+			}
+			return assistants;
+		};
+		let byTs: Map<number, string> | null = null;
+		const next = new Map<string, TurnOutputs[]>();
+		for (const o of this.outputs.values()) {
+			let key = o.anchorMessageId ? this.idIndex.get(o.anchorMessageId) : undefined;
+			if (key !== undefined && this.recs.get(key)?.msg.role !== "assistant") key = undefined;
+			if (key === undefined && o.anchorTimestamp !== null) {
+				byTs ??= new Map(rows().map((r) => [r.ts, r.key] as const));
+				key = byTs.get(o.anchorTimestamp);
+			}
+			if (key === undefined) {
+				// Last assistant row whose timestamp is not after the turn's end (rows are in chronological order).
+				const list = rows();
+				let lo = 0;
+				let hi = list.length - 1;
+				while (lo <= hi) {
+					const mid = (lo + hi) >> 1;
+					const row = list[mid];
+					if (row && row.ts <= o.endedAt) {
+						key = row.key;
+						lo = mid + 1;
+					} else hi = mid - 1;
+				}
+			}
+			if (key === undefined) continue;
+			const bucket = next.get(key);
+			if (bucket) bucket.push(o);
+			else next.set(key, [o]);
+		}
+		const merged = new Map<string, readonly TurnOutputs[]>();
+		for (const [key, list] of next) {
+			list.sort((a, b) => a.startedAt - b.startedAt);
+			const prev = this.rowOutputs.get(key);
+			if (prev && prev.length === list.length && prev.every((p, i) => p === list[i])) {
+				merged.set(key, prev);
+				continue;
+			}
+			merged.set(key, list);
+			fire(this.outL.get(key));
+		}
+		for (const key of this.rowOutputs.keys()) if (!merged.has(key)) fire(this.outL.get(key));
+		this.rowOutputs = merged;
 	}
 
 	private ingestToolResult(m: UiMessage): void {
@@ -440,7 +561,7 @@ export class SessionStream {
 		const result = textOf(m);
 		const prev = this.tools.get(m.toolCallId);
 		if (prev && prev.status !== "running" && prev.status !== "interrupted") {
-			if (prev.result === undefined) this.setTool({ ...prev, result });
+			if (prev.result === undefined) this.setTool({ ...prev, result, details: prev.details ?? m.toolDetails });
 			return;
 		}
 		this.setTool({
@@ -450,6 +571,7 @@ export class SessionStream {
 			intent: prev?.intent,
 			status: m.isError ? "error" : "ok",
 			result,
+			details: m.toolDetails,
 			startedAt: prev?.startedAt,
 			endedAt: prev?.endedAt ?? (prev?.startedAt !== undefined ? Date.now() : undefined),
 		});
@@ -590,6 +712,7 @@ export class SessionStream {
 				this.setMeta({ agentRunning: false, aborting: false });
 				for (const t of [...this.tools.values()]) if (t.status === "running") this.setTool({ ...t, status: "interrupted", endedAt: Date.now() });
 				this.pushLog({ kind: "agent", level: "info", text: "Agent finished" });
+				this.refreshProjectFiles();
 				this.invalidateSoon();
 				break;
 			case "message_start":
@@ -614,11 +737,15 @@ export class SessionStream {
 					intent: prev?.intent,
 					status: e.isError ? "error" : "ok",
 					result: e.result,
+					details: e.toolDetails,
 					startedAt: prev?.startedAt,
 					endedAt: this.now(),
 				});
 				break;
 			}
+			case "turn_outputs":
+				this.mergeOutputs([e.outputs]);
+				break;
 			case "prompt_result":
 				this.setMeta({ aborting: false });
 				this.pushLog({
@@ -744,6 +871,13 @@ export class SessionStream {
 		fire(this.logL);
 	};
 
+	/** The agent may have written files during the turn: refresh the file tree and any open previews of this session's project. */
+	private refreshProjectFiles(): void {
+		const projectId = this.qc.getQueryData<AgentSession>(qk.session(this.sessionId))?.projectId;
+		if (!projectId) return;
+		void this.qc.invalidateQueries({ queryKey: ["local", "project", projectId], predicate: (q) => q.queryKey[3] === "files" || q.queryKey[3] === "file" });
+	}
+
 	private invalidateSoon(): void {
 		if (this.invalidateTimer) return;
 		this.invalidateTimer = setTimeout(() => {
@@ -835,13 +969,6 @@ export class SessionStream {
 		}
 	};
 
-	respond = async (requestId: string, value: boolean | string | null): Promise<void> => {
-		await api.post(routes.sessionUiResponse(this.sessionId), { requestId, value });
-		if (this.meta.uiRequests.some((r) => r.requestId === requestId)) {
-			this.setMeta({ uiRequests: this.meta.uiRequests.filter((r) => r.requestId !== requestId) });
-		}
-	};
-
 	restartRuntime = async (): Promise<RuntimeStatus> => {
 		const status = await api.post<RuntimeStatus>(routes.runtimeRestart(this.sessionId));
 		this.liveFromEvent = false;
@@ -888,6 +1015,17 @@ export function useToolRec(stream: SessionStream, id: string | null | undefined)
 
 export function useOrder(stream: SessionStream): readonly string[] {
 	return useSyncExternalStore(stream.subscribeOrder, stream.getOrder);
+}
+
+export function useRowOutputs(stream: SessionStream, key: string): readonly TurnOutputs[] | undefined {
+	const sub = useCallback((cb: () => void) => stream.subscribeRowOutputs(key, cb), [stream, key]);
+	return useSyncExternalStore(sub, () => stream.getRowOutputs(key));
+}
+
+/** Derived primitive of one message record (e.g. a divider label). The selector must return a stable value. */
+export function useMsgSlice<T>(stream: SessionStream, key: string, select: (rec: MsgRec | undefined) => T): T {
+	const sub = useCallback((cb: () => void) => stream.subscribeRec(key, cb), [stream, key]);
+	return useSyncExternalStore(sub, () => select(stream.getRec(key)));
 }
 
 export function useLog(stream: SessionStream): readonly LogEntry[] {

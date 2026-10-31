@@ -1,11 +1,13 @@
 import { type AccessStatus, MIN_PASSWORD_LENGTH, routes } from "@clam/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useRouter } from "@tanstack/react-router";
-import { ExternalLink, Info, KeyRound, LogOut, Monitor } from "lucide-react";
+import { ExternalLink, Globe, Info, KeyRound, LogOut, Monitor, ShieldAlert, Terminal } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { authGate } from "@/features/auth/gate";
+import { PasswordDialog } from "@/features/auth/password-dialog";
+import { useTerminalInfo } from "@/features/terminal/api";
 import { accessKey, useAccess, useDropOwnerData } from "@/features/auth/hooks";
 import { useSignOut } from "@/features/auth/sign-out";
 import { api, errorMessage } from "@/lib/api";
@@ -65,7 +67,7 @@ function RemoteAccessSection({ a }: { a: AccessStatus }) {
 	const patch = useAccessMutation((body: { remoteUiEnabled?: boolean; sessionTtlHours?: number }) => api.patch<AccessStatus>(routes.access, body));
 	const canToggle = loopback && (a.passwordSet || a.remoteUiEnabled);
 	const toggleReason = !loopback
-		? "Remote access and the sign-in length can only be changed from the computer this node runs on."
+		? "Remote access and the sign-in length can only be changed from the computer this machine runs on."
 		: !a.passwordSet && !a.remoteUiEnabled
 			? "Set an owner password first."
 			: null;
@@ -73,7 +75,7 @@ function RemoteAccessSection({ a }: { a: AccessStatus }) {
 	return (
 		<SettingsSection
 			title="Remote access to this web UI"
-			description="Open this node's own web UI from any browser through its public domain, after signing in with the owner password."
+			description="Open this machine's own web UI from any browser through its public domain, after signing in with the owner password."
 			actions={
 				<Switch
 					checked={a.remoteUiEnabled}
@@ -137,21 +139,115 @@ function RemoteAccessSection({ a }: { a: AccessStatus }) {
 			{toggleReason && <LoopbackOnlyNote>{toggleReason}</LoopbackOnlyNote>}
 			<div className="mt-3 space-y-1.5 text-xs leading-relaxed text-muted-foreground">
 				<p>
-					<strong className="font-medium text-foreground">What this exposes:</strong> the full web UI of this node (sessions, files, git, settings) to anyone who can sign in with the owner password. A signed-in browser can run agents on this machine, so choose a long, unique password.
+					<strong className="font-medium text-foreground">What this exposes:</strong> the full web UI of this machine (sessions, files, git, settings) to anyone who can sign in with the owner password. A signed-in browser can run agents on this machine, so choose a long, unique password.
 				</p>
 				<p>
-					<strong className="font-medium text-foreground">What stays protected:</strong> the node-to-node API (<code className="font-mono">/api/v1</code>) keeps requiring a signed request from a paired node. It never accepts this password or the browser session, and turning this on or off does not change it.
+					<strong className="font-medium text-foreground">What stays protected:</strong> the machine-to-machine API (<code className="font-mono">/api/v1</code>) keeps requiring a signed request from a paired node. It never accepts this password or the browser session, and turning this on or off does not change it.
 				</p>
 			</div>
 			<ConfirmDialog
 				open={confirmEnable}
 				onOpenChange={setConfirmEnable}
 				title="Allow remote access to this UI?"
-				description="Anyone who knows the owner password will be able to sign in at your public address and control agents on this machine. The node-to-node API stays signature-protected either way."
+				description="Anyone who knows the owner password will be able to sign in at your public address and control agents on this machine. The machine-to-machine API stays signature-protected either way."
 				confirmLabel="Turn on"
 				loading={patch.isPending}
 				onConfirm={() => patch.mutate({ remoteUiEnabled: true }, { onSettled: () => setConfirmEnable(false) })}
 			/>
+		</SettingsSection>
+	);
+}
+
+type ToolKey = "remoteTerminalEnabled" | "remoteBrowserEnabled";
+
+function MachineToolRow({ a, tool, icon: Icon, title, description, risk }: { a: AccessStatus; tool: ToolKey; icon: typeof Terminal; title: string; description: string; risk: React.ReactNode }) {
+	const loopback = a.via === "loopback";
+	const on = a[tool];
+	const [confirm, setConfirm] = useState(false);
+	const patch = useAccessMutation((body: Partial<Record<ToolKey, boolean>> & { password?: string }) => api.patch<AccessStatus>(routes.access, body));
+	const blocked = loopback && !a.passwordSet && !on;
+	return (
+		<div className="flex flex-col gap-3 py-3.5 first:pt-0 last:pb-0">
+			<div className="flex items-start gap-3">
+				<span className="grid size-9 shrink-0 place-items-center rounded-lg bg-surface-2 text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]">
+					<Icon className="size-4" />
+				</span>
+				<div className="min-w-0 flex-1">
+					<div className="flex flex-wrap items-center gap-2">
+						<h4 className="text-[13px] font-medium">{title}</h4>
+						<Badge variant={on ? "warning" : "success"}>{on ? "On through the domain" : "Off through the domain"}</Badge>
+					</div>
+					<p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</p>
+				</div>
+				<Switch
+					checked={on}
+					disabled={blocked || patch.isPending}
+					aria-label={`${title} through the domain`}
+					onCheckedChange={(next) => (next ? setConfirm(true) : patch.mutate({ [tool]: false }))}
+				/>
+			</div>
+			<p className="ml-12 flex items-start gap-2 rounded-lg bg-warning/10 p-2.5 text-xs leading-relaxed text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--warning)_28%,transparent)]">
+				<ShieldAlert className="mt-0.5 size-3.5 shrink-0 text-warning" aria-hidden />
+				<span>{risk}</span>
+			</p>
+			{blocked && <p className="ml-12 text-xs text-subtle">Set an owner password first.</p>}
+			{loopback ? (
+				<ConfirmDialog
+					open={confirm}
+					onOpenChange={setConfirm}
+					title={`Allow the ${title} through the domain?`}
+					description={risk}
+					confirmLabel="Turn on"
+					loading={patch.isPending}
+					onConfirm={() => patch.mutate({ [tool]: true }, { onSettled: () => setConfirm(false) })}
+				/>
+			) : (
+				<PasswordDialog
+					open={confirm}
+					onOpenChange={setConfirm}
+					title={`Turn on the ${title} through the domain`}
+					description="Confirm with the owner password. You can switch it off again at any time."
+					risk={risk}
+					confirmLabel="Turn on"
+					onSubmit={(password) => patch.mutateAsync({ [tool]: true, password })}
+				/>
+			)}
+		</div>
+	);
+}
+
+function MachineToolsSection({ a }: { a: AccessStatus }) {
+	const info = useTerminalInfo(a.via === "loopback" || a.remoteTerminalEnabled);
+	const user = info.data?.user;
+	return (
+		<SettingsSection
+			title="Terminal and Browser"
+			description="This machine's own Terminal and Browser always work from this computer. Switch them on to use them from a browser that signed in through the domain too."
+		>
+			<div className="divide-y divide-border">
+				<MachineToolRow
+					a={a}
+					tool="remoteTerminalEnabled"
+					icon={Terminal}
+					title="Terminal"
+					description="A real shell on this machine. Opening one through the domain asks for the owner password again (10 minutes)."
+					risk={
+						<>
+							Anyone who signs in to this machine&apos;s domain can run commands as {user ? <strong className="font-semibold">{user}</strong> : "the user that runs this machine"}: read and change every file that account can, and reach everything on this machine&apos;s network.
+						</>
+					}
+				/>
+				<MachineToolRow
+					a={a}
+					tool="remoteBrowserEnabled"
+					icon={Globe}
+					title="Browser"
+					description="This machine's own browser: open localhost previews and pages on this machine from a signed-in remote session."
+					risk="It can reach anything on this machine's localhost and its local network, including services that expect only local access."
+				/>
+			</div>
+			{a.via === "loopback" && !a.remoteUiEnabled && <LoopbackOnlyNote>Remote access to the web UI is off, so these only matter once you turn it on above.</LoopbackOnlyNote>}
+			{a.via === "remote" && <LoopbackOnlyNote>You can switch these off from here. Switching one on asks for the owner password.</LoopbackOnlyNote>}
 		</SettingsSection>
 	);
 }
@@ -210,7 +306,7 @@ function PasswordSection({ a }: { a: AccessStatus }) {
 					<KeyRound /> {first ? "Set password" : "Change password"}
 				</Button>
 			</form>
-			{blocked && <LoopbackOnlyNote>The first password can only be set from the computer this node runs on, so it can never be set by someone who reaches the public address.</LoopbackOnlyNote>}
+			{blocked && <LoopbackOnlyNote>The first password can only be set from the computer this machine runs on, so it can never be set by someone who reaches the public address.</LoopbackOnlyNote>}
 			{!first && !loopback && <LoopbackOnlyNote>Changing the password here also asks for the current one. Other signed-in browsers keep working until you use “Sign out everywhere”.</LoopbackOnlyNote>}
 		</SettingsSection>
 	);
@@ -280,10 +376,10 @@ function SecurityNotes() {
 		<SettingsSection title="How sign-in is protected">
 			<ul className="list-disc space-y-1.5 pl-4 text-xs leading-relaxed text-muted-foreground">
 				<li>The password is never stored or sent anywhere except as a one-way hash on this machine; it is checked in constant time.</li>
-				<li>Repeated wrong passwords lock sign-in for longer and longer, per browser and for the node as a whole.</li>
-				<li>The session cookie is HttpOnly, Secure and SameSite=Strict, so scripts on other sites cannot read or send it. Every change request must come from this node's own address.</li>
+				<li>Repeated wrong passwords lock sign-in for longer and longer, per browser and for the machine as a whole.</li>
+				<li>The session cookie is HttpOnly, Secure and SameSite=Strict, so scripts on other sites cannot read or send it. Every change request must come from this machine's own address.</li>
 				<li>Only this machine can set the first password, turn remote access on or off, or edit the tunnel. Someone who reaches your public address cannot.</li>
-				<li>Terminals and the agent runtime's raw channel are never exposed through the web UI, with or without remote access.</li>
+				<li>The Terminal and the Browser are off through the domain until you switch them on, and the Terminal asks for the password again before it opens. The agent runtime's raw channel is never exposed.</li>
 			</ul>
 		</SettingsSection>
 	);
@@ -297,13 +393,14 @@ export default function SecurityPage() {
 
 	return (
 		<>
-			<PageIntro title="Security" description="How this node is exposed and where its secrets live." />
+			<PageIntro title="Security" description="How this machine is exposed and where its secrets live." />
 			<PageBody>
 				{access.isPending && <Skeleton className="h-48" />}
 				{access.isError && <InlineError error={access.error} onRetry={() => access.refetch()} />}
 				{access.data && (
 					<>
 						<RemoteAccessSection a={access.data} />
+						<MachineToolsSection a={access.data} />
 						<PasswordSection a={access.data} />
 						<SignInSessionsSection a={access.data} />
 						<SecurityNotes />
@@ -327,12 +424,12 @@ export default function SecurityPage() {
 										))}
 									</span>
 								</KeyValue>
-								<KeyValue label="Remote node API">
+								<KeyValue label="Remote machine API">
 									<Badge variant={s.remoteApiEnabled ? "warning" : "success"}>{s.remoteApiEnabled ? "Enabled" : "Disabled"}</Badge>
 								</KeyValue>
 							</dl>
 							<p className="mt-3 text-xs text-muted-foreground">
-								Requests with an unrecognized Host or Origin are rejected to defend against DNS rebinding. The OMP RPC channel and a terminal are never exposed.
+								Requests with an unrecognized Host or Origin are rejected to defend against DNS rebinding. The OMP RPC channel is never exposed; the Terminal and Browser reach the domain only when you switch them on above.
 							</p>
 						</SettingsSection>
 						<SettingsSection title="Secret store" description="GitHub tokens are kept here. Provider credentials stay inside OMP.">
@@ -348,7 +445,7 @@ export default function SecurityPage() {
 								</p>
 							)}
 						</SettingsSection>
-						<SettingsSection title="Node identity" description="Other nodes will verify this fingerprint when pairing.">
+						<SettingsSection title="Machine identity" description="Other machines will verify this fingerprint when pairing.">
 							<div className="flex flex-wrap items-center justify-between gap-3">
 								<code className="break-all font-mono text-xs leading-relaxed">{fingerprint}</code>
 								<CopyButton value={s.fingerprint} label="Copy" />

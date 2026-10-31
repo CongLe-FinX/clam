@@ -290,7 +290,7 @@ function ProjectsAndAgents({ recorded, mesh, projects }: { recorded: RecordedUsa
 					</div>
 				)}
 			</Section>
-			<Section title="Cost by agent" description="Roll-up of CL Agent Mesh agent sessions on this node, from per-session OMP statistics." source={mesh ? meshSource(mesh.byAgent) : "clam-estimated"}>
+			<Section title="Cost by agent" description="Roll-up of CL Agent Mesh agent sessions on this machine, from per-session OMP statistics." source={mesh ? meshSource(mesh.byAgent) : "clam-estimated"}>
 				{mesh ? (
 					<BarList items={meshItems(mesh.byAgent)} empty="No agent sessions have recorded usage yet." />
 				) : (

@@ -4,7 +4,7 @@
 
 CL Agent Mesh turns the computers of one person into an AI team. Each computer (a **Node**) runs one or more AI agents — the first supported runtime is [OMP](https://github.com/can1357/oh-my-pi) (`omp`) — behind a local web UI. Nodes pair with each other, delegate tasks to each other's agents, share project context through GitHub, and hand unfinished work from one node to another. A node going offline never interrupts work that is executing on another node.
 
-**Current milestone: M5 — Remote access to a node's own UI, shared sessions and manual takeover** (on top of M4 — Agent-to-agent delegation, task engine and agent discussion; M3 — Node identity, Cloudflare Tunnel, Pairing, Agent Network; M2 — GitHub integration + Project; and M1 — Local Web + OMP RPC + Settings). M1 is a local server and browser UI that drive OMP over its RPC protocol (sessions, streaming chat, tool-call tracking, model selection, context usage and cost), plus Settings for GitHub accounts, OMP providers/login/model roles, and an LLM usage dashboard that keeps OMP-recorded usage and provider-reported quota apart. M2 adds real Git (see [Git and GitHub projects](#git-and-github-projects)): clone a GitHub repository into a new project, status/diff/history, branches, stage/commit, fetch / fast-forward pull / push (never forced), conflict check, pull requests, and a `.clmesh/` bootstrap — in the Git panel of each project. M3 connects nodes (see [Pair two machines](#pair-two-machines)): a Cloudflare Tunnel exposes a separate network listener that serves only the signed `/api/v1`, nodes pair with a short invitation code and verified fingerprints, show each other online/offline, and list each other's agents in an Agent Directory. M4 adds delegation (see [Delegate a task and let two agents talk](#delegate-a-task-and-let-two-agents-talk-m4)): a task is handed to an agent on a paired node, run there with a pushed task branch as the result, discussed in a shared thread whose messages are injected into both agents' sessions, and reconciled after either node was offline. M5 adds shared sessions (see [Share a session and continue it on another node](#share-a-session-and-continue-it-on-another-node-m5)): a session on one node is mirrored live to another, discussed in a shared thread, checkpointed to a shared git branch plus an OMP session snapshot, and continued on the other node by a manual takeover — and each node's own domain can serve its web UI to its owner ([Open a node's UI remotely](#open-a-nodes-ui-remotely)). Shared context and the planned handoff protocol are designed ([docs](#documentation)) but arrive in M6–M7; they appear in the UI as disabled entries with a milestone badge.
+**Current milestone: M7 — Handoff: move a running task to another node, with dependency setup and a durable acknowledgement** (on top of M6 — Shared context; M5 — Remote access to a node's own UI, shared sessions and manual takeover; M4 — Agent-to-agent delegation, task engine and agent discussion; M3 — Node identity, Cloudflare Tunnel, Pairing, Agent Network; M2 — GitHub integration + Project; and M1 — Local Web + OMP RPC + Settings). M1 is a local server and browser UI that drive OMP over its RPC protocol (sessions, streaming chat, tool-call tracking, model selection, context usage and cost), plus Settings for GitHub accounts, OMP providers/login/model roles, and an LLM usage dashboard that keeps OMP-recorded usage and provider-reported quota apart. M2 adds real Git (see [Git and GitHub projects](#git-and-github-projects)): clone a GitHub repository into a new project, status/diff/history, branches, stage/commit, fetch / fast-forward pull / push (never forced), conflict check, pull requests, and a `.clmesh/` bootstrap — in the Git panel of each project. M3 connects nodes (see [Pair two machines](#pair-two-machines)): a Cloudflare Tunnel exposes a separate network listener that serves only the signed `/api/v1`, nodes pair with a short invitation code and verified fingerprints, show each other online/offline, and list each other's agents in an Agent Directory. M4 adds delegation (see [Delegate a task and let two agents talk](#delegate-a-task-and-let-two-agents-talk-m4)): a task is handed to an agent on a paired node, run there with a pushed task branch as the result, discussed in a shared thread whose messages are injected into both agents' sessions, and reconciled after either node was offline. M5 adds shared sessions (see [Share a session and continue it on another node](#share-a-session-and-continue-it-on-another-node-m5)): a session on one node is mirrored live to another, discussed in a shared thread, checkpointed to a shared git branch plus an OMP session snapshot, and continued on the other node by a manual takeover — and each node's own domain can serve its web UI to its owner ([Open a node's UI remotely](#open-a-nodes-ui-remotely)). Shared context and the planned handoff protocol are designed ([docs](#documentation)) but arrive in M6–M7; they appear in the UI as disabled entries with a milestone badge.
 
 ## Monorepo layout
 
@@ -24,10 +24,12 @@ packages/
   git-engine/        Real `git` CLI wrapper: status, diff, branches, commit, clone/fetch/pull/push, askpass auth broker
   provider-usage/    Normalized `omp stats` / `omp usage` / `omp models` data
   task-engine/       Pure task rules (M4): state machine, epoch/budget rules, brief + injection texts, host-tool schemas, repo/branch helpers
+  handoff-engine/    Pure handoff rules (M7): manifest, source/target state tables, recovery decisions, fencing tokens, environment detection, setup runner, resume prompt
+  context-engine/    Pure context rules (M6): versions, conflict detection, `.clmesh/` mapping, FTS5 query builder, project-memory preface, sync wire schemas
 docs/                Architecture and design documents
 ```
 
-Planned packages (not yet): `context-engine`, `handoff-engine`, `shared-ui` — see the [module dependency diagram](docs/architecture.md#3-module-dependency-diagram).
+Planned packages (not yet): `shared-ui` — see the [module dependency diagram](docs/architecture.md#3-module-dependency-diagram).
 
 Package scope is `@clam/*`. Versioned project metadata that may live in a repository is stored under `.clmesh/`.
 
@@ -169,6 +171,54 @@ The executing agent's question arrives in your session as a prompt starting with
 
 Notes: do not put secrets in task text or messages (they cross the network and Cloudflare); a task needs `tasks.send` granted by the executor; the executor chooses nothing the sender cannot see — the other node never gets your local paths or credentials, only what the task, thread and result contain ([docs/security.md §5a](docs/security.md#5a-task-delegation-m4-what-crosses-nodes-and-what-can-go-wrong)). Protocol: [docs/agent-network-protocol.md §5.5–5.8](docs/agent-network-protocol.md#55-post-tasks--taskssend-granted-by-the-executor-to-the-sender); design: [docs/architecture.md §4.6c](docs/architecture.md#46c-task-engine-executor-host-tools-and-recovery-m4).
 
+## Work without a git repository
+
+Git is optional everywhere. You can work with agents on A and B on a plain folder:
+
+* **A project without git.** In the UI choose *New empty folder* (or `POST /api/local/projects {"workspaceId","name"}` with **no `path`**): CL Agent Mesh creates `<dataDir>/projects/<id>` and the project is `managed`. Pointing a project at any existing folder works too; `vcs` (`git`/`none`) is read from the folder every time. Deleting the project keeps the folder unless you ask for `DELETE /api/local/projects/<id>?deleteFiles=true` (managed projects only).
+* **A task without a repository.** `POST /api/local/tasks` with just `targetNodeId`, `title`, `description` (plus `workspaceId` if the target shares several) runs in a fresh folder on the executor and returns a summary. Add `projectId` + `inputPaths` to send files along, and `deliverAs: "files"` to get back the files the agent created or changed:
+
+```bash
+curl -s -X POST http://127.0.0.1:4317/api/local/tasks -H 'content-type: application/json' -d '{
+  "targetNodeId":"<B node id>", "projectId":"<A managed project id>", "inputPaths":["notes.txt"], "deliverAs":"files",
+  "title":"Append and summarize", "description":"Append a line to notes.txt and create summary.md." }'
+curl -s "http://127.0.0.1:4317/api/local/tasks/<id>/files/preview?projectId=<A project id>"   # per file: new | unchanged | update | conflict, + diffs
+curl -s -X POST http://127.0.0.1:4317/api/local/tasks/<id>/files/apply -H 'content-type: application/json' -d '{"projectId":"<A project id>","overwrite":[]}'
+```
+
+  A file you changed locally since you sent it is a **conflict** and is only replaced when you list it in `overwrite`; nothing is ever deleted. Credential-looking files are refused as input and left out of results (rule names only).
+* **A shared session without git.** Share a session of a plain folder exactly as in M5 (`POST /api/local/sessions/<id>/participants`, or hand over). The shared session is in **files mode**: the driver's folder travels as a bundle with every checkpoint, B accepts into a managed folder (or one of its plain projects), takeover and hand-over restore the folder from the last bundle (a conflicting local edit refuses a takeover unless you confirm; your version is saved as a rescue bundle first), and a former driver's work after its last checkpoint is kept as a rescue bundle you can look at and apply (`/api/local/shared/<id>/rescue/preview|apply`). Details: [docs/shared-sessions.md §11](docs/shared-sessions.md#11-files-mode-shared-sessions-without-a-git-repository-migration-0006_nogit).
+
+## Chats with agents: no project, no repository, files both ways
+
+"Ask agent A and agent B to research a topic, write a report, make a video" needs no GitHub repository and no project picker:
+
+* **A chat without a project.** `POST /api/local/sessions {"title"?}` with no `projectId` gives the conversation a working folder of its own, `<dataDir>/projects/<id>` (a managed folder, `Project.origin = "chat"`, in the node's first workspace or the `workspaceId` you pass; a default workspace is created on a fresh node). The agent writes its notes, reports, images, audio and video there.
+* **See, preview and download the files** from any node's UI, including a remote UI over the node's own domain: `GET /api/local/projects/<id>/raw?path=…` streams the bytes with the right content type and HTTP range support (video/audio seeking, PDF), `&download=1` forces a download; `POST …/upload?path=…` stores raw bytes (streamed to disk up to 2 GB, parent folders created, `409` when the file exists unless `&overwrite=1`). Both stay inside the project folder (no `..`, no symlink escape, never `.git`).
+* **Files in a group chat.** In a shared session (files mode) a person attaches files to a message (`POST /api/local/shared/<id>/attachments?name=…` with the raw bytes, then `attachmentIds` in the message). The message carries the file's metadata; every member node stores the bytes once under `<dataDir>/attachments/<sha256>`, fetching them from any member that has them and verifying the digest — at once up to 100 MB, otherwise the first time somebody opens the file. When a message reaches an agent, its files are first copied into that agent's working folder under `attachments/<name>` (never overwriting: `name (2).ext`) and the prompt lists the paths. Agents post what they produce with the host tool **`mesh_share_file({path, caption?})`**; it appears in the chat as a message from that agent, and `POST …/attachments/<attId>/save` copies any posted file into a local project folder.
+
+## Shared context: memory, plans and decisions (M6)
+
+A **context** is a short markdown document — a lasting fact (*memory*), a *decision*, a *plan*, a *summary* or a *note* — that belongs to a workspace or to one project. Every context is **private to your node** until you mark it **shareable**; then it is copied to every node that shares the workspace (no git needed), searched in milliseconds, told to agents, and — for a git project — can be written to `.clmesh/` in the repository. Versions are immutable; if two nodes edit the same context at once it is reported as a **conflict** and a person chooses (nothing is merged automatically).
+
+```bash
+# create a shareable memory (type: memory | plan | decision | summary | note; omit projectId for the whole workspace)
+curl -s -X POST http://127.0.0.1:4317/api/local/contexts -H 'content-type: application/json' -d '{
+  "workspaceId":"<ws>", "type":"memory", "title":"Coding style", "body":"Tabs, no semicolons.", "shareable":true }'
+curl -s "http://127.0.0.1:4317/api/local/contexts/search?q=semicolons&workspaceId=<ws>"            # ranked, with «hit» excerpts
+curl -s -X PATCH http://127.0.0.1:4317/api/local/contexts/<id> -H 'content-type: application/json' \
+  -d '{"baseVersion":1,"body":"Tabs, no semicolons, trailing commas."}'                             # 409 stale_version if someone edited first
+curl -s -X POST http://127.0.0.1:4317/api/local/contexts/<id>/resolve -H 'content-type: application/json' -d '{"keep":"merged","body":"…"}'   # keep: local | remote | merged
+curl -s http://127.0.0.1:4317/api/local/workspaces/<ws>/members                                      # this node + paired peers sharing the workspace
+curl -s -X POST http://127.0.0.1:4317/api/local/workspaces/<ws>/members -H 'content-type: application/json' -d '{"nodeId":"<peer node id>"}'
+```
+
+* **Sync between nodes.** Pair the nodes and let each one grant the other the capability **`context.sync`** (peer settings → capabilities; it is not part of the default grant). A shareable context then appears on every member node within a second or so, edits flow both ways, an offline node catches up when it returns, and deleting a shareable context removes it everywhere. The sender must also be a **member of the workspace** on the receiver (pairing makes the first membership; `POST /workspaces/<ws>/members` adds a paired node to another workspace and creates it there). Stopping to share a context is only possible on the node that created it. Protocol: [docs/agent-network-protocol.md §5.9](docs/agent-network-protocol.md#59-post-contextsync--contextsync).
+* **Project-level contexts** follow the project: a project linked to the same GitHub repository on both nodes (or, for a plain folder, with the same name in the workspace) shares them; workspace-level contexts are not tied to any project.
+* **Agents.** Every agent session has two tools: `mesh_memory` (search / read / list the project's memory) and `mesh_remember` (save a note — **always private**, 12 per session, and it cannot change anything that has been shared). The **first prompt of a new session** in a project with contexts starts with a short "Project memory" section (titles and first lines, about 2 000 characters; memory first, then newest).
+* **`.clmesh/` in a git project** (never committed for you): `POST /api/local/projects/<id>/context/export` writes the shareable contexts to `.clmesh/memory|decisions|plans|notes|summaries/*.md` plus `context/index.json`, refusing any context that contains something that looks like a secret (rule and line are reported, never the value); review and commit them like any change. After a `git pull`, `POST /api/local/projects/<id>/context/import` reads them back (created / updated / unchanged / conflicts / skipped). Details: [docs/github-integration.md §9](docs/github-integration.md#9-clmesh-layout-versioned-in-the-repo).
+* **Search** is SQLite FTS5 over the current text of every context (answers in well under 100 ms with 10 000 snapshots). Schema and design: [docs/database-schema.md §3.3](docs/database-schema.md#33-context-and-git-sync--m2--m6); what crosses nodes and the threats: [docs/security.md §5c](docs/security.md#5c-workspace-context-and-working-folder-bundles-m6-wave-what-crosses-nodes-and-what-can-go-wrong).
+
 ## Share a session and continue it on another node (M5)
 
 A session that runs on node A can be **shared** with an agent on node B: B shows A's conversation live (read-only), both agents and both humans talk in one shared thread, and A keeps **checkpoints** (a commit pushed to a shared git branch plus a session snapshot sent to B). If A goes offline, a person on B presses **Continue on this node** and B's agent carries on from the last checkpoint; A is fenced and shows a read-only "moved" copy when it returns. Reference: [docs/shared-sessions.md](docs/shared-sessions.md).
@@ -205,9 +255,47 @@ curl -s -X DELETE http://127.0.0.1:4317/api/local/shared/<shared id>/transfer   
 
 Notes: snapshots contain whole conversations and travel only to participants over the signed tunnel — do not share a session that must not reach the other node. Protocol: [docs/agent-network-protocol.md §5.9a](docs/agent-network-protocol.md#59a-shared-sessions--sessionsshare); design: [docs/architecture.md §4.6d](docs/architecture.md#46d-shared-sessions-takeover-and-the-nodes-own-domain-m5).
 
+## Hand a running task to another node (M7)
+
+A task that runs on node **B** (delegated by node **A**) can be **handed off** to node **C** while it is in flight: B stops, C restores the work, installs what the work needs, starts a NEW agent session, and from then on C owns the task. A's Task shows the new executor and follows its events and result; B can never run the task again, even if it comes back after a crash (ownership **epochs** and a fencing token). Nothing is released until C wrote a **durable acknowledgement**.
+
+**Prerequisites.** Nodes paired (A–B, A–C and B–C, all in the task's workspace); **`handoff.receive` granted in both directions** between B and C (Network → the peer → capabilities; the Hand-off dialog only offers peers that granted it) and `tasks.receive` from A to C; the task's sender A must be a paired workspace member on C. Git tasks need the same GitHub repository linked on both; files/summary tasks work without any repository.
+
+**1. Hand off (on B).** Task → **Hand off…** (or `POST /api/local/handoffs`). B freezes the task, lets or makes the agent settle (`stopRunning`), asks OMP for a summary (secret-scanned), commits and pushes the work in progress to the task branch (or ships a patch), or bundles the task folder, records the environment (runtimes, package manager, setup/check commands you listed), and offers it to C.
+```bash
+curl -s -X POST http://127.0.0.1:5127/api/local/handoffs -H 'content-type: application/json' \
+  -d '{"taskId":"<task id>","targetNodeId":"<C node id>","stopRunning":true,"setupCommands":["npm ci"],"checkCommand":"npm test"}'   # → 202 Handoff
+```
+**2. Accept and set up (on C).** In **Handoff Center** C accepts (choosing the project/agent), or accepts automatically (**Settings → Handoffs → Accept handoffs automatically**). **Settings → Handoffs → Dependency setup** decides what happens to the install/setup commands: *Ask me* (each command waits for your approval in the Handoff Center; denied commands are skipped and reported to the agent), *Run automatically*, or *Never run*.
+```bash
+curl -s -X POST http://127.0.0.1:5137/api/local/handoffs/<id>/decide -H 'content-type: application/json' -d '{"decision":"accept"}'
+curl -s -X POST http://127.0.0.1:5137/api/local/handoffs/<id>/setup  -H 'content-type: application/json' -d '{"approve":["<setup command id>"],"deny":[]}'
+```
+**3. What you see.** Both nodes show the same timeline (`GET /api/local/handoffs/<id>`, topic `handoff:<id>`); C shows the ten steps. B stays the owner (and keeps the task frozen) until C's ack arrives; a deadline (30 min, **Extend** it) ends in `ack_timeout`, where you can **Reclaim** the task on B (needs proof that C did not ack, otherwise an explicit override). A failed setup/validation on C can be fixed and **Retried**.
+
+Crash safety: every state is saved before its side effect, so both nodes recover at boot and when the peer reconnects. To rehearse a crash, start a node with `CLAM_FAULT=handoff:source:awaiting_ack` (or `target:acked`, `*`…): it exits right after that state became durable. Details: [docs/handoff-protocol.md](docs/handoff-protocol.md#11-implemented-as-m7).
+
 ## Open a node's UI remotely
 
 Each node's domain (its Cloudflare Tunnel) can also serve **that node's own web UI to you**, so you can watch a session from another machine — for example B's continuation after a takeover. It is **off by default** and can only be switched on **at the machine** (the loopback UI at `http://127.0.0.1:4317`): set an owner password (**Settings → Security**, at least 12 characters; the first one can only be set from loopback), then switch **Remote access** on. After that, `https://<node's tunnel domain>/` shows a login page; the session cookie is `HttpOnly`/`Secure`/`SameSite=Strict`, mutating requests need a matching `Origin`, and login attempts are throttled. `/api/v1` is unaffected: node-to-node calls still use signatures only. The UI port itself stays loopback-only. Everything about the credential, cookie, CSRF, lockout and headers is in [docs/security.md §5b](docs/security.md#5b-remote-ui-access-the-owner-logs-in-through-the-nodes-own-domain) — read it before enabling the switch, because a signed-in owner can run commands on that machine through its agents. With a quick tunnel the domain changes at every start; use a named tunnel for a stable address.
+
+## The machine's Browser
+
+Every machine has its **own Browser** in its web UI (**Browser** in the sidebar): a real headless Chromium-family browser that runs **on that machine** and is streamed to the page, so `localhost:1234` is *that machine's* localhost. Agent X on machine A is serving a web app on `localhost:5173`? Open A's UI (`http://127.0.0.1:4317` at A, or A's domain from anywhere), open **Browser**, type `localhost:5173` — or click the **Running on this machine** chip (`Todo demo · :5173`, web servers found with `lsof`/`ss`/`netstat`, labelled with the page title, newest first; CL Agent Mesh's own servers and system daemons left out). It is the machine's browser, not yours: Vite HMR, websockets and absolute paths just work, and it works through a quick tunnel too.
+
+* **Using it.** Tabs (title, favicon, loading bar), address bar (`localhost:3000`, `3000` and `:3000` become `http://localhost:3000`; other bare hosts get https), back/forward/reload/stop, mouse, touch, keyboard, IME and paste (**Copy** button for the page's selection), page dialogs (`alert`/`confirm`/`prompt`), file uploads from the device you are sitting at, downloads (saved in `<dataDir>/browser-downloads`, offered as links), and a **Console / Network errors** panel for debugging the agent's app. **Fit / Desktop 1440 / iPhone 16 Pro Max** switches the emulated viewport (the iPhone mode adds touch and a mobile user agent) so you can test the app responsively. A debug overlay shows FPS, KB/s and latency.
+* **Which browser.** `CLAM_BROWSER_PATH`, then an installed Google Chrome / Chromium / Edge / Brave, then Playwright's cached Chromium (`~/Library/Caches/ms-playwright`, `~/.cache/ms-playwright`). None found: the page offers **Install Chromium** (`npx playwright install chromium` into `<dataDir>/browsers`, with progress). One process, started on first use with a dedicated profile (`<dataDir>/browser-profile`, never your own), controlled over a private pipe (no debugging port), closed after 15 idle minutes without a viewer (`CLAM_BROWSER_IDLE_MS`).
+* **Who may use it.** On the machine's own UI it is always available. Through the machine's domain it is **off by default**: switch **Remote Browser** on in **Settings → Security** (from the machine itself, or from a signed-in remote session by re-entering the owner password); logging out everywhere or switching it off closes the live sockets at once. Nothing is relayed through the mesh `/api/v1`: another machine's **Open <machine>'s Browser** button on the peer page opens *that machine's own UI* (`<its public URL>/browser`) in a new tab, where you sign in. See [docs/security.md §5e](docs/security.md#5e-machine-tools-the-browser).
+
+## The machine's own Terminal
+
+Every machine has its **own Terminal** in its web UI (**Terminal** in the sidebar, or **Open terminal here** on a project): real shells (PTYs, `node-pty`) running as the user that runs the node, in that machine's own home or a project/chat folder. `ls`, `vim`, `top`, `htop`, `ssh` and every other full-screen program work.
+
+* **Using it.** Several terminals as tabs (rename with a double-click, close with ×); the starting folder is Home, a project or a chat folder; a login shell (`$SHELL -l`) or any shell listed in `/etc/shells`; `TERM=xterm-256color`, `COLORTERM=truecolor`. Find in output (⌘F), copy/paste, text size (also pinch on a phone); light and dark themes follow the app. On a phone an accessory key bar (Esc, Tab, Ctrl, Alt, arrows, `|`, `~`, `/`, `-`, paste) sits right above the keyboard. Terminals **keep running when the browser closes**: reload or come back later and the page reattaches and replays the last 2 MiB of scrollback. Limits: 12 terminals per machine; a finished shell stays readable for 10 minutes.
+* **Another machine's terminal.** From machine A open **Machines → B → Open B's Terminal**: it opens **B's own UI** (B's public address, `/terminal`) in a new tab and you sign in there. Nothing is relayed through the mesh, so a paired machine never gets a shell on yours.
+* **Who may use it.** On the machine's own (loopback) UI it is always available. Through the machine's domain it is **off by default**: switch it on under **Settings → Security → Terminal and Browser** (at the machine, or from a signed-in remote session by re-entering the owner password), and opening a terminal through the domain asks for the owner password again (10 minutes). Switching it off, logging out or "sign out everywhere" closes its sockets at once. Details and threat notes: [docs/security.md §5d](docs/security.md#5d-machine-terminal-a-shell-on-the-node-and-the-gate-that-guards-the-machine-tools).
+* **API.** `GET/POST /api/local/terminal/sessions`, `GET|PATCH|DELETE /api/local/terminal/sessions/:id`, `GET /api/local/terminal`; the bytes travel on the WebSocket `/ws/terminal/:id` (binary frames both ways, small JSON control frames: `resize`, `ping`; contracts in `packages/contracts/src/terminal.ts`).
+* **Docker.** The node image compiles `node-pty` (build tools are in the builder stage) and ships `bash`, `less` and `nano`; a build-time check spawns a PTY from the production tree.
 
 ## Try two machines on one computer (Docker)
 
@@ -227,6 +315,10 @@ Each node's domain (its Cloudflare Tunnel) can also serve **that node's own web 
 | `CLAM_WEB_DIST` | `apps/web/dist` (when it contains `index.html`) | Built web app to serve statically |
 | `CLAM_OMP_BIN` | auto-detected | Explicit path to the `omp` binary |
 | `CLAM_OMP_PROFILE` | unset | Passed as `--profile` to every `omp` invocation (isolated OMP profile) |
+| `CLAM_BROWSER_PATH` | auto-detected | Explicit Chrome/Chromium/Edge/Brave executable for the machine's Browser |
+| `CLAM_BROWSER_IDLE_MS` | `900000` | Close the Browser process after this long with no viewer and no activity |
+| `CLAM_BROWSER_NO_SANDBOX` | unset | `1` starts Chromium with `--no-sandbox` (containers without user namespaces; the Docker image sets it). Root on Linux gets it automatically |
+| `CLAM_FAULT` | unset | Fault injection for crash tests: `handoff:<role>:<state>[,…]` (`*` wildcards) makes the process exit (code 86) right after that handoff state was saved. Inert when unset |
 | `CLAM_LOG_LEVEL` | `info` | pino log level |
 | `CLAM_LOG_PRETTY` | on under `pnpm dev`, off otherwise | `1` forces human-readable logs (`pino-pretty`); any other value disables them |
 | `CLAM_SECRET_BACKEND` | auto | `auto`, `macos-keychain`, `libsecret` or `encrypted-file`; a forced OS backend that is unusable fails instead of falling back |
@@ -246,12 +338,12 @@ Each node's domain (its Cloudflare Tunnel) can also serve **that node's own web 
 | Document | Contents |
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | Control vs execution plane, module diagram, OMP process model, prompt data flow, deployment, failure model |
-| [docs/database-schema.md](docs/database-schema.md) | All tables, M1 subset, `git_sync_states` (M2), network tables (M3), task tables (M4), shared-session tables (M5), migration plan |
-| [docs/agent-network-protocol.md](docs/agent-network-protocol.md) | `/api/v1` node-to-node protocol: signing, Host binding, idempotency, ordering, fencing, pairing, tasks and discussion (M3–M5 implemented; handoffs are specification) |
+| [docs/database-schema.md](docs/database-schema.md) | All tables, M1 subset, `git_sync_states` (M2), network tables (M3), task tables (M4), shared-session tables (M5), no-git columns (0006), context tables + FTS5 (M6, 0007), handoff tables (M7, 0009), migration plan |
+| [docs/agent-network-protocol.md](docs/agent-network-protocol.md) | `/api/v1` node-to-node protocol: signing, Host binding, idempotency, ordering, fencing, pairing, tasks and discussion, shared sessions, context sync, handoffs (M3–M7 implemented) |
 | [docs/omp-rpc-compatibility.md](docs/omp-rpc-compatibility.md) | Verified OMP 18.14 capabilities, mapped to requirements, with explicit gaps |
-| [docs/github-integration.md](docs/github-integration.md) | Device flow, multi-account, credential storage, repo permissions, M2 Git operations, askpass auth, `.clmesh/` |
+| [docs/github-integration.md](docs/github-integration.md) | Device flow, multi-account, credential storage, repo permissions, M2 Git operations, askpass auth, `.clmesh/` layout, context export/import (M6) |
 | [docs/shared-sessions.md](docs/shared-sessions.md) | Shared sessions as built (M5): model, flows, checkpoints, takeover, transfer, former driver, data model, errors, limits, try-it |
-| [docs/handoff-protocol.md](docs/handoff-protocol.md) | Handoff manifest, state machines, recovery, duplicate-execution prevention |
+| [docs/handoff-protocol.md](docs/handoff-protocol.md) | Handoff manifest, state machines, recovery, duplicate-execution prevention, M7 implementation notes |
 | [docs/security.md](docs/security.md) | Threat model and controls |
 | [docs/ui-sitemap.md](docs/ui-sitemap.md) | Sitemap, responsive layout, wireframes |
-| [docs/roadmap.md](docs/roadmap.md) | Reconciled milestones M1–M10, acceptance criteria, M1–M5 checklists |
+| [docs/roadmap.md](docs/roadmap.md) | Reconciled milestones M1–M10, acceptance criteria, M1–M6 checklists |

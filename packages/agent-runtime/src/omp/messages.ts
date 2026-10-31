@@ -62,6 +62,25 @@ function toTodoPhases(value: unknown): TodoPhase[] {
 	return phases;
 }
 
+/**
+ * The structured part of a `todo` / `ask` tool result (`details`), reduced to what the UI renders; undefined for every
+ * other tool (their details can be large and have no UI of their own). `ask` always comes out as `{ results }`.
+ */
+export function toolDetailsOf(toolName: unknown, details: unknown): unknown {
+	if (!isRecord(details)) return undefined;
+	if (toolName === "todo") {
+		const completedTasks = Array.isArray(details.completedTasks) ? details.completedTasks.filter(isRecord).map((t) => ({ phase: str(t.phase) ?? "", content: str(t.content) ?? "" })) : [];
+		return { op: str(details.op), phases: toTodoPhases(details.phases), completedTasks };
+	}
+	if (toolName === "ask") {
+		// Several questions: `{ results: [{ id, question, options, multi, selectedOptions, customInput?, timedOut? }] }`.
+		if (Array.isArray(details.results)) return { results: details.results.filter(isRecord) };
+		// One question: OMP puts the single result at the top level (no id): the same shape as one entry of `results`.
+		if (Array.isArray(details.selectedOptions)) return { results: [details] };
+	}
+	return undefined;
+}
+
 export function toLiveState(args: {
 	sessionId: string;
 	runtime: RuntimeStatus;
@@ -209,6 +228,8 @@ export function toUiMessage(message: unknown, id: string, opts?: { clientId?: st
 			if (typeof message.toolCallId === "string") out.toolCallId = message.toolCallId;
 			if (typeof message.toolName === "string") out.toolName = message.toolName;
 			out.isError = message.isError === true;
+			const toolDetails = toolDetailsOf(message.toolName, message.details);
+			if (toolDetails !== undefined) out.toolDetails = toolDetails;
 			return out;
 		}
 		case "custom":

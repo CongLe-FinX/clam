@@ -63,10 +63,13 @@ export default function OverviewPage() {
 				description={node.data ? `${node.data.platform}/${node.data.arch} · ${node.data.hostname} · ${node.data.bindAddress}:${node.data.port}` : "Distributed AI Agents. One Shared Workspace."}
 				actions={
 					<>
+						<Button variant="primary" onClick={() => openDialog({ kind: "new-chat" })}>
+							<MessageSquarePlus /> New chat
+						</Button>
 						<Button variant="outline" onClick={() => openDialog({ kind: "create-project" })} disabled={firstRun}>
 							<FolderPlus /> Add project
 						</Button>
-						<Button variant="primary" onClick={() => openDialog({ kind: "create-session" })} disabled={(projects.data?.length ?? 0) === 0}>
+						<Button variant="outline" onClick={() => openDialog({ kind: "create-session" })} disabled={(projects.data?.length ?? 0) === 0}>
 							<MessageSquarePlus /> New session
 						</Button>
 					</>
@@ -108,7 +111,7 @@ export default function OverviewPage() {
 
 			<div className="flex items-center gap-2 text-xs text-subtle">
 				<ShieldCheck className="size-3.5" />
-				Local node · listening on loopback only · fingerprint <span className="font-mono">{node.data ? shortFingerprint(node.data.fingerprint) : "—"}</span>
+				This machine · listening on loopback only · fingerprint <span className="font-mono">{node.data ? shortFingerprint(node.data.fingerprint) : "—"}</span>
 			</div>
 			{health.isError ? <p className="text-xs text-danger">{errorMessage(health.error)}</p> : null}
 		</PageContainer>
@@ -140,7 +143,7 @@ function GettingStarted() {
 					<h2 className="text-[15px] font-semibold tracking-tight">Welcome to CL Agent Mesh</h2>
 					<p className="text-[13px] text-muted-foreground">Three steps to your first agent session.</p>
 					{omp.data && !omp.data.install.installed ? (
-						<p className="mt-2 text-[13px] text-warning">OMP is not installed on this node — agent sessions need it. See Settings → OMP Providers.</p>
+						<p className="mt-2 text-[13px] text-warning">OMP is not installed on this machine — agent sessions need it. See Settings → OMP Providers.</p>
 					) : null}
 				</div>
 				<div className="grid gap-3 sm:grid-cols-3">
@@ -170,7 +173,7 @@ function NodeHealthCard({ className }: { className?: string }) {
 		<Card className={className}>
 			<CardHeader>
 				<CardTitle className="flex items-center gap-2">
-					<Server className="size-4 text-muted-foreground" /> Node health
+					<Server className="size-4 text-muted-foreground" /> Machine health
 				</CardTitle>
 				{h ? (
 					<Badge variant={h.status === "ok" ? "success" : h.status === "degraded" ? "warning" : "danger"}>
@@ -327,7 +330,7 @@ function NetworkCard() {
 				<CardTitle className="flex items-center gap-2">
 					<Network className="size-4 text-muted-foreground" /> Network
 				</CardTitle>
-				<CardLink to="/network/nodes">Connected nodes</CardLink>
+				<CardLink to="/network/nodes">Machines</CardLink>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-3.5 pt-3">
 				{peers.isLoading ? <Skeleton className="h-10" /> : null}
@@ -335,9 +338,9 @@ function NetworkCard() {
 				{peers.isSuccess ? (
 					list.length === 0 ? (
 						<div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
-							<span className="flex-1">No node is paired yet.</span>
+							<span className="flex-1">No machine is paired yet.</span>
 							<Button size="sm" variant="outline" onClick={() => openDialog({ kind: "invite-node" })}>
-								<UserPlus /> Invite a node
+								<UserPlus /> Invite a machine
 							</Button>
 						</div>
 					) : (

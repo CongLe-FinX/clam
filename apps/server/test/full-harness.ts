@@ -15,7 +15,11 @@ import type { ServerConfig, ServerContext } from "../src/context.ts";
 import type { NetworkBase } from "../src/network/types.ts";
 import type { TaskTimings } from "../src/tasks/hub.ts";
 import type { SharedOptions } from "../src/shared/hub.ts";
+import type { ContextTimings } from "../src/context/service.ts";
+import type { HandoffTimings } from "../src/handoff/hub.ts";
+import type { FaultOptions } from "../src/handoff/fault.ts";
 import { assembleContext } from "../src/assemble.ts";
+import type { TerminalOptions } from "../src/terminal/service.ts";
 import type { NetworkOptions, NetworkService } from "../src/network/index.ts";
 import { createAutostartManager } from "../src/services/autostart.ts";
 import { ensureDefaultAgent, ensureNodeRow } from "../src/services/bootstrap.ts";
@@ -75,8 +79,16 @@ export async function createFullHarness(
 		tasks?: boolean;
 		/** Task engine timers (default: fast ones, so polling and retries are observable in milliseconds). */
 		taskTimings?: Partial<TaskTimings>;
+		/** Handoff engine timers (HandoffServiceOptions.timings). */
+		handoffTimings?: Partial<HandoffTimings>;
+		/** Handoff fault injection (HandoffServiceOptions.fault). */
+		handoffFault?: FaultOptions;
 		/** Shared-session timers (default: fast ones). */
 		sharedTimings?: Partial<SharedOptions>;
+		/** Context sync timers (default: a fast reconcile so catch-up is observable in milliseconds). */
+		contextTimings?: Partial<ContextTimings>;
+		/** Terminal service limits/timers (TerminalOptions). */
+		terminal?: TerminalOptions;
 	} = {},
 ): Promise<FullHarness> {
 	const dataDir = options.dataDir ?? mkdtempSync(join(tmpdir(), "clam-full-"));
@@ -149,7 +161,10 @@ export async function createFullHarness(
 	const ctx: ServerContext = assembleContext(base, {
 		network: options.network?.options,
 		tasks: { timings: { mirrorIntervalMs: 150, outboxTickMs: 80, injectRetryMs: 100, injectRetries: 5, ...options.taskTimings } },
+		contexts: { timings: { reconcileMs: 400, ...options.contextTimings } },
 		shared: { timings: { mirrorFlushMs: 40, checkpointDebounceMs: 150, retryMs: 150, reconcileMs: 1_000, idleTimeoutMs: 20_000, transferTimeoutMs: 20_000, transferAcceptTimeoutMs: 20_000, transferStopTimeoutMs: 10_000, transferPollMs: 50, downloadIdleMs: 5_000, ...options.sharedTimings } },
+		terminal: options.terminal,
+		handoffs: { ...(options.handoffTimings && { timings: options.handoffTimings }), ...(options.handoffFault && { fault: options.handoffFault }) },
 	});
 	const net = ctx.network;
 	const app = await buildApp(ctx);
@@ -172,6 +187,8 @@ export async function createFullHarness(
 		netUrl: `http://127.0.0.1:${config.networkPort}`,
 		netPort: config.networkPort,
 		async cleanup(cleanupOptions = {}) {
+			ctx.terminals.stop();
+			await ctx.browser.stop();
 			await app.close();
 			if (tasksRunning) await ctx.tasks.stop();
 			await net.close();

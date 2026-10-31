@@ -105,7 +105,7 @@ export default function GitPage() {
 		<PageContainer wide>
 			<PageHeader
 				title="Git"
-				description="Branch, sync state and local changes of every project on this node."
+				description="Branch, sync state and local changes of every project on this machine."
 				actions={
 					<>
 						<Button variant="outline" onClick={() => void q.refetch()} disabled={q.isFetching} aria-label="Refresh">

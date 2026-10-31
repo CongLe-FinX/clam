@@ -8,6 +8,7 @@ import { KeyedLock, errorText } from "../network/util.ts";
 import type { DecideInput, ShareInput, SharedHub, SharingApi } from "./hub.ts";
 import { newInviteId, newSharedId, type InviteRow, type SharedRow } from "./store.ts";
 import { candidateProjects } from "./views.ts";
+import { createManagedProject, projectVcs } from "../services/project-folders.ts";
 
 const NO_GOAL_TITLE = "New session";
 
@@ -51,8 +52,9 @@ export class SharingService implements SharingApi {
 			this.hub.assertShareable(peer.id);
 			const project = this.ctx.db.select().from(projects).where(eq(projects.id, session.projectId)).get();
 			if (!project) throw ApiError.notFound("Project");
-			const repo = project.repository ? normalizeRepoUrl(project.repository.htmlUrl) : null;
-			if (!repo) throw new ApiError(409, "no_repository", "Link the session's project to a GitHub repository first; the other node needs it to find its clone.");
+			// A project with a linked GitHub repository that is a git working tree shares through a branch; anything else shares the folder as bundles.
+			const linked = project.repository ? normalizeRepoUrl(project.repository.htmlUrl) : null;
+			const repo = shared ? (shared.vcs === "git" && shared.repoUrl ? normalizeRepoUrl(shared.repoUrl) : null) : linked && projectVcs(project.path) === "git" ? linked : null;
 			const member = this.ctx.db
 				.select()
 				.from(workspaceMembers)
@@ -73,7 +75,7 @@ export class SharingService implements SharingApi {
 			if (existing && (existing.state === "active" || existing.state === "invited")) {
 				throw new ApiError(409, "already_participant", `${peer.name} is already ${existing.state === "active" ? "in" : "invited to"} this shared session`);
 			}
-			shared ??= await this.createShared(session, project, repo.url);
+			shared ??= repo ? await this.createShared(session, project, repo.url) : await this.createFilesShared(session, project);
 			const inviteId = newInviteId();
 			const now = new Date().toISOString();
 			this.store.upsertParticipant({
@@ -97,7 +99,8 @@ export class SharingService implements SharingApi {
 				workspaceId: shared.workspaceId,
 				title: shared.title,
 				goal: shared.goal,
-				repo: { url: shared.repoUrl, branch: shared.branch, baseBranch: shared.baseBranch, baseCommit: shared.baseCommit },
+				vcs: shared.vcs === "files" ? "files" : "git",
+				...(shared.vcs !== "files" && shared.repoUrl && shared.branch && { repo: { url: shared.repoUrl, branch: shared.branch, baseBranch: shared.baseBranch, baseCommit: shared.baseCommit } }),
 				epoch: shared.epoch,
 				...(input.agentId && { targetAgentId: input.agentId }),
 				driver: { agentId: session.agentId, agentName: ownerAgent?.name ?? null, uiUrl: this.hub.uiUrl() },
@@ -168,6 +171,50 @@ export class SharingService implements SharingApi {
 		});
 		this.ctx.sessions.setSharedSession(session.id, shared.id);
 		this.hub.discussion.note(shared.id, `Shared session created by ${this.hub.nodeName()} on branch ${branch}.`);
+		return shared;
+	}
+
+	/** First share of a session whose project has no git repository (or none linked): no branch, the working folder travels as bundles. */
+	private async createFilesShared(session: typeof agentSessions.$inferSelect, project: ProjectRow): Promise<SharedRow> {
+		const now = new Date().toISOString();
+		const title = session.title === NO_GOAL_TITLE ? "Shared session" : session.title;
+		const owner = this.ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, session.agentId)).get();
+		const shared = this.store.transaction(() => {
+			const row = this.store.insert({
+				id: newSharedId(),
+				workspaceId: project.workspaceId,
+				title,
+				goal: title,
+				vcs: "files",
+				repoUrl: null,
+				branch: null,
+				epoch: 1,
+				driverNodeId: this.self,
+				driverNodeName: this.hub.nodeName(),
+				localRole: "driver",
+				state: "active",
+				localSessionId: session.id,
+				localProjectId: project.id,
+				agentMessageLimit: this.hub.options.agentMessageLimit,
+			});
+			this.store.upsertParticipant({
+				sharedSessionId: row.id,
+				nodeId: this.self,
+				nodeName: this.hub.nodeName(),
+				agentId: session.agentId,
+				agentName: owner?.name ?? null,
+				role: "driver",
+				state: "active",
+				agentSessionId: session.id,
+				uiUrl: null,
+				snapshotSeq: 0,
+				briefed: true,
+				joinedAt: now,
+			});
+			return row;
+		});
+		this.ctx.sessions.setSharedSession(session.id, shared.id);
+		this.hub.discussion.note(shared.id, `Shared session created by ${this.hub.nodeName()} (no git repository: the working folder travels as a bundle with every checkpoint).`);
 		return shared;
 	}
 
@@ -256,8 +303,9 @@ export class SharingService implements SharingApi {
 			.where(and(eq(workspaceMembers.workspaceId, request.workspaceId), eq(workspaceMembers.memberId, peerId), isNull(workspaceMembers.revokedAt)))
 			.get();
 		if (!member) throw new ApiError(403, "forbidden", "The sender is not a member of that workspace on this node");
-		const repo = normalizeRepoUrl(request.repo.url);
-		if (!repo) throw ApiError.badRequest("repo.url is not a GitHub repository URL");
+		const filesMode = request.vcs === "files";
+		const repo = filesMode ? null : request.repo ? normalizeRepoUrl(request.repo.url) : null;
+		if (!filesMode && !repo) throw ApiError.badRequest(request.repo ? "repo.url is not a GitHub repository URL" : "A git shared session needs repo (its GitHub repository and shared branch)");
 		if (request.targetAgentId && !this.ompAgent(request.targetAgentId)) throw new ApiError(400, "unknown_agent", "The requested agent does not exist on this node");
 		const local = this.store.find(request.sharedSessionId);
 		if (local && local.state === "active") {
@@ -273,20 +321,22 @@ export class SharingService implements SharingApi {
 			fromAgentName: request.driver.agentName ?? null,
 			title: request.title,
 			goal: request.goal,
-			repoUrl: repo.url,
-			repoBranch: request.repo.branch,
+			vcs: filesMode ? "files" : "git",
+			repoUrl: repo?.url ?? null,
+			repoBranch: filesMode ? null : (request.repo?.branch ?? null),
 			workspaceId: request.workspaceId,
 			agentId: request.targetAgentId ?? null,
 			epoch: request.epoch,
 			driverUiUrl: request.driver.uiUrl ?? null,
 			model: request.model ?? null,
 		});
-		const candidates = candidateProjects(this.ctx, repo.key);
+		const candidates = repo ? candidateProjects(this.ctx, repo.key) : [];
 		const only = candidates.length === 1 ? candidates[0] : undefined;
 		let state: wire.SharedInviteAccepted["state"] = "pending";
-		if (peer.autoAcceptTasks && only) {
+		// Files mode needs no matching clone: auto-accepting gives the session a managed folder of its own.
+		if (peer.autoAcceptTasks && (filesMode || only)) {
 			try {
-				await this.accept(row, { projectId: only.id });
+				await this.accept(row, only ? { projectId: only.id } : {});
 				state = "accepted";
 			} catch (error) {
 				this.hub.log.warn({ err: errorText(error), inviteId: row.id }, "auto-accepting a shared session invitation failed; it stays pending");
@@ -327,12 +377,11 @@ export class SharingService implements SharingApi {
 		});
 	}
 
-	/** Accept an invitation: local project + agent, the shared-session rows, the mirror, the participant agent session, the answer to the driver. */
-	private async accept(invite: InviteRow, choice: { projectId?: string; agentId?: string }): Promise<InviteRow> {
-		const repo = normalizeRepoUrl(invite.repoUrl);
-		const key = repo?.key ?? "";
+	/** Git mode: the local clone the user chose, or the only local project of the invitation's repository. */
+	private cloneProject(invite: InviteRow, chosen: string | undefined): ProjectRow {
+		const key = normalizeRepoUrl(invite.repoUrl ?? "")?.key ?? "";
 		const candidates = candidateProjects(this.ctx, key);
-		const projectId = choice.projectId ?? (candidates.length === 1 ? candidates[0]?.id : undefined);
+		const projectId = chosen ?? (candidates.length === 1 ? candidates[0]?.id : undefined);
 		if (!projectId) {
 			throw new ApiError(409, "project_required", candidates.length === 0 ? "No local project is linked to this repository; clone it and link it first, or choose a project explicitly" : "Several local projects match this repository; choose one", {
 				candidates: candidates.map((p) => p.id),
@@ -343,10 +392,28 @@ export class SharingService implements SharingApi {
 		if (!project.repository || `${project.repository.owner}/${project.repository.name}`.toLowerCase() !== key) {
 			throw new ApiError(409, "project_mismatch", "That project is not linked to the shared session's repository");
 		}
+		return project;
+	}
+
+	/** Files mode: a local project of the invitation's workspace the user chose, or a new managed folder for this session. */
+	private folderProject(invite: InviteRow, chosen: string | undefined): ProjectRow {
+		if (chosen) {
+			const project = this.ctx.db.select().from(projects).where(eq(projects.id, chosen)).get();
+			if (!project) throw ApiError.notFound("Project");
+			if (project.workspaceId !== invite.workspaceId) throw new ApiError(409, "project_mismatch", "That project belongs to another workspace than the shared session");
+			return project;
+		}
+		return createManagedProject(this.ctx, { workspaceId: invite.workspaceId, name: `Shared: ${invite.title}`.slice(0, 80), origin: "chat" });
+	}
+
+	/** Accept an invitation: local project + agent, the shared-session rows, the mirror, the participant agent session, the answer to the driver. */
+	private async accept(invite: InviteRow, choice: { projectId?: string; agentId?: string }): Promise<InviteRow> {
+		const filesMode = invite.vcs === "files";
 		const agentId = choice.agentId ?? invite.agentId;
 		let agent = agentId ? this.ompAgent(agentId) : undefined;
 		if (agentId && !agent) throw new ApiError(400, "unknown_agent", "The agent does not exist on this node");
 		agent ??= this.ctx.db.select().from(agents).where(eq(agents.runtime, "omp")).orderBy(agents.createdAt).get();
+		const project = filesMode ? this.folderProject(invite, choice.projectId) : this.cloneProject(invite, choice.projectId);
 
 		const now = new Date().toISOString();
 		const nodeName = this.hub.nodeName();
@@ -356,6 +423,7 @@ export class SharingService implements SharingApi {
 				workspaceId: invite.workspaceId,
 				title: invite.title,
 				goal: invite.goal,
+				vcs: filesMode ? "files" : "git",
 				repoUrl: invite.repoUrl,
 				branch: invite.repoBranch,
 				epoch: invite.epoch,
@@ -509,7 +577,7 @@ export class SharingService implements SharingApi {
 				goal: shared.goal,
 				driver: { agentName: driver?.agentName ?? null, nodeName: shared.driverNodeName },
 				self: { agentName: self.agentName, nodeName: this.hub.nodeName() },
-				repo: { url: shared.repoUrl, branch: shared.branch },
+				repo: shared.repoUrl && shared.branch ? { url: shared.repoUrl, branch: shared.branch } : null,
 				others,
 				agentMessageLimit: shared.agentMessageLimit,
 			});

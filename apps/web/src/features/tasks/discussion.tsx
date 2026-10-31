@@ -104,14 +104,14 @@ function DateRule({ at }: { at: string }) {
 	return <div className="py-1 text-center text-2xs font-medium text-subtle">{dateTime.format(Date.parse(at))}</div>;
 }
 
-/** Agent-message budget (loop guard) as the node enforces it. */
+/** Agent-message budget (loop guard) as the machine enforces it. */
 export function BudgetMeter({ left: budget, noun = "task" }: { left: number; noun?: string }) {
 	const left = Math.max(0, budget);
 	const used = Math.max(0, AGENT_MESSAGE_LIMIT - left);
 	return (
-		<div className="flex flex-col gap-1" title={`Each node lets its agents post this many messages per ${noun}, so two agents cannot talk forever. A human can always continue the discussion.`}>
+		<div className="flex flex-col gap-1" title={`Each machine lets its agents post this many messages per ${noun}, so two agents cannot talk forever. A human can always continue the discussion.`}>
 			<div className="flex items-center justify-between gap-2 text-2xs">
-				<span className={cn(left === 0 ? "font-medium text-warning" : "text-subtle")}>{left === 0 ? "Agent messages used up — a human must continue" : `Agent messages left on this node: ${left} of ${AGENT_MESSAGE_LIMIT}`}</span>
+				<span className={cn(left === 0 ? "font-medium text-warning" : "text-subtle")}>{left === 0 ? "Agent messages used up — a human must continue" : `Agent messages left on this machine: ${left} of ${AGENT_MESSAGE_LIMIT}`}</span>
 			</div>
 			<Progress value={(used / AGENT_MESSAGE_LIMIT) * 100} tone={left === 0 ? "warning" : left <= 3 ? "warning" : "accent"} className="h-1" />
 		</div>
@@ -138,8 +138,8 @@ export function Discussion({ task, messages, visible, hideTitle, className }: { 
 			hideTitle={hideTitle}
 			className={className}
 			logLabel="Task discussion"
-			emptyText="No messages yet. Agents on both nodes can ask questions and answer here; you can step in at any time."
-			inputLabel="Message to the other node"
+			emptyText="No messages yet. Agents on both machines can ask questions and answer here; you can step in at any time."
+			inputLabel="Message to the other machine"
 		/>
 	);
 }
@@ -154,7 +154,7 @@ export interface DiscussionPaneProps {
 	posting: boolean;
 	/** Set when the thread is read-only: shown instead of the composer. */
 	closedNote: string | null;
-	/** This node's agent session the messages are injected into (for the "injected" link). */
+	/** This machine's agent session the messages are injected into (for the "injected" link). */
 	ownSessionId: string | null;
 	visible: boolean;
 	/** The caller already labels the pane (mobile tab). */

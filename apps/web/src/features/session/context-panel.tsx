@@ -1,5 +1,5 @@
 import type { AgentSession, Project, TodoPhase } from "@clam/contracts";
-import { Check, CircleDashed, CircleDot, CircleSlash, RotateCw, X } from "lucide-react";
+import { RotateCw, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "@/components/code-block";
@@ -14,6 +14,7 @@ import { ModelPicker, ThinkingPicker } from "./model-pickers.tsx";
 import { type SessionStream, useStreamMeta, useToolRec } from "./stream-store.ts";
 import { StatusGlyph, ToolDetails, toolDuration, useNow } from "./tool-card.tsx";
 import { summarizeArgs } from "./tool-meta.tsx";
+import { PlanSection } from "./omp/plan-ui.tsx";
 
 function Section({ title, actions, children, className }: { title: string; actions?: ReactNode; children: ReactNode; className?: string }) {
 	return (
@@ -116,45 +117,10 @@ function ContextMeter({ stream, session }: { stream: SessionStream; session: Age
 
 // ── todos
 
-function TodoIcon({ status }: { status: string }) {
-	const cls = "mt-0.5 size-3.5 shrink-0";
-	switch (status) {
-		case "completed":
-		case "done":
-			return <Check className={cn(cls, "text-success")} aria-label="Completed" />;
-		case "in_progress":
-		case "active":
-			return <CircleDot className={cn(cls, "text-accent")} aria-label="In progress" />;
-		case "abandoned":
-		case "cancelled":
-			return <CircleSlash className={cn(cls, "text-subtle")} aria-label="Abandoned" />;
-		default:
-			return <CircleDashed className={cn(cls, "text-subtle")} aria-label={status || "Pending"} />;
-	}
-}
-
 function Todos({ phases }: { phases: TodoPhase[] }) {
-	const total = phases.reduce((n, p) => n + p.tasks.length, 0);
-	const done = phases.reduce((n, p) => n + p.tasks.filter((t) => t.status === "completed" || t.status === "done").length, 0);
 	return (
-		<Section title="Plan" actions={<span className="tabular font-mono text-2xs text-subtle">{done}/{total}</span>}>
-			<div className="flex flex-col gap-3">
-				{phases.map((p, i) => (
-					// biome-ignore lint/suspicious/noArrayIndexKey: phases carry no id
-					<div key={i} className="flex flex-col gap-1.5">
-						{p.name ? <div className="text-xs font-medium">{p.name}</div> : null}
-						<ul className="flex flex-col gap-1.5">
-							{p.tasks.map((t, j) => (
-								// biome-ignore lint/suspicious/noArrayIndexKey: tasks carry no id
-								<li key={j} className="flex items-start gap-2 text-xs">
-									<TodoIcon status={t.status} />
-									<span className={cn("min-w-0 flex-1 break-words", (t.status === "abandoned" || t.status === "cancelled") && "text-subtle line-through", t.status === "in_progress" && "font-medium")}>{t.content}</span>
-								</li>
-							))}
-						</ul>
-					</div>
-				))}
-			</div>
+		<Section title="Plan">
+			<PlanSection phases={phases} />
 		</Section>
 	);
 }

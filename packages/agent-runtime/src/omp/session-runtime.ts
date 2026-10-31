@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
+import { readFile, rename, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { MessagesPage, RuntimeState, RuntimeStatus, SessionEvent, SessionLiveState, SessionStats } from "@clam/contracts";
+import type { AskAnswer, AskQuestion, MessagesPage, RuntimeState, RuntimeStatus, SessionEvent, SessionLiveState, SessionStats, Subagent, SubagentMessagesPage } from "@clam/contracts";
 import {
 	AgentRuntimeError,
 	type HostToolProvider,
@@ -18,6 +20,7 @@ import { OmpEventMapper } from "./events.ts";
 import { HostToolDispatcher, validateHostToolDefinitions, type WireHostToolDefinition } from "./host-tools.ts";
 import { isRecord, type OmpFrame, type OmpResponseFrame } from "./frames.ts";
 import { toLiveState, toSessionStats } from "./messages.ts";
+import { SUBAGENT_ROSTER_FILE, SubagentTracker, parsePersistedSubagents, readSubagentTranscript, transcriptMessages } from "./subagents.ts";
 import { OmpTransport, type TransportExit } from "./transport.ts";
 
 export interface OmpSessionRuntimeCallbacks {
@@ -61,6 +64,12 @@ interface Waiter {
 const DEFAULT_READY_TIMEOUT_MS = 30_000;
 const HISTORY_PAGE_LIMIT = 256;
 const HISTORY_RETRIES = 3;
+/** Generating a handoff document is a model call over the whole conversation. */
+const HANDOFF_TIMEOUT_MS = 5 * 60_000;
+/** `steer_subagent` answers once the subagent accepted the message, which can wait for its current step boundary. */
+const STEER_TIMEOUT_MS = 30_000;
+/** The roster is written at most this often while subagents report progress. */
+const ROSTER_SAVE_MS = 1_000;
 
 function runtimeCodeOf(error: unknown): string | undefined {
 	if (error instanceof AgentRuntimeError && isRecord(error.details)) {
@@ -114,6 +123,11 @@ export class OmpSessionRuntime implements RuntimeSession {
 	private refreshAgain = false;
 	/** Set by the supervisor while it has a restart scheduled, so `whenReady` keeps waiting through backoff. */
 	restartPending = false;
+	/** Subagents of this conversation: tracked across process restarts and persisted next to the conversation files. */
+	private readonly roster: SubagentTracker;
+	private rosterLoaded = false;
+	private rosterTimer: NodeJS.Timeout | null = null;
+	private rosterWrite: Promise<void> = Promise.resolve();
 	/** Host tool calls of the current process. Replaced on every start. */
 	private hostCalls: HostToolDispatcher | null = null;
 	/** Signature of the definitions OMP acknowledged for the current process (null = none registered yet). */
@@ -125,6 +139,7 @@ export class OmpSessionRuntime implements RuntimeSession {
 		this.spec = options.spec;
 		this.sessionId = options.spec.sessionId;
 		this.log = options.log;
+		this.roster = new SubagentTracker({ emit: (event) => this.emit(event), onChange: () => this.scheduleRosterSave() });
 	}
 
 	// ------------------------------------------------------------------ introspection
@@ -236,6 +251,15 @@ export class OmpSessionRuntime implements RuntimeSession {
 				runtimeSessionId: typeof opened.sessionId === "string" ? opened.sessionId : null,
 				runtimeSessionFile: typeof opened.sessionFile === "string" ? opened.sessionFile : null,
 			};
+			// Both are opt-in per process. A build without them answers with a failed response: the agent then keeps working
+			// with `select` dialogs for `ask` and without subagent frames, so neither is a failed start.
+			await transport.request("set_ask_dialog", { enabled: true }).catch((error: unknown) => {
+				this.log.warn({ sessionId: this.sessionId, err: error }, "set_ask_dialog was refused; questions arrive as select dialogs");
+			});
+			await this.loadRoster();
+			await transport.request("set_subagent_subscription", { level: "progress" }).catch((error: unknown) => {
+				this.log.warn({ sessionId: this.sessionId, err: error }, "set_subagent_subscription was refused; subagents will not be listed");
+			});
 			// A failure is a notice, not a failed start: the agent still works, only without the mesh tools.
 			await this.registerHostTools(transport).catch(() => {});
 			await this.loadHistory(transport);
@@ -271,12 +295,14 @@ export class OmpSessionRuntime implements RuntimeSession {
 		const approvalMode = this.spec.approvalMode ?? settings.approvalMode;
 		const args: string[] = [];
 		if (this.opts.profile) args.push("--profile", this.opts.profile);
-		args.push("--mode", "rpc");
-		// Under --no-ui tools that need approval fail closed instead of asking. Only yolo never asks,
+		// `rpc-ui` keeps the tool UI, without which OMP does not offer the `ask` tool at all (`--mode rpc` answers "Tool ask not found").
+		// Under `--no-ui` extensions run headless: tools that need approval fail closed instead of asking. Only yolo never asks,
 		// so every other mode must keep the extension UI so approvals surface as ui_request events.
+		args.push("--mode", "rpc-ui");
 		if (approvalMode === "yolo") args.push("--no-ui");
 		args.push("--cwd", this.spec.cwd, "--approval-mode", approvalMode);
 		if (this.spec.maxCostUsd !== undefined) args.push("--max-cost", String(this.spec.maxCostUsd));
+		if (this.spec.appendSystemPrompt) args.push("--append-system-prompt", this.spec.appendSystemPrompt);
 		return args;
 	}
 
@@ -386,6 +412,7 @@ export class OmpSessionRuntime implements RuntimeSession {
 		// A start in flight fails by itself once its transport is closed; wait so callers see a settled state.
 		if (this.starting) await this.starting.catch(() => {});
 		this.abandonInFlightWork("Agent runtime stopped", "aborted");
+		await this.saveRoster();
 		this.pid = null;
 		this.transition("stopped");
 		this.rejectWaiters(new AgentRuntimeError("not_ready", "The agent runtime was stopped"));
@@ -403,6 +430,7 @@ export class OmpSessionRuntime implements RuntimeSession {
 		if (transport !== this.transport) return;
 		this.touch();
 		if (this.hostCalls?.handleFrame(frame as OmpFrame)) return;
+		if (this.roster.handle(frame as OmpFrame)) return;
 		if (frame.type === "response") {
 			this.log.debug({ sessionId: this.sessionId, frame }, "unmatched omp response");
 			return;
@@ -466,9 +494,10 @@ export class OmpSessionRuntime implements RuntimeSession {
 		}
 		this.inflight.clear();
 		for (const request of this.mapper.pendingUiRequests()) {
-			const resolved = this.mapper.markUiResolved(request.requestId);
+			const resolved = this.mapper.markUiResolved(request.requestId, "abandoned");
 			if (resolved) this.emit(resolved);
 		}
+		this.roster.interruptRunning();
 		if (this.agentRunning) this.emit({ type: "agent_end" });
 		this.agentRunning = false;
 		this.settled = true;
@@ -559,7 +588,15 @@ export class OmpSessionRuntime implements RuntimeSession {
 				availableThinkingLevels: this.levels,
 			}),
 			thinkingSelector: this.thinkingSelector,
+			awaiting: this.awaiting(),
 		};
+	}
+
+	/** The oldest unanswered question/approval, for the live state (null = the agent is not waiting for a human). */
+	private awaiting(): SessionLiveState["awaiting"] {
+		const pending = this.mapper.pendingUiRequests();
+		const first = pending[0];
+		return first ? { method: first.method, title: first.title, count: pending.length } : null;
 	}
 
 	private async fetchLevels(transport: OmpTransport): Promise<void> {
@@ -708,6 +745,48 @@ export class OmpSessionRuntime implements RuntimeSession {
 		return toSessionStats(await transport.request("get_session_stats"));
 	}
 
+	async handoffSummary(customInstructions?: string): Promise<{ text: string | null; savedPath: string | null }> {
+		const transport = await this.connected();
+		if (this.agentRunning || !this.settled || this.inflight.size > 0) {
+			throw new AgentRuntimeError("invalid_state", "Cannot hand off while a response is in progress; let the agent settle or abort it first", { state: this.stateName });
+		}
+		const result = await transport.request<{ savedPath?: string } | null>(
+			"handoff",
+			customInstructions === undefined ? {} : { customInstructions },
+			{ timeoutMs: HANDOFF_TIMEOUT_MS },
+		);
+		this.touch();
+		if (result === null || result === undefined) return { text: null, savedPath: null };
+		const savedPath = isRecord(result) && typeof result.savedPath === "string" && result.savedPath !== "" ? result.savedPath : null;
+		if (savedPath) {
+			const text = await readFile(savedPath, "utf8").then(
+				(content) => content.trim(),
+				(error: unknown) => {
+					this.log.warn({ sessionId: this.sessionId, err: error }, "the handoff document could not be read from its saved path");
+					return "";
+				},
+			);
+			if (text) return { text, savedPath };
+		}
+		return { text: await this.newestCompactionSummary(transport), savedPath };
+	}
+
+	/** The handoff is committed as a compaction entry: its summary is the newest `compactionSummary` message of the conversation. */
+	private async newestCompactionSummary(transport: OmpTransport): Promise<string | null> {
+		try {
+			const page = await transport.request<{ messages?: unknown[] }>("get_messages_page", { limit: 64 }, { timeoutMs: 60_000 });
+			const messages = Array.isArray(page?.messages) ? page.messages : [];
+			for (const message of [...messages].reverse()) {
+				if (!isRecord(message) || message.role !== "compactionSummary") continue;
+				const summary = typeof message.summary === "string" ? message.summary.trim() : "";
+				if (summary) return summary;
+			}
+		} catch (error) {
+			this.log.warn({ sessionId: this.sessionId, err: error }, "could not read the handoff summary from the transcript");
+		}
+		return null;
+	}
+
 	async messages(query: MessagesQuery = {}): Promise<MessagesPage> {
 		if (this.stateName === "starting" || this.stateName === "restarting") await this.whenReady();
 		this.touch();
@@ -722,8 +801,15 @@ export class OmpSessionRuntime implements RuntimeSession {
 			throw new AgentRuntimeError("not_ready", "The agent runtime is not running", { state: this.stateName });
 		}
 		let frame: Record<string, unknown>;
+		let answers: AskAnswer[] | undefined;
 		if (body.value === null) {
 			frame = { type: "extension_ui_response", id: pending.requestId, cancelled: true };
+		} else if (pending.method === "ask") {
+			if (body.answers === undefined) throw new AgentRuntimeError("invalid_argument", "A question needs `answers`, one entry per question");
+			answers = validateAskAnswers(pending.questions ?? [], body.answers);
+			frame = { type: "extension_ui_response", id: pending.requestId, answers };
+		} else if (body.answers !== undefined) {
+			throw new AgentRuntimeError("invalid_argument", `Requests of kind "${pending.method}" take \`value\`, not \`answers\``);
 		} else if (pending.method === "confirm") {
 			if (typeof body.value !== "boolean") throw new AgentRuntimeError("invalid_argument", "A confirmation needs a boolean value");
 			frame = { type: "extension_ui_response", id: pending.requestId, confirmed: body.value };
@@ -740,17 +826,127 @@ export class OmpSessionRuntime implements RuntimeSession {
 		}
 		transport.send(frame);
 		this.touch();
-		const resolved = this.mapper.markUiResolved(pending.requestId);
+		const resolved = this.mapper.markUiResolved(pending.requestId, body.value === null ? "cancelled" : "answered", answers);
 		if (resolved) this.emit(resolved);
+		this.scheduleRefresh();
 	}
 
 	pendingUiRequests(): Array<Extract<SessionEvent, { type: "ui_request" }>> {
 		return this.mapper.pendingUiRequests();
 	}
 
+	// ------------------------------------------------------------------ subagents
+
+	/** Every subagent of this conversation seen so far (finished ones included), oldest first. */
+	subagents(): Subagent[] {
+		return this.roster.list();
+	}
+
+	/**
+	 * The subagent's own transcript from `fromByte` on. Asks the running process (`get_subagent_messages`); when the process is
+	 * gone or does not know the subagent any more the transcript file is read directly (same incremental semantics).
+	 */
+	async subagentMessages(subagentId: string, fromByte = 0): Promise<SubagentMessagesPage> {
+		const file = this.roster.sessionFileOf(subagentId);
+		if (!file) throw new AgentRuntimeError("invalid_argument", `Unknown subagent ${subagentId}`);
+		const transport = this.transport;
+		if (transport && transport.state === "ready" && (this.stateName === "ready" || this.stateName === "busy")) {
+			try {
+				const data = await transport.request<{ fromByte?: unknown; nextByte?: unknown; reset?: unknown; entries?: unknown } | undefined>("get_subagent_messages", { subagentId, fromByte });
+				if (isRecord(data) && typeof data.nextByte === "number" && Array.isArray(data.entries)) {
+					return { fromByte: typeof data.fromByte === "number" ? data.fromByte : fromByte, nextByte: data.nextByte, reset: data.reset === true, messages: transcriptMessages(data.entries) };
+				}
+			} catch (error) {
+				this.log.debug({ sessionId: this.sessionId, subagentId, err: error }, "get_subagent_messages failed; reading the transcript file");
+			}
+		}
+		return readSubagentTranscript(file, fromByte);
+	}
+
+	/** Hard-kill one running subagent without aborting the parent turn (`cancel_subagent`). `cancelled: false` = it was not running. */
+	async cancelSubagent(subagentId: string): Promise<{ cancelled: boolean }> {
+		const transport = await this.connected();
+		const data = await transport.request<{ cancelled?: unknown } | undefined>("cancel_subagent", { subagentId });
+		this.touch();
+		return { cancelled: isRecord(data) && data.cancelled === true };
+	}
+
+	/** Message a running subagent as its user (`steer_subagent`); resolves once it accepted the message. */
+	async steerSubagent(subagentId: string, message: string): Promise<void> {
+		const transport = await this.connected();
+		await transport.request("steer_subagent", { subagentId, message }, { timeoutMs: STEER_TIMEOUT_MS });
+		this.touch();
+	}
+
+	private async loadRoster(): Promise<void> {
+		if (this.rosterLoaded) return;
+		this.rosterLoaded = true;
+		try {
+			const restored = parsePersistedSubagents(await readFile(path.join(this.spec.sessionDir, SUBAGENT_ROSTER_FILE), "utf8"));
+			if (restored) this.roster.restore(restored);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") this.log.debug({ sessionId: this.sessionId, err: error }, "subagent roster could not be read");
+		}
+	}
+
+	private scheduleRosterSave(): void {
+		if (this.rosterTimer || this.shuttingDown) return;
+		this.rosterTimer = setTimeout(() => {
+			this.rosterTimer = null;
+			void this.saveRoster();
+		}, ROSTER_SAVE_MS);
+		this.rosterTimer.unref?.();
+	}
+
+	/** Write the roster now (after any save in flight). Failures are only logged: the roster is a cache of what was seen. */
+	private saveRoster(): Promise<void> {
+		clearTimeout(this.rosterTimer ?? undefined);
+		this.rosterTimer = null;
+		const write = async (): Promise<void> => {
+			const roster = this.roster.persisted();
+			if (roster.subagents.length === 0) return;
+			const file = path.join(this.spec.sessionDir, SUBAGENT_ROSTER_FILE);
+			const temp = `${file}.${process.pid}.tmp`;
+			try {
+				await writeFile(temp, JSON.stringify(roster));
+				await rename(temp, file);
+			} catch (error) {
+				this.log.debug({ sessionId: this.sessionId, err: error }, "subagent roster could not be saved");
+			}
+		};
+		this.rosterWrite = this.rosterWrite.then(write);
+		return this.rosterWrite;
+	}
+
 	takeUsage(): UsageDelta[] {
 		return this.mapper.takeUsage();
 	}
+}
+
+/**
+ * Check `answers` against the questions exactly as OMP does and return them normalised (trimmed free text, empty text dropped).
+ * OMP fails the whole `ask` tool call on a mismatching shape instead of guessing, so refuse here with a reason the UI can show.
+ */
+export function validateAskAnswers(questions: AskQuestion[], answers: AskAnswer[]): AskAnswer[] {
+	if (answers.length !== questions.length) {
+		throw new AgentRuntimeError("invalid_argument", `Expected ${questions.length} answers (one per question, in order), got ${answers.length}`);
+	}
+	return questions.map((question, index) => {
+		const answer = answers[index] as AskAnswer;
+		if (answer.id !== question.id) throw new AgentRuntimeError("invalid_argument", `Answer ${index + 1} must be for question "${question.id}", not "${answer.id}"`);
+		const labels = new Set(question.options.map((o) => o.label));
+		const selected = new Set(answer.selectedOptions);
+		if (selected.size !== answer.selectedOptions.length) throw new AgentRuntimeError("invalid_argument", `Question "${question.id}": options must not repeat`);
+		for (const label of selected) {
+			if (!labels.has(label)) throw new AgentRuntimeError("invalid_argument", `Question "${question.id}": "${label}" is not one of its options`);
+		}
+		const customInput = answer.customInput?.trim() ?? "";
+		if (!question.multi && selected.size > 1) throw new AgentRuntimeError("invalid_argument", `Question "${question.id}" takes one option`);
+		if (!question.multi && selected.size === 1 && customInput !== "") {
+			throw new AgentRuntimeError("invalid_argument", `Question "${question.id}" takes an option or free text, not both`);
+		}
+		return { id: question.id, selectedOptions: answer.selectedOptions, ...(customInput === "" ? {} : { customInput }) };
+	});
 }
 
 /** `provider/id` -> parts. The provider is everything before the first slash; ids may contain slashes. A `:thinking` suffix is not part of the id. */

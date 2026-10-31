@@ -8,7 +8,7 @@ const MAX_TOPICS_PER_SOCKET = 256;
 /** A client that lets this much pile up unread is dropped instead of ballooning server memory. */
 const MAX_BUFFERED_BYTES = 16 << 20;
 const HEARTBEAT_MS = 30_000;
-const TOPIC_PATTERN = /^(sessions|runtime|node|network|tunnel|tasks|shared|session:[\w.-]{1,128}|task:[\w.-]{1,128}|shared:[\w.-]{1,128}|login:[\w.-]{1,128}|github-device:[\w.-]{1,128}|git:[\w.-]{1,128}|git-op:[\w.-]{1,128})$/;
+const TOPIC_PATTERN = /^(sessions|runtime|node|network|tunnel|tasks|shared|contexts|handoffs|session:[\w.-]{1,128}|task:[\w.-]{1,128}|shared:[\w.-]{1,128}|handoff:[\w.-]{1,128}|login:[\w.-]{1,128}|github-device:[\w.-]{1,128}|git:[\w.-]{1,128}|git-op:[\w.-]{1,128})$/;
 
 /**
  * The single multiplexed `/ws` endpoint: subscribe/unsubscribe to bus topics, per-topic `seq` stamped by the

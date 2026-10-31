@@ -15,6 +15,8 @@ export function defaultNodeSettings(): NodeSettings {
 		// OMP's own default; stricter modes surface approvals as ui_request events.
 		approvalMode: "yolo",
 		autoStart: false,
+		dependencySetup: "ask",
+		autoAcceptHandoffs: false,
 	};
 }
 

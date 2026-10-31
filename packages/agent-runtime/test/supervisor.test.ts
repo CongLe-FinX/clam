@@ -97,14 +97,16 @@ describe("OmpSupervisor", () => {
 		await waitFor(() => session.status().state === "ready", "ready after settle");
 	});
 
-	it("passes --no-ui only in yolo and keeps the approval UI otherwise", async () => {
+	it("runs rpc-ui in every mode (rpc has no `ask` tool) and adds --no-ui only in yolo", async () => {
 		const { supervisor } = create();
 		await supervisor.open(spec("yolo"));
 		supervisor.updateOptions({ approvalMode: "always-ask" });
 		await supervisor.open(spec("ask"));
 		const [yolo, ask] = spawnRecords();
 		expect(yolo?.argv).toContain("--no-ui");
-		expect(yolo?.argv).toEqual(expect.arrayContaining(["--mode", "rpc", "--approval-mode", "yolo", "--cwd"]));
+		expect(yolo?.argv).toEqual(expect.arrayContaining(["--mode", "rpc-ui", "--approval-mode", "yolo", "--cwd"]));
+		expect(yolo?.argv).not.toContain("rpc");
+		expect(ask?.argv).toEqual(expect.arrayContaining(["--mode", "rpc-ui"]));
 		expect(ask?.argv).not.toContain("--no-ui");
 		expect(ask?.argv).toEqual(expect.arrayContaining(["--approval-mode", "always-ask"]));
 	});

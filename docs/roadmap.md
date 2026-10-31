@@ -109,12 +109,13 @@ Parallelism: M2 and M3 are independent after M1 and can be developed concurrentl
 **Scope:** (1) *Remote access*: each node's own domain can serve that node's web UI to its owner (opt-in, password + cookie session, strict Origin/CSRF checks; `/api/v1` still signature-only) — documented in [security.md §5b](./security.md#5b-remote-ui-access-the-owner-logs-in-through-the-nodes-own-domain). (2) *Shared sessions* ([shared-sessions.md](./shared-sessions.md)): driver/participants with an epoch, invitations with auto-accept, a live read-only **mirror**, a shared **discussion thread** injected into agent sessions with a loop guard (`mesh_team`, `mesh_say`), **checkpoints** = commit + push to `clam/shared/<slug>-<id>` + `omp session pack` snapshot delivered by pull (sha256, 100 MiB cap, 0600), manual **takeover** on a participant (git alignment, `omp session unpack`, new local session, epoch + 1), **transfer** by an online driver, the returning **former driver** as a read-only *moved* copy with a rescue branch, leave/remove; capability `sessions.share`; migration `0005_shared`.
 **Acceptance:** T6 (and the manual part of T4): A shares a session with B's agent, both discuss, B's mirror follows A live, A goes offline, takeover on B continues from the last checkpoint and B's domain shows it, A returns fenced and read-only without losing unpushed work; restarts at any point recover (outbox, pending downloads, `pendingFormerDriver` journal); stale-epoch calls are refused.
 
-### M6 — Workspace/project context + Git sync (P0)
+### M6 — Workspace/project context + Git sync (P0) — **implemented** (checklist §5e)
 
-**Scope:** `@clam/context-engine` (memory, snapshots, FTS5 search), shareable vs private contexts, export to/import from `.clmesh/`, `POST /context/sync`, Shared Context UI, workspace membership UI.
-**Acceptance:** only `shareable` contexts reach Git; secret scanner blocks leaks (tests); conflict reporting without auto-merge; context search returns results in < 100 ms on 10 000 snapshots.
+**Scope:** `@clam/context-engine` (memory, plans, decisions, summaries, notes; immutable versions, FTS5 search), shareable vs private contexts, node-to-node sync of shareable contexts to the members of a workspace (`POST /context/sync`, works with or without git), export to / import from `.clmesh/` for git projects through the secret scanner, conflict reporting without auto-merge, agent access (`mesh_memory`, `mesh_remember`, the project-memory section of a new session's first prompt), Shared Context UI, workspace membership UI.
+**Also delivered in the same wave — work without git, everywhere:** plain-folder and managed (CL Agent Mesh-created) projects, tasks without a repository (`deliverAs: "files"`, optional input files), shared sessions and hand-over/takeover in **files mode** (the working folder travels as a bundle next to the OMP session snapshot). Git mode behaves exactly as before. Reference: [README → Work without a git repository](../README.md#work-without-a-git-repository), [architecture.md §4.6e](./architecture.md#46e-work-without-git-managed-folders-task-files-files-mode-shared-sessions), [shared-sessions.md §11](./shared-sessions.md#11-files-mode-shared-sessions-without-a-git-repository), [protocol §5.5/§5.9a](./agent-network-protocol.md). Contexts work in both worlds: peer sync needs no repository; only the `.clmesh/` export/import needs a git project.
+**Acceptance:** only `shareable` contexts reach Git (and peers); secret scanner blocks leaks (tests); conflict reporting without auto-merge; context search returns results in < 100 ms on 10 000 snapshots (benchmarks in `packages/context-engine/test/search.test.ts` and `apps/server/test/context-crud.test.ts`).
 
-### M7 — Handoff protocol + context sync + recovery (P0)
+### M7 — Handoff protocol + context sync + recovery (P0) — **implemented** (checklist §5f)
 
 **Already delivered by M5** (do not rebuild): manual takeover on a participant (unpack of the last OMP session snapshot into a new local session, git alignment with the shared branch), checkpoints (commit + push + `omp session pack` snapshot, pull delivery with digest), ownership epoch per shared session with `stale_epoch` fencing, the former driver's return (read-only moved copy, rescue branch), the one-action **hand-over** by an online driver (invite if needed, wait for acceptance, stop or wait for the running turn, final checkpoint of everything, target ack, takeover, `SharedSession.transfer` progress, cancel). **Stays in M7:** the planned handoff protocol of [handoff-protocol.md](./handoff-protocol.md) (manifest, source/target state machines, *dependency and environment setup on the target*, durable target ack before the source releases, `/handoffs*` endpoints, `handoffs`/`task_assignments`/`task_checkpoints` tables, fencing tokens per task), recovery at every state with fault injection, the Handoff Center, and context sync (`.clmesh/`, from M6) carried in the package. M7 reuses M5's snapshot/checkpoint code instead of a second mechanism.
 
@@ -331,6 +332,59 @@ Legend as in §5: `[x]` implemented in the repo (code located; tests named where
 - [ ] `omp session moved` is refused by OMP's lease while another omp on the same machine holds the same session id (best effort); a never-prompted session cannot be snapshotted or resumed; the unpack cwd spelling must equal the runtime cwd
 - [ ] No second factor / per-device sessions for remote access ([security.md](./security.md) §5b "not implemented")
 - [ ] Not observed yet over **real Cloudflare tunnels** with two real OMP installations; the suites above use loopback peers and the fake omp
+
+## 5e. M6 detailed checklist
+
+Legend as in §5. Suites: `packages/context-engine/test` (pure rules, `.clmesh/` mapping, FTS5 query builder and the 10 000-snapshot benchmark, preface), `packages/database/test/context-migration.test.ts` (0007 chain, FTS triggers, pre-migration backup), and in `apps/server/test`: `context-crud.test.ts`, `context-sync.test.ts` (two real in-process nodes), `context-clmesh.test.ts` (real git, local bare origin), `context-agent.test.ts` (fake omp: preface + host tools) and `context-executor.test.ts` (a delegated task's executor session gets the preface), helpers in `context-fixtures.ts`.
+
+**Engine (`@clam/context-engine`)**
+- [x] Version model: sha-256 over the canonical title + body (LF, one final newline), versions identified by `(version, sha256)`, `base`/`merged`/`ancestors` lineage, tombstones
+- [x] Rules for versions that meet: fast-forward (the head is in the incoming ancestry), duplicate, stale, **conflict** (concurrent, never merged), edit-beats-deletion, equal text with different history converges on the longer one; merge-free resolution (`local` / `remote` / `merged`) is a NEW version that descends from both, so it fast-forwards wherever it is delivered
+- [x] `.clmesh/` mapping (paths per type, JSON-quoted front matter, `context/index.json` with sorted keys and one entry per line, strict parser, hand-edit detection), FTS5 query builder (prefix + phrase, every term double-quoted letters/digits only, `«»` snippets, bm25 with a title weight), preface builder (≈ 2 000 characters), wire schemas
+
+**Persistence**
+- [x] Migration `0007_context`: `contexts`, `context_snapshots`, `context_replicas`, plus the custom-SQL `context_fts` FTS5 external-content table and its three triggers ([database-schema.md §3.3](./database-schema.md#33-context-and-git-sync--m2--m6))
+
+**Services (`apps/server/src/context`)**
+- [x] CRUD with optimistic concurrency (`baseVersion` → `409 stale_version`), versions, search, tombstones (deleting a shareable context blanks its old text everywhere), conflict state + resolve, retraction (only the creating node may stop sharing; the members lose their copy, sharing again restores it)
+- [x] Peer sync: outbox kinds `context.sync` / `context.member`, `POST /context/sync` (signed, `context.sync`, workspace membership enforced, `Idempotency-Key`), have-index → `want` → push, replicas per peer (`syncedTo`), a version applied from one peer is pushed on to the other members (relay: A reaches C through B in a three-node test), reconcile on peer online and on a timer, offline peers catch up; **private contexts are never read by the sync** (test)
+- [x] Project-level contexts follow the project across nodes by project identity (linked GitHub repository, else project name)
+- [x] `.clmesh/` export (git projects only; scanner refuses a context with a token and reports rule + line; working tree only, never stages or commits; removes the files of contexts that stopped being shareable) and import (created / updated / unchanged / conflicts / skipped; a file with a secret, a private or foreign context is skipped)
+- [x] Workspace members: list, add (local row + signed `POST /context/membership` so the peer creates the workspace if missing), remove (revoked for that workspace only)
+- [x] Agents: host tools `mesh_memory` (search/read/list) and `mesh_remember` (private, budgeted: 12 per session, 20 000 characters, 200 per project; shared items are edited by people only); the first prompt of a brand-new session carries a "Project memory" section (local sessions, task executors, shared participants — one hook in `SessionService`)
+- [x] `contexts` WebSocket topic (`context`, `removed`, `members`)
+
+**Web (`apps/web`, features/context)** — Shared Context page, project context tab, editor with versions, conflict resolution view, membership panel, export/import results (built by the web owner; not exercised by the suites above)
+
+**Live acceptance (server started from source with `tsx`, real OMP `anthropic/claude-haiku-5-5`, two nodes `cx-a` 5037/5038 and `cx-b` 5047/5048 paired on loopback, sandbox repository `CongLe-FinX/clam-sandbox`)**
+- [x] A creates a shareable memory "Coding style: tabs, no semicolons"; B shows it (`synced` on both); a session on B asks for the coding style and answers from the preface (tabs, no semicolons); another session uses `mesh_memory` and finds it
+- [x] The agent on B saves a decision with `mesh_remember` (private, `author.kind = agent`): absent on A after 4 s; present on A once a person marks it shareable
+- [x] Git: with node sync withdrawn, A exports project contexts to `.clmesh/` (token-bearing context refused, nothing committed), pushes a throw-away branch, B fetches it and imports (2 created, 1 unchanged, second import a no-op); node sync restored without conflicts; branch deleted, `main` still `cfeff7f`
+
+**Not in M6 (open)**
+- [ ] Contexts are plain markdown text: no attachments, no per-context permissions beyond private/shareable and workspace membership, no merge tool (a conflict is resolved by choosing a side or typing the merged text)
+- [ ] A `.clmesh/` import attributes an untouched file to `system@<node>` (the front matter's author line is descriptive only)
+- [ ] Deleting a project deletes its local contexts; peers keep theirs (and may push them back as workspace-level ones)
+- [ ] Project identity for plain-folder projects is the project name: two different folders with one name in one workspace share their project-level contexts
+- [x] ~~Handoff packages that carry context (M7) are not built~~ — M7 manifests reference context versions (`contexts[]`), restored at target step 4
+
+## 5f. M7 detailed checklist (and the same wave's machine tools)
+
+Legend as in §5. Suites: `packages/handoff-engine/test` (manifest hashing + secret scan, environment detection incl. nested projects, setup runner, state tables, recovery decisions, fencing tokens), and in `apps/server/test`: `handoff-flow`, `handoff-source`, `handoff-target`, `handoff-setup`, `handoff-fence`, `handoff-recovery`, `handoff-session-kind`, `handoff-crash-source` and `handoff-crash-target` (fault injection after every persisted state, `CLAM_FAULT=handoff:<role>:<state>`).
+
+- [x] `@clam/handoff-engine`: secret-free manifest with canonical sha-256, source/target state machines (`files_restored` instead of `git_restored`: git, folder bundle or no files), ten target steps, recovery decision table (§6), boot fence scan (§8), Ed25519 fencing tokens
+- [x] Migration `0009_handoff` (`handoffs`, `handoff_steps`, `handoff_events`, `handoff_setup`, `handoff_artifacts`, `tasks.fenced`, `tasks.highest_seen_epoch`); wire `POST /handoffs`, `/:id/accept`, `/:id/ack`, `/:id/state`, `GET /handoffs/:id`, artifacts, `POST /tasks/:id/executor` (the sender follows the new owner)
+- [x] Dependency setup on the target (`NodeSettings.dependencySetup` ask/auto/skip, approval in Handoff Center, nested project roots), validation, new local OMP session, durable ack before the source releases, late results kept as `late_result`
+- [x] M5 hand-overs/takeovers recorded as `kind: "session"` handoffs and run the same dependency step before the continuation prompt
+- [x] Handoff Center (list, 10-step timeline, setup approval, failure actions, reclaim with the duplicate-execution warning) and "Hand off…" on running tasks
+- [x] Live: 3-node loopback run (A→B→C mid-run, `npm ci` on C, B killed during `awaiting_ack` and recovered) and the 2-container Docker + quick-tunnel E2E (B→A handoff with approved `npm install`, B restarted on a new URL stays fenced)
+- [x] Same wave: chats without a repository (managed chat folders, Files panel, group-chat attachments, `mesh_share_file`), rich chat output (turn outputs, images/video/PDF cards, mermaid, charts, math), OMP `ask` dialogs (answerable from any member machine), subagents (Team card, steer/stop), plan chip, per-machine Terminal and Browser (loopback always; over the domain opt-in with the owner password), Light/Dark/System theme
+
+**Not in M7 (open)**
+- [ ] `omp session pack` transcript attachment is opt-in and only tested with the fake omp
+- [ ] Recovery-driven cleanup of a git work branch on the target has no test (files mode is tested)
+- [ ] A target retry after a retryable failure only works while the source still waits in `awaiting_ack`
+- [ ] Terminal/Browser: no per-device sessions or second factor beyond the step-up password; iOS keyboard behaviour verified only by viewport emulation
 
 ---
 

@@ -283,7 +283,7 @@ describe("checkpoint notices and acknowledgements", () => {
 
 	it("a notice for a checkpoint whose snapshot the driver does not hold is recorded, the download is given up on and the checkpoint shows no snapshot", async () => {
 		const { shared } = await joined();
-		const notice = { seq: 50, epoch: 1, branch: shared.repo.branch, commit: "a".repeat(40), pushed: true, snapshot: { sha256: "ab".repeat(32), size: 1234, messageCount: 3 }, note: "phantom", at: new Date().toISOString() };
+		const notice = { seq: 50, epoch: 1, branch: shared.repo?.branch, commit: "a".repeat(40), pushed: true, snapshot: { sha256: "ab".repeat(32), size: 1234, messageCount: 3 }, note: "phantom", at: new Date().toISOString() };
 		expect((await post(pair.a, pair.b, `/shared/${shared.id}/checkpoints`, notice)).status).toBe(202);
 		const row = await eventually(() => {
 			const current = pair.b.ctx.shared.store.checkpoint(shared.id, 50);
@@ -292,7 +292,7 @@ describe("checkpoint notices and acknowledgements", () => {
 		expect(row.snapshotPath).toBeNull();
 		expect(row.note).toContain("snapshot unavailable");
 		// a notice without a snapshot at all is just a row
-		const plain = { seq: 51, epoch: 1, branch: shared.repo.branch, pushed: false, snapshot: null, at: new Date().toISOString() };
+		const plain = { seq: 51, epoch: 1, branch: shared.repo?.branch, pushed: false, snapshot: null, at: new Date().toISOString() };
 		expect((await post(pair.a, pair.b, `/shared/${shared.id}/checkpoints`, plain)).status).toBe(202);
 		expect(pair.b.ctx.shared.store.checkpoint(shared.id, 51)).toMatchObject({ pushed: false, snapshotSha256: null });
 		// the snapshot of seq 1 is still the one a takeover would use
@@ -301,7 +301,7 @@ describe("checkpoint notices and acknowledgements", () => {
 
 	it("validates notices and answers epoch_unknown to a notice from a future epoch (and asks the sender who drives)", async () => {
 		const { shared } = await joined();
-		const ok = { seq: 60, epoch: 1, branch: shared.repo.branch, pushed: true, snapshot: null, at: new Date().toISOString() };
+		const ok = { seq: 60, epoch: 1, branch: shared.repo?.branch, pushed: true, snapshot: null, at: new Date().toISOString() };
 		const bad: Array<[string, Record<string, unknown>]> = [
 			["seq 0", { seq: 0 }],
 			["a digest that is not hex", { snapshot: { sha256: "xyz", size: 5, messageCount: 1 } }],
@@ -334,7 +334,9 @@ describe("mirror frames", () => {
 		const path_ = `/shared/${shared.id}/mirror`;
 		const texts = () => transcriptTexts(pair.b, mirrorId);
 
-		// take over the stream with a sync of our own (A is idle, so its real publisher sends nothing meanwhile)
+		// take over the stream with a sync of our own. A's real publisher is detached meanwhile: after a settle it still
+		// refreshes the runtime state and forwards it, and that frame (own stream id) would reset the mirror mid-test.
+		pair.a.ctx.shared.mirror.unpublish(shared.id);
 		const sync = await post(pair.a, pair.b, path_, { type: "sync", epoch: 1, streamId: "str_wire", seq: 5, index: 0, final: true, messages: [message("w1", "wire one")] });
 		expect(sync.status).toBe(200);
 		expect(sync.body).toEqual({ applied: true, lastSeq: 5 });
@@ -367,8 +369,8 @@ describe("mirror frames", () => {
 		expect(next.body).toEqual({ applied: true, lastSeq: 7 });
 		expect(await texts()).toEqual(["wire one", "wire two", "wire three"]);
 
-		// the driver replays its real conversation: the mirror equals A again
-		pair.a.ctx.shared.mirror.syncPeer(shared.id, pair.bId);
+		// the driver publishes again and replays its real conversation: the mirror equals A again
+		pair.a.ctx.shared.mirror.publish(shared.id);
 		const expected = await transcriptTexts(pair.a, sessionId);
 		await eventually(async () => JSON.stringify(await texts()) === JSON.stringify(expected), "B's mirror to equal A's transcript again");
 	});
@@ -454,7 +456,7 @@ describe("who may call what", () => {
 		const mirror = await post(pair.a, pair.b, `/shared/${shared.id}/mirror`, { type: "events", epoch: 1, streamId: "str_x", seq: 1, events: [{ type: "notice" }] });
 		expect(mirror.status).toBe(403);
 		expect(mirror.body.error).toMatchObject({ code: "forbidden", message: expect.stringContaining("driver") });
-		const notice = await post(pair.a, pair.b, `/shared/${shared.id}/checkpoints`, { seq: 70, epoch: 1, branch: shared.repo.branch, pushed: true, snapshot: null, at: new Date().toISOString() });
+		const notice = await post(pair.a, pair.b, `/shared/${shared.id}/checkpoints`, { seq: 70, epoch: 1, branch: shared.repo?.branch, pushed: true, snapshot: null, at: new Date().toISOString() });
 		expect(notice.status).toBe(403);
 		expect(store.checkpoint(shared.id, 70)).toBeUndefined();
 		const transferToB = await post(pair.a, pair.b, `/shared/${shared.id}/transfer`, { epoch: 1, checkpointSeq: 1, sha256: FAKE_SHA });
@@ -476,6 +478,7 @@ describe("who may call what", () => {
 
 		const probes: Array<[string, string, unknown]> = [
 			["POST", "mirror", { type: "events", epoch: 1, streamId: "str_p", seq: 1, events: [{ type: "notice" }] }],
+			["POST", "answer", { epoch: 1, requestId: "ui-1", value: true }],
 			["POST", "checkpoints", { seq: 1, epoch: 1, branch: "b", pushed: true, at: new Date().toISOString() }],
 			["POST", "messages", groupMessage(pair, { messageId: "shm_p" })],
 			["POST", "messages/sync", { cursor: {} }],
@@ -527,6 +530,7 @@ describe("who may call what", () => {
 			["POST", `/shared/${shared.id}/messages`, groupMessage(pair, { messageId: "shm_cap" })],
 			["POST", `/shared/${shared.id}/messages/sync`, { cursor: {} }],
 			["POST", `/shared/${shared.id}/mirror`, { type: "events", epoch: 1, streamId: "str_c", seq: 1, events: [{ type: "notice" }] }],
+			["POST", `/shared/${shared.id}/answer`, { epoch: 1, requestId: "ui-1", value: true }],
 			["POST", `/shared/${shared.id}/checkpoints`, { seq: 1, epoch: 1, branch: "b", pushed: true, at: new Date().toISOString() }],
 			["POST", `/shared/${shared.id}/checkpoints/1/ack`, { sha256: FAKE_SHA, size: 5 }],
 			["POST", `/shared/${shared.id}/driver`, { epoch: 2, reason: "takeover", at: new Date().toISOString() }],
@@ -568,7 +572,7 @@ describe("who may call what", () => {
 			sharedSessionId: shared.id,
 			epoch: 1,
 			driverNodeId: pair.aId,
-			branch: shared.repo.branch,
+			branch: shared.repo?.branch,
 			participants: expect.arrayContaining([expect.objectContaining({ nodeId: pair.aId, role: "driver", state: "active" }), expect.objectContaining({ nodeId: pair.bId, role: "participant", state: "active" })]),
 			lastCheckpoint: expect.objectContaining({ seq: 1, epoch: 1, pushed: true }),
 		});
@@ -684,7 +688,7 @@ describe("snapshot download", () => {
 			expect(stored).toContain(aws);
 		}
 		// the shared branch holds the work, never a snapshot: no .tar, nothing from the session store
-		const branch = shared.repo.branch;
+		const branch = shared.repo?.branch as string;
 		const files = git(pair.origin, "ls-tree", "-r", "--name-only", branch).split("\n").filter(Boolean);
 		expect(files).toContain("NOTES.md");
 		expect(files.filter((f) => /\.tar$|snapshots?\//.test(f))).toEqual([]);

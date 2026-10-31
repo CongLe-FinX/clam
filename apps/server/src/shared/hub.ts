@@ -1,11 +1,13 @@
 import type { wire } from "@clam/agent-network";
-import type { Checkpoint, DecideSharedInviteBody, SharedInvite, SharedMessage, SharedSession, SharedSessionDetail, SharedTopicEvent, TransferBody } from "@clam/contracts";
+import { ATTACHMENT_EAGER_MAX_BYTES, type SaveAttachmentBody, type FileEntry, type SharedAttachment } from "@clam/contracts";
+import type { Checkpoint, DecideSharedInviteBody, FilesApplyResult, FilesPreview, SessionLiveState, SharedInvite, SharedMessage, SharedSession, SharedSessionDetail, SharedTopicEvent, TransferBody, UiResponseBody } from "@clam/contracts";
 import type { GroupMessageKind, MessageTo } from "@clam/task-engine";
-import type { FastifyBaseLogger } from "fastify";
+import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from "fastify";
 import type { z } from "zod";
 import type { ServerContext } from "../context.ts";
 import type { NewOutboxItem } from "../tasks/store.ts";
-import type { CheckpointRow, InviteRow, ParticipantRow, SharedMessageRow, SharedRow, SharedStore } from "./store.ts";
+import type { SharedRescueFiles } from "@clam/database";
+import type { AttachmentRow, CheckpointRow, InviteRow, ParticipantRow, SharedMessageRow, SharedRow, SharedStore } from "./store.ts";
 
 /**
  * The seams between the units of the shared-session feature (docs/shared-sessions.md, "Code map"). `SharedService`
@@ -38,6 +40,8 @@ export interface SharedOptions {
 	transferPollMs: number;
 	/** Per-request timeout of a snapshot download (default 60 s of silence). */
 	downloadIdleMs: number;
+	/** Files up to this size are copied to every member node as soon as they are posted; larger ones are fetched when somebody opens them (default 100 MiB). */
+	attachmentEagerMaxBytes: number;
 	/** How often every reachable peer is asked who drives the shared sessions we have in common (default 30 s; also on every `online` transition and at boot). */
 	reconcileMs: number;
 }
@@ -55,6 +59,7 @@ export const DEFAULT_SHARED_OPTIONS: SharedOptions = {
 	transferPollMs: 250,
 	downloadIdleMs: 60_000,
 	reconcileMs: 30_000,
+	attachmentEagerMaxBytes: ATTACHMENT_EAGER_MAX_BYTES,
 };
 
 export interface ChangedInfo {
@@ -69,6 +74,8 @@ export interface PostInput {
 	author: { kind: "human" | "agent"; agentId: string | null; agentName: string | null };
 	/** Explicit addressing (humans only); without it the @mentions in `text` decide. */
 	to?: MessageTo | undefined;
+	/** Ids of files uploaded to this shared session by this node (`AttachmentApi.upload`), posted with the message. */
+	attachmentIds?: readonly string[] | undefined;
 }
 
 export interface ShareInput {
@@ -125,6 +132,32 @@ export interface DiscussionApi {
 	stop(): void;
 }
 
+/** Files posted in the group chat: stored once per digest, replicated to every member node, handed to the local agent (`attachments.ts`). */
+export interface AttachmentApi {
+	/** `POST /shared/:id/attachments`: store the raw request body (streamed, hashed) as an unattached file of this shared session. */
+	upload(sharedId: string, input: { name: string; mimeType: string | undefined; body: unknown; contentLength: string | undefined }): Promise<SharedAttachment>;
+	/** Check that `ids` are unattached uploads of this node in `sharedId` (throws 400 otherwise) and return them. */
+	claim(sharedId: string, ids: readonly string[]): AttachmentRow[];
+	/** A message that carries files arrived from `originNodeId`: remember their metadata and start fetching the bytes (eagerly up to the size limit). */
+	received(sharedId: string, messageId: string, originNodeId: string, files: readonly wire.SharedAttachmentWire[]): void;
+	/** `GET /shared/:id/attachments/:attId`: stream the file (range supported); fetched from a member first when this node lacks it. */
+	serve(request: FastifyRequest, reply: FastifyReply, sharedId: string, attachmentId: string, download: boolean): Promise<FastifyReply>;
+	/** Wire: the file as stored here for a member that asks. 404 when this node does not hold the bytes. */
+	wireFile(sharedId: string, attachmentId: string): { path: string; size: number; sha256: string; name: string };
+	/** `POST …/save`: copy into a local project folder. */
+	save(sharedId: string, attachmentId: string, body: z.infer<typeof SaveAttachmentBody>): Promise<FileEntry>;
+	/** Copy the files into the project folder of the local agent session (`attachments/<name>`); `null` for a file that could not be fetched. */
+	placeInFolder(sessionId: string, files: readonly AttachmentRow[]): Promise<Array<{ file: AttachmentRow; relativePath: string | null }>>;
+	/** Store a file of the agent's working folder as an unattached group chat file (`maxBytes` caps it; `skipIfPosted` makes a file already in the chat from that path with the same digest yield null). The agent's own path rules apply: inside the folder, a regular file, no `.git`. */
+	registerFromFolder(sharedId: string, sessionId: string, path: string, options?: { maxBytes?: number; skipIfPosted?: boolean }): Promise<AttachmentRow | null>;
+	/** An agent shares a file of its working folder (`mesh_share_file`): stored, then posted to the group as a message of that agent. */
+	shareFile(sharedId: string, sessionId: string, input: { path: string; caption: string | undefined; agent: { id: string | null; name: string | null } }): Promise<{ attachment: SharedAttachment; messageId: string }>;
+	/** Fetch every missing file up to the eager limit now (boot, a peer came online, a message arrived). Never throws. */
+	kick(): void;
+	start(): void;
+	stop(): void;
+}
+
 /** Live copy of the driving session on participant nodes (`mirror.ts`). */
 export interface MirrorApi {
 	/** Driver: start publishing the driving session of `sharedId` (idempotent) and sync the participants that are reachable. */
@@ -137,8 +170,24 @@ export interface MirrorApi {
 	receive(peerId: string, sharedId: string, request: wire.SharedMirrorRequest): wire.SharedMirrorAccepted;
 	/** Freeze the transcript of a session's runtime into `sessionId`'s stored transcript (moved copies are read from it). */
 	freeze(sessionId: string): Promise<void>;
+	/** Driver: the pending questions/approvals (or how one ended) of the driving session changed: publish the new state to the participants now. */
+	requestsChanged(sessionId: string): void;
+	/** Participant: the driver of the mirror's session changed; its questions are not answerable any more. Closes them (`abandoned`) on the mirror and its viewers. */
+	withdrawRequests(mirrorSessionId: string): void;
 	start(): void;
 	stop(): Promise<void>;
+}
+
+/** Questions and approvals answered from any member machine (`requests.ts`). */
+export interface RequestApi {
+	/** Driver: what the driving session waits for and how its latest requests ended (the part of the mirrored state that carries them). */
+	snapshot(sessionId: string): NonNullable<SessionLiveState["requests"]>;
+	/** Participant: forward a person's answer of the mirror session to the driver. Rejects `409 already_answered` (with `details.answeredBy`) when somebody was first. */
+	answer(mirrorSessionId: string, input: z.infer<typeof UiResponseBody>): Promise<void>;
+	/** Wire: `POST /shared/:id/answer` (driver side). */
+	receiveAnswer(peerId: string, sharedId: string, request: wire.SharedAnswerRequest): Promise<wire.SharedAnswerAccepted>;
+	start(): void;
+	stop(): void;
 }
 
 /** Checkpoints and snapshots (`checkpoints.ts`). */
@@ -198,6 +247,22 @@ export interface TransferApi {
 	stop(): Promise<void>;
 }
 
+/** Files mode (no git repository): the working folder travels as bundles (`files.ts`). */
+export interface FilesModeApi {
+	/** Driver: bundle the driving project's folder as the files of checkpoint `seq` (stored 0600). `meta` is null with a problem note when it could not be made. */
+	bundle(shared: SharedRow, seq: number): Promise<{ relative: string | null; meta: { sha256: string; size: number; fileCount: number } | null; problems: string[] }>;
+	/** Wire: absolute path, size and digest of a folder bundle this node holds. 404 when it does not. */
+	bundleFile(sharedId: string, seq: number): { path: string; size: number; sha256: string };
+	/** Participant: the first bundle arrived: place its files in the local folder (existing different files are kept). */
+	applyInitial(sharedId: string, seq: number): Promise<void>;
+	/** Takeover/transfer: restore the folder from the held checkpoint. Throws `409 files_conflict` for local edits unless `force` (transfers always continue, saving the local versions as a rescue bundle first). */
+	restore(shared: SharedRow, held: CheckpointRow, options: { force: boolean; reason: "takeover" | "transfer" }): Promise<{ fileCount: number; applied: string[]; kept: string[]; rescued: number }>;
+	/** Former driver: save everything new or changed since the last synced checkpoint as a rescue bundle; null when there was none. */
+	rescueSinceSync(shared: SharedRow): Promise<SharedRescueFiles | null>;
+	rescuePreview(sharedId: string, projectId: string): Promise<FilesPreview>;
+	rescueApply(sharedId: string, body: { projectId: string; paths?: string[] | undefined; overwrite: string[] }): Promise<FilesApplyResult>;
+}
+
 export interface SharedHub {
 	readonly ctx: ServerContext;
 	readonly store: SharedStore;
@@ -205,10 +270,13 @@ export interface SharedHub {
 	readonly options: SharedOptions;
 	readonly sharing: SharingApi;
 	readonly discussion: DiscussionApi;
+	readonly attachments: AttachmentApi;
 	readonly mirror: MirrorApi;
+	readonly requests: RequestApi;
 	readonly checkpoints: CheckpointApi;
 	readonly epochs: EpochApi;
 	readonly transfers: TransferApi;
+	readonly files: FilesModeApi;
 	nodeName(): string;
 	/** Public base URL of this node's web UI (its domain), or null when it has none. */
 	uiUrl(): string | null;

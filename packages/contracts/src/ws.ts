@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { LoginFlow } from "./omp.ts";
 import type { AgentSession, RuntimeStatus, SessionEvent } from "./session.ts";
 import type { DeviceFlowStatus } from "./github.ts";
+import type { ContextTopicEvent } from "./context.ts";
+import type { HandoffTopicEvent } from "./handoff.ts";
 import type { GitEvent, GitOperationEvent } from "./git.ts";
 import type { NetworkEvent, TunnelEvent } from "./network.ts";
 import type { NodeHealth } from "./node.ts";
@@ -10,7 +12,7 @@ import type { TaskTopicEvent } from "./tasks.ts";
 
 /**
  * Single multiplexed socket at `/ws`.
- * Topics: `session:<id>` · `sessions` · `runtime` · `login:<flowId>` · `github-device:<flowId>` · `node` · `git:<projectId>` · `git-op:<operationId>` · `network` · `tunnel` · `tasks` · `task:<id>` · `shared` · `shared:<id>`.
+ * Topics: `session:<id>` · `sessions` · `runtime` · `login:<flowId>` · `github-device:<flowId>` · `node` · `git:<projectId>` · `git-op:<operationId>` · `network` · `tunnel` · `tasks` · `task:<id>` · `shared` · `shared:<id>` · `contexts` · `handoffs` · `handoff:<id>`.
  */
 export const ClientWsMessage = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("subscribe"), topics: z.array(z.string()).max(64) }),
@@ -33,7 +35,10 @@ export type TopicPayload =
 	| { topic: "tasks"; event: TaskTopicEvent }
 	| { topic: `task:${string}`; event: TaskTopicEvent }
 	| { topic: "shared"; event: SharedTopicEvent }
-	| { topic: `shared:${string}`; event: SharedTopicEvent };
+	| { topic: `shared:${string}`; event: SharedTopicEvent }
+	| { topic: "contexts"; event: ContextTopicEvent }
+	| { topic: "handoffs"; event: HandoffTopicEvent }
+	| { topic: `handoff:${string}`; event: HandoffTopicEvent };
 
 /** Server → client frames. `seq` is per-topic, monotonically increasing; gaps mean the client must refetch. */
 export type ServerWsMessage =

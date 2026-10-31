@@ -16,7 +16,8 @@ ARG CLOUDFLARED_VERSION=2026.10.5
 # ---------------------------------------------------------------- builder
 FROM node:${NODE_VERSION}-bookworm-slim AS builder
 ARG PNPM_VERSION
-# python3 + make + g++ only matter when better-sqlite3 has no prebuilt binary for the platform (node-gyp fallback).
+# python3 + make + g++ build native addons with node-gyp: node-pty (the Terminal's PTY) ships no linux prebuilds, so it is ALWAYS compiled here;
+# better-sqlite3 only needs them when it has no prebuilt binary for the platform.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 make g++ ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
@@ -30,10 +31,12 @@ RUN pnpm build
 # Self-contained production tree for the server: package.json + dist + production node_modules
 # (incl. the compiled better-sqlite3 addon). Workspace packages are bundled into dist/main.js by tsup.
 # (`deploy` also copies the package sources; replace them with the built bundle.)
+# The last check fails the build when the compiled node-pty addon did not make it into the production tree (no Terminal otherwise).
 RUN pnpm --filter @clam/server deploy --prod --legacy /out/server \
  && rm -rf /out/server/dist /out/server/src /out/server/test /out/server/*.ts \
  && cp -r apps/server/dist /out/server/dist \
- && cp -r apps/web/dist /out/web
+ && cp -r apps/web/dist /out/web \
+ && cd /out/server && node -e "const pty=require('node-pty'); const p=pty.spawn('/bin/sh',['-c','exit 0'],{}); p.onExit(()=>process.exit(0)); setTimeout(()=>{console.error('node-pty smoke test timed out'); process.exit(1)},5000)"
 
 # ---------------------------------------------------------------- tools (bun + omp, gh, cloudflared)
 FROM debian:bookworm-slim AS tools
@@ -71,8 +74,10 @@ RUN /opt/bun/bin/bun install -g "@oh-my-pi/pi-coding-agent@${OMP_VERSION}" \
 # ---------------------------------------------------------------- runtime
 FROM node:${NODE_VERSION}-bookworm-slim AS runtime
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates curl jq tini openssh-client procps \
+ && apt-get install -y --no-install-recommends git ca-certificates curl jq tini openssh-client procps less nano iproute2 lsof chromium fonts-liberation fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/*
+# Chromium is the machine's own Browser (headless, controlled over a private pipe; see docs/security.md). Its dedicated profile lives in
+# the data dir; the container has no user namespaces for Chromium's sandbox, so it runs with --no-sandbox (CLAM_BROWSER_NO_SANDBOX).
 COPY --from=tools /usr/local/bin/gh /usr/local/bin/cloudflared /usr/local/bin/
 COPY --from=tools /opt/bun /opt/bun
 COPY --from=builder /out/server /opt/clam/server
@@ -93,6 +98,8 @@ ENV HOME=/home/clam \
     CLAM_DATA_DIR=/home/clam/.clam \
     CLAM_WEB_DIST=/opt/clam/web \
     CLAM_OMP_BIN=/opt/bun/bin/omp \
+    CLAM_BROWSER_PATH=/usr/bin/chromium \
+    CLAM_BROWSER_NO_SANDBOX=1 \
     CLAM_CLOUDFLARED_BIN=/usr/local/bin/cloudflared \
     CLAM_SECRET_BACKEND=encrypted-file \
     CLAM_LOG_LEVEL=info

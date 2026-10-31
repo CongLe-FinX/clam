@@ -85,7 +85,7 @@ export function usePageVisible(): boolean {
  * Cached status of one project. With `live`, subscribes to `git:<projectId>` while the page is visible and bridges events
  * into the cache; a missed event (gap/reconnect) or returning to the tab refetches.
  */
-export function useGitStatus(projectId: string, opts: { live?: boolean } = {}) {
+export function useGitStatus(projectId: string, opts: { live?: boolean; enabled?: boolean } = {}) {
 	const qc = useQueryClient();
 	const visible = usePageVisible();
 	const setOp = useGitUi((s) => s.setOperation);
@@ -93,6 +93,7 @@ export function useGitStatus(projectId: string, opts: { live?: boolean } = {}) {
 		queryKey: gk.status(projectId),
 		queryFn: ({ signal }) => api.get<GitStatus>(routes.gitStatus(projectId), undefined, { signal }),
 		staleTime: 4_000,
+		enabled: opts.enabled ?? true,
 	});
 	const live = Boolean(opts.live) && visible;
 	useTopic(

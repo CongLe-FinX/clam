@@ -1,5 +1,5 @@
 import type { TaskEvent } from "@clam/contracts";
-import { CheckCheck, CircleDot, MessageSquare, StickyNote, Wrench, Zap, type LucideIcon } from "lucide-react";
+import { CheckCheck, CircleDot, History, MessageSquare, StickyNote, Wrench, Zap, type LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -12,6 +12,7 @@ const ICON: Record<TaskEvent["type"], LucideIcon> = {
 	message: MessageSquare,
 	result: CheckCheck,
 	note: StickyNote,
+	late_result: History,
 };
 const SHOWN = 12;
 const time = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });

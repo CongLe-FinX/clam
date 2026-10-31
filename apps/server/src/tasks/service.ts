@@ -1,7 +1,10 @@
 import path from "node:path";
 import type { wire } from "@clam/agent-network";
 import {
+	ApplyFilesBody,
 	TaskStatus,
+	type FilesApplyResult,
+	type FilesPreview,
 	type CreateTaskBody,
 	type Task,
 	type TaskDetail,
@@ -19,6 +22,8 @@ import { errorText } from "../network/util.ts";
 import { readNodeSettings } from "../services/settings.ts";
 import { recordPeerActivity } from "./activity.ts";
 import { ArtifactStore } from "./artifacts.ts";
+import { execState } from "./exec-state.ts";
+import { TaskFiles } from "./files.ts";
 import { TaskExecutor } from "./executor.ts";
 import { DEFAULT_TASK_TIMINGS, type ChangeInfo, type DecideInput, type ExecutorApi, type InjectorApi, type OutboxApi, type PostMessageInput, type SenderApi, type TaskHub, type TaskRole, type TaskTimings } from "./hub.ts";
 import { MeshHostTools } from "./host-tools.ts";
@@ -44,6 +49,7 @@ export class TaskService implements TaskHub {
 	/** The wire response store (protocol §6): generic per `(peer, key)`, shared with future mutating endpoints. */
 	readonly idempotency: IdempotencyStore;
 	readonly artifacts: ArtifactStore;
+	readonly files: TaskFiles;
 	readonly log: FastifyBaseLogger;
 	readonly timings: TaskTimings;
 	readonly sender: SenderApi;
@@ -63,6 +69,7 @@ export class TaskService implements TaskHub {
 		this.store = new TaskStore(ctx.db, { nodeId: ctx.identity.nodeId });
 		this.idempotency = new IdempotencyStore(ctx.db);
 		this.artifacts = new ArtifactStore(this.store, path.join(ctx.config.dataDir, "artifacts"));
+		this.files = new TaskFiles(this);
 		// Units only keep the hub; none may call another unit from its constructor.
 		this.outbox = new OutboxService(this);
 		this.injector = new TaskInjector(this);
@@ -88,6 +95,8 @@ export class TaskService implements TaskHub {
 		// Registered before any runtime is (re)opened, so recovery sessions get the mesh tools too.
 		this.ctx.hostTools.register(this.hostTools);
 		this.ctx.shared.registerHostTools();
+		// Outbox kinds, the prompt guard and the boot fence scan come before any runtime is (re)opened: a task this node released is never resumed.
+		this.ctx.handoffs.prepare();
 		this.ctx.runtime.setHostToolProvider(this.ctx.hostTools);
 		this.injector.start();
 		await this.executor.start();
@@ -95,6 +104,9 @@ export class TaskService implements TaskHub {
 		this.sender.start();
 		// Shared sessions ride this outbox and these sessions: they start once both are up and stop before them.
 		this.ctx.shared.start();
+		this.ctx.contexts.start();
+		// Boot recovery of every non-terminal handoff and the timers; the outbox and the executor run already.
+		this.ctx.handoffs.start();
 		void this.injector.retryPending();
 		this.pruneTimer = setInterval(() => {
 			try {
@@ -111,6 +123,8 @@ export class TaskService implements TaskHub {
 		this.pruneTimer = null;
 		this.stopPeerActivity?.();
 		this.stopPeerActivity = null;
+		await this.ctx.handoffs.stop();
+		await this.ctx.contexts.stop();
 		await this.ctx.shared.stop();
 		await this.sender.stop();
 		await this.outbox.stop();
@@ -128,7 +142,8 @@ export class TaskService implements TaskHub {
 		this.ctx.bus.publish(`task:${taskId}`, { type: "task", task });
 		for (const event of info.events ?? []) this.ctx.bus.publish(`task:${taskId}`, { type: "event", taskId, event: this.store.toEvent(event) });
 		for (const message of info.messages ?? []) this.ctx.bus.publish(`task:${taskId}`, { type: "message", taskId, message: this.store.toMessage(message) });
-		if (row.direction === "incoming" && info.notifyPeer !== false) {
+		// A task that came home (peer = this node) has nobody to notify.
+		if (row.direction === "incoming" && info.notifyPeer !== false && !this.store.isSelfPeer(row)) {
 			// The sender polls authoritatively; this frame only makes it poll now (quick tunnels buffer SSE, so it may arrive late).
 			this.ctx.network.events.append(NODE_STREAM, "task.updated", { taskId, seq: row.lastEventSeq, status: row.status }, row.peerId);
 		}
@@ -163,6 +178,14 @@ export class TaskService implements TaskHub {
 		return this.store.toTask(row);
 	}
 
+	filesPreview(id: string, projectId: string): Promise<FilesPreview> {
+		return this.files.preview(id, projectId);
+	}
+
+	filesApply(id: string, body: z.infer<typeof ApplyFilesBody>): Promise<FilesApplyResult> {
+		return this.files.apply(id, body);
+	}
+
 	async decide(id: string, body: DecideInput): Promise<Task> {
 		const row = this.store.get(id);
 		if (row.direction !== "incoming") throw ApiError.conflict("Only the node that executes a task can accept or reject it");
@@ -193,7 +216,9 @@ export class TaskService implements TaskHub {
 		const task = this.store.get(taskId);
 		const role = this.roleOf(task);
 		if (isTerminalStatus(task.status as TaskStatus)) throw new ApiError(409, "task_finished", `The task is ${task.status}; the discussion is closed`);
-		const allowed = canSendKind(role, input.author.kind, input.kind);
+		// A task that came home (peer = this node) has the same person on both ends: it may instruct its own executor.
+		const asSender = this.store.isSelfPeer(task) ? canSendKind("sender", input.author.kind, input.kind) : null;
+		const allowed = asSender?.ok ? asSender : canSendKind(role, input.author.kind, input.kind);
 		if (!allowed.ok) throw ApiError.badRequest(allowed.message);
 		if (input.author.kind === "agent") {
 			const budget = this.store.budget(taskId);
@@ -206,13 +231,16 @@ export class TaskService implements TaskHub {
 				);
 			}
 		}
-		const peer = this.ctx.network.peers.row(task.peerId);
-		if (!peer || peer.status === "revoked") throw new ApiError(409, "peer_unavailable", "The other node of this task is no longer a paired peer");
-		const needed = role === "sender" ? "tasks.send" : "tasks.receive";
-		if (!(peer.receivedCapabilities as string[]).includes(needed)) {
-			throw new ApiError(409, "capability_missing", `${peer.name} has not granted this node ${needed}, so messages cannot be delivered`, { missing: [needed] });
+		// Work that came home runs here: its thread never leaves this node, so no peer is involved.
+		const selfPeer = this.store.isSelfPeer(task);
+		if (!selfPeer) {
+			const peer = this.ctx.network.peers.row(task.peerId);
+			if (!peer || peer.status === "revoked") throw new ApiError(409, "peer_unavailable", "The other node of this task is no longer a paired peer");
+			const needed = role === "sender" ? "tasks.send" : "tasks.receive";
+			if (!(peer.receivedCapabilities as string[]).includes(needed)) {
+				throw new ApiError(409, "capability_missing", `${peer.name} has not granted this node ${needed}, so messages cannot be delivered`, { missing: [needed] });
+			}
 		}
-
 		const createdAt = new Date().toISOString();
 		const { row: message } = this.store.insertMessage({
 			id: newMessageId(),
@@ -225,7 +253,7 @@ export class TaskService implements TaskHub {
 			kind: input.kind,
 			text: input.text,
 			createdAt,
-			delivery: "pending",
+			delivery: selfPeer ? "local" : "pending",
 		});
 		const events = role === "executor" ? [this.recordMessageEvent(task, message)] : [];
 		const body: wire.TaskMessageRequest = {
@@ -236,8 +264,10 @@ export class TaskService implements TaskHub {
 			author: { kind: input.author.kind, agentId: input.author.agentId, agentName: input.author.agentName },
 			createdAt,
 		};
-		this.store.enqueue({ peerId: task.peerId, taskId, kind: "task.message", refId: message.id, path: `/tasks/${taskId}/messages`, body, correlationId: task.correlationId });
-		this.outbox.kick(task.peerId);
+		if (!selfPeer) {
+			this.store.enqueue({ peerId: task.peerId, taskId, kind: "task.message", refId: message.id, path: `/tasks/${taskId}/messages`, body, correlationId: task.correlationId });
+			this.outbox.kick(task.peerId);
+		}
 		this.changed(taskId, { events, messages: [message] });
 		if (input.author.kind === "human") void this.deliverLocally(task, message);
 		return this.store.toMessage(message);
@@ -250,6 +280,8 @@ export class TaskService implements TaskHub {
 	async receiveMessage(peerId: string, taskId: string, request: wire.TaskMessageRequest): Promise<wire.TaskMessageAccepted> {
 		const task = this.store.find(taskId);
 		if (!task || task.peerId !== peerId) throw ApiError.notFound("Task");
+		const moving = this.movingError(task);
+		if (moving) throw moving;
 		const epoch = checkEpoch(task.epoch, request.epoch);
 		if (!epoch.ok) {
 			throw new ApiError(409, epoch.reason === "stale" ? "stale_epoch" : "conflict", `The message carries epoch ${request.epoch}; the task is at epoch ${task.epoch}`, { currentEpoch: epoch.currentEpoch });
@@ -278,6 +310,21 @@ export class TaskService implements TaskHub {
 		this.changed(taskId, { events, messages: [message] });
 		void this.deliverLocally(task, message);
 		return { messageId: message.id, accepted: true, eventSeq: this.store.get(taskId).lastEventSeq };
+	}
+
+	/**
+	 * What a wire call against `task` gets while the task is moving (docs/handoff-protocol.md §5): `503 handoff_in_progress` while a handoff holds it
+	 * (the sealed manifest must not change), `503 handed_off` once this node released it or lost its epoch. Both are retryable: the sender's outbox
+	 * keeps the call until it learned the new executor. Null for a task that is not moving (and for rows this node does not execute).
+	 */
+	movingError(task: TaskRow): ApiError | null {
+		if (task.direction !== "incoming") return null;
+		if (task.fenced || task.status === "handed_off") {
+			return new ApiError(503, "handed_off", `Task ${task.id} moved to another node`, { executorNodeId: task.executorNodeId, currentEpoch: Math.max(task.highestSeenEpoch, task.epoch), retryAfterSeconds: 2 });
+		}
+		const handoffId = execState(task).handoffId;
+		if (handoffId !== undefined) return new ApiError(503, "handoff_in_progress", `Task ${task.id} is being handed over`, { handoffId, retryAfterSeconds: 2 });
+		return null;
 	}
 
 	private recordMessageEvent(task: TaskRow, message: { id: string; kind: string; text: string; authorKind: string; authorNodeName: string; authorAgentName: string | null }) {

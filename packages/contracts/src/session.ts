@@ -80,6 +80,8 @@ export const AgentSession = z.object({
 	sharedSessionId: z.string().nullable(),
 	/** Set when the work continued on another node (takeover / transfer); this copy is then read-only. */
 	movedTo: z.object({ nodeId: z.string(), nodeName: z.string(), url: z.string().nullable(), sessionId: z.string().nullable(), at: IsoDate }).nullable(),
+	/** Questions and approvals the agent is waiting on (drives the badge in session lists). */
+	pendingRequests: z.number().int().default(0),
 	createdAt: IsoDate,
 	updatedAt: IsoDate,
 });
@@ -89,7 +91,13 @@ export type AgentSession = z.infer<typeof AgentSession>;
 export const ModelSelector = z.string().regex(/^[^/\s]+\/\S+$/, "Use provider/id, e.g. anthropic/claude-haiku-4-5");
 
 export const CreateSessionBody = z.object({
-	projectId: z.string().min(1),
+	/**
+	 * Omit to start a plain chat with no repository: the node creates a managed folder for it (Project.origin `chat`)
+	 * where the agent keeps its notes, reports, media and other outputs.
+	 */
+	projectId: z.string().min(1).optional(),
+	/** Workspace for a chat without `projectId` (defaults to the node's first workspace). */
+	workspaceId: z.string().min(1).optional(),
 	title: z.string().max(120).optional(),
 	/** Defaults to OMP's default role. */
 	model: ModelSelector.optional(),
@@ -142,6 +150,11 @@ export const UiMessage = z.object({
 	clientId: z.string().optional(),
 	// custom
 	customType: z.string().optional(),
+	/**
+	 * Structured result data of a `todo` (`{ phases }`) or `ask` (`{ results }`) tool call, copied from OMP's tool result
+	 * `details` so the UI can render a diff / the answers without parsing the text. Absent for every other tool.
+	 */
+	toolDetails: z.unknown().optional(),
 });
 export type UiMessage = z.infer<typeof UiMessage>;
 
@@ -152,9 +165,201 @@ export const MessagesPage = z.object({
 });
 export type MessagesPage = z.infer<typeof MessagesPage>;
 
+// ---------------------------------------------------------------- turn outputs
+
+/** One file an agent turn created or modified in the session's project folder. */
+export const TurnOutputFile = z.object({
+	/** Posix path relative to the project root (`projectRaw` takes it as `?path=`). */
+	path: z.string(),
+	name: z.string(),
+	size: z.number().int(),
+	mimeType: z.string(),
+	/** Epoch ms. */
+	modifiedAt: z.number(),
+	change: z.enum(["created", "modified"]),
+});
+export type TurnOutputFile = z.infer<typeof TurnOutputFile>;
+
+/**
+ * The files one agent turn (agent_start → agent_end) produced, detected by diffing a (path, size, mtime) snapshot of the
+ * project folder taken at turn start against one taken when the turn ends, plus the paths the turn's write/edit tool calls
+ * named. Persisted per turn (`turn_outputs` table) so a reload or another device shows the same strip; pushed live as
+ * `SessionEvent` `turn_outputs`. The strip belongs under the turn's last assistant message (`anchorMessageId`; match
+ * `anchorTimestamp` against message timestamps when ids differ after a runtime restart).
+ */
+export const TurnOutputs = z.object({
+	id: z.string(),
+	sessionId: z.string(),
+	projectId: z.string(),
+	anchorMessageId: z.string().nullable(),
+	anchorTimestamp: z.number().nullable(),
+	startedAt: z.number(),
+	endedAt: z.number(),
+	files: z.array(TurnOutputFile),
+	/** More files changed than `files` lists (capped). */
+	truncated: z.boolean(),
+});
+export type TurnOutputs = z.infer<typeof TurnOutputs>;
+
+/** `GET /sessions/:id/outputs`: the files of every turn that produced some, oldest → newest (newest 500 turns). */
+export const SessionOutputsPage = z.object({ outputs: z.array(TurnOutputs) });
+export type SessionOutputsPage = z.infer<typeof SessionOutputsPage>;
+
 export const TodoItem = z.object({ content: z.string(), status: z.string() });
 export const TodoPhase = z.object({ name: z.string(), tasks: z.array(TodoItem) });
 export type TodoPhase = z.infer<typeof TodoPhase>;
+
+// ---------------------------------------------------------------- subagents
+
+export const SubagentStatus = z.enum(["pending", "running", "completed", "failed", "aborted"]);
+export type SubagentStatus = z.infer<typeof SubagentStatus>;
+
+/** One tool call a subagent finished recently (newest last). */
+export const SubagentToolRun = z.object({
+	tool: z.string(),
+	args: z.string(),
+	intent: z.string().optional(),
+	isError: z.boolean().optional(),
+	endedAt: z.number(),
+});
+export type SubagentToolRun = z.infer<typeof SubagentToolRun>;
+
+/**
+ * A subagent the session's agent spawned with the `task` tool, as last reported by the runtime (`subagent_lifecycle` /
+ * `subagent_progress` frames). `id` is unique within the session. Finished subagents stay listed.
+ */
+export const Subagent = z.object({
+	id: z.string(),
+	/** Spawn order within the session. */
+	index: z.number().int(),
+	/** Agent definition that runs it (`task`, `scout`, ...). */
+	agent: z.string(),
+	/** The `task` tool call that spawned it: render the subagent under that call. */
+	parentToolCallId: z.string().nullable(),
+	status: SubagentStatus,
+	/** One-line summary of what it was asked to do. */
+	description: z.string().nullable(),
+	/** What it was asked to do (the assignment text). */
+	assignment: z.string().nullable(),
+	/** `provider/id[:thinking]` it runs on, when known. */
+	model: z.string().nullable(),
+	/** Its own intent line / current step in words. */
+	stage: z.string().nullable(),
+	currentTool: z.string().nullable(),
+	currentToolArgs: z.string().nullable(),
+	recentTools: z.array(SubagentToolRun),
+	/** Last lines of text it produced. */
+	recentOutput: z.array(z.string()),
+	toolCount: z.number().int(),
+	requests: z.number().int(),
+	tokens: z.number(),
+	cost: z.number(),
+	contextTokens: z.number().nullable(),
+	contextWindow: z.number().nullable(),
+	/** Its own estimate of completion, 0..100. */
+	completionPercent: z.number().nullable(),
+	/** Runs as a background job (the parent turn keeps going). */
+	detached: z.boolean(),
+	/** Runtime-reported run time so far (ms). */
+	durationMs: z.number(),
+	/** Epoch ms the spawn was first seen here / the last update was received (drive elapsed timers and ordering). */
+	startedAt: z.number(),
+	updatedAt: z.number(),
+	/** A transcript can be read (`GET .../subagents/:id/messages`). */
+	hasTranscript: z.boolean(),
+	/** Why it ended badly, when the runtime said so. */
+	error: z.string().nullable(),
+});
+export type Subagent = z.infer<typeof Subagent>;
+
+/** `GET /sessions/:id/subagents`. `live` is false when the runtime is stopped and the list is the last known snapshot. */
+export const SubagentsPage = z.object({ subagents: z.array(Subagent), live: z.boolean() });
+export type SubagentsPage = z.infer<typeof SubagentsPage>;
+
+export const SubagentMessagesQuery = z.object({ fromByte: z.coerce.number().int().min(0).optional() });
+
+/**
+ * `GET /sessions/:id/subagents/:subId/messages?fromByte=`: the subagent's own transcript, incrementally. Pass `nextByte`
+ * as the next `fromByte`; `reset` means the file shrank/restarted and `messages` is the whole transcript again.
+ */
+export const SubagentMessagesPage = z.object({
+	fromByte: z.number(),
+	nextByte: z.number(),
+	reset: z.boolean(),
+	messages: z.array(UiMessage),
+});
+export type SubagentMessagesPage = z.infer<typeof SubagentMessagesPage>;
+
+export const SteerSubagentBody = z.object({ message: z.string().trim().min(1).max(20_000) });
+export const CancelSubagentResult = z.object({ cancelled: z.boolean() });
+export type CancelSubagentResult = z.infer<typeof CancelSubagentResult>;
+
+// ---------------------------------------------------------------- questions (OMP `ask`)
+
+export const AskOption = z.object({
+	label: z.string(),
+	description: z.string().optional(),
+	/** Markdown or code shown beside / below the options while this one is highlighted. */
+	preview: z.string().optional(),
+});
+export type AskOption = z.infer<typeof AskOption>;
+
+export const AskQuestion = z.object({
+	id: z.string(),
+	question: z.string(),
+	/** Short chip label ("Database"). */
+	header: z.string().optional(),
+	/** Never includes "Other": the UI always offers free text. */
+	options: z.array(AskOption),
+	multi: z.boolean().optional(),
+	/** Index into `options` the agent suggests. */
+	recommended: z.number().int().optional(),
+});
+export type AskQuestion = z.infer<typeof AskQuestion>;
+
+/** One answer, exactly as OMP takes it: exact option labels (no duplicates) and/or trimmed free text. */
+export const AskAnswer = z.object({
+	id: z.string(),
+	selectedOptions: z.array(z.string()),
+	customInput: z.string().optional(),
+});
+export type AskAnswer = z.infer<typeof AskAnswer>;
+
+export const UiRequestOutcome = z.enum(["answered", "cancelled", "timed_out", "abandoned"]);
+export type UiRequestOutcome = z.infer<typeof UiRequestOutcome>;
+
+/** Who gave the answer of a shared session's request: a person at the UI of machine `machine` (`nodeId`). */
+export const UiRequestAnswerer = z.object({ nodeId: z.string(), machine: z.string() });
+export type UiRequestAnswerer = z.infer<typeof UiRequestAnswerer>;
+
+/** How a request ended (kept by the driver for a while, replicated to participants inside `SessionLiveState.requests`). */
+export const UiRequestResolution = z.object({
+	requestId: z.string(),
+	outcome: UiRequestOutcome,
+	answers: z.array(AskAnswer).optional(),
+	/** Absent when nobody answered (timeout, the agent cancelled) or the answerer is not known. */
+	answeredBy: UiRequestAnswerer.optional(),
+	at: z.number(),
+});
+export type UiRequestResolution = z.infer<typeof UiRequestResolution>;
+
+/** An unanswered approval/question; also listed by GET /sessions/:id/ui-requests for reconnecting clients. */
+export const PendingUiRequest = z.object({
+	requestId: z.string(),
+	method: z.string(),
+	title: z.string(),
+	message: z.string().optional(),
+	options: z.array(z.string()).optional(),
+	/** `select` only: the description of each option, aligned with `options`. */
+	optionDetails: z.array(z.object({ description: z.string().optional() })).optional(),
+	/** `ask` only: every question of the tool call. */
+	questions: z.array(AskQuestion).optional(),
+	/** The agent gives up waiting after this long and uses the defaults (ms). */
+	timeoutMs: z.number().optional(),
+	/** Epoch ms the request was raised on this node; `raisedAt + timeoutMs` is when the agent's timer ends. */
+	raisedAt: z.number().optional(),
+});
+export type PendingUiRequest = z.infer<typeof PendingUiRequest>;
 
 /** Live state of a session's runtime (subset of RPC get_state). */
 export const SessionLiveState = z.object({
@@ -172,6 +377,17 @@ export const SessionLiveState = z.object({
 	queued: z.object({ steering: z.array(z.string()), followUp: z.array(z.string()) }),
 	todoPhases: z.array(TodoPhase),
 	tokensPerSecond: z.number().nullable(),
+	/**
+	 * The agent is waiting for a human (a question or an approval). Mirrors get it through the forwarded `state` event, so a
+	 * read-only copy can say "waiting for an answer on <machine>" without being able to answer. Null/absent = nothing pending.
+	 */
+	awaiting: z.object({ method: z.string(), title: z.string(), count: z.number().int() }).nullable().optional(),
+	/**
+	 * Shared sessions only: the DRIVER's pending questions/approvals in full, plus how the latest ones ended. It rides the
+	 * forwarded `state` (old nodes strip the unknown key), so a participant machine can show the same answerable card and
+	 * learn who answered. `at` is the driver's clock when it was published (the receiver rebases `raisedAt` onto its own clock).
+	 */
+	requests: z.object({ pending: z.array(PendingUiRequest), resolved: z.array(UiRequestResolution), at: z.number() }).optional(),
 });
 export type SessionLiveState = z.infer<typeof SessionLiveState>;
 
@@ -187,25 +403,29 @@ export type SessionEvent =
 	| { type: "message_removed"; messageId: string }
 	| { type: "tool_start"; toolCallId: string; toolName: string; args: unknown; intent?: string }
 	| { type: "tool_update"; toolCallId: string; preview: string }
-	| { type: "tool_end"; toolCallId: string; isError: boolean; result: string }
+	| { type: "tool_end"; toolCallId: string; isError: boolean; result: string; toolDetails?: unknown }
 	| { type: "prompt_result"; promptId: string; clientId: string; status: "completed" | "aborted" | "error"; error?: string }
 	| { type: "settled" }
 	| { type: "notice"; level: "info" | "warning" | "error"; message: string }
+	/** Files the turn that just ended produced (only emitted when there are some). */
+	| { type: "turn_outputs"; outputs: TurnOutputs }
 	/** Tool/extension approval or question that needs a human. Answer via POST /sessions/:id/ui-response. */
 	| ({ type: "ui_request" } & PendingUiRequest)
-	| { type: "ui_request_resolved"; requestId: string };
+	/**
+	 * The request is closed: answered (here or on another device), cancelled by the agent, or timed out. For an `ask`
+	 * `answers` holds what the agent received (the submitted ones, or the defaults it used on timeout/cancel).
+	 */
+	| { type: "ui_request_resolved"; requestId: string; outcome?: UiRequestOutcome; answers?: AskAnswer[]; answeredBy?: UiRequestAnswerer }
+	/** A subagent appeared or changed (lifecycle or progress). The payload is the whole current snapshot. */
+	| { type: "subagent_upsert"; subagent: Subagent }
+	| { type: "subagent_remove"; subagentId: string };
 
-/** An unanswered approval/question; also listed by GET /sessions/:id/ui-requests for reconnecting clients. */
-export interface PendingUiRequest {
-	requestId: string;
-	method: string;
-	title: string;
-	message?: string;
-	options?: string[];
-}
-
-export const UiResponseBody = z.object({
-	requestId: z.string(),
-	/** confirm → boolean; select → option string; input → text; cancelled → null. */
-	value: z.union([z.boolean(), z.string(), z.null()]),
-});
+export const UiResponseBody = z
+	.object({
+		requestId: z.string(),
+		/** confirm → boolean; select → option string; input/editor → text; cancelled → null. Omit for an `ask` (use `answers`). */
+		value: z.union([z.boolean(), z.string(), z.null()]).optional(),
+		/** `ask`: one entry per question in request order, with each `id` equal to the question's `id` (OMP rejects anything else). */
+		answers: z.array(AskAnswer).optional(),
+	})
+	.refine((body) => (body.value === undefined) !== (body.answers === undefined), { message: "Send exactly one of `value` and `answers`" });

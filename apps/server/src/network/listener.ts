@@ -24,6 +24,7 @@ import fastify, { LogController, type FastifyInstance, type FastifyReply, type F
 import type { ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
 import { installErrorHandler } from "../http/error-handler.ts";
+import { installBoundedClose } from "../http/shutdown.ts";
 import { registerUiSurface } from "../app.ts";
 import { hostnameOf, isLocalHostHeader } from "../http/host-guard.ts";
 import { HealthService } from "../services/health.ts";
@@ -32,6 +33,8 @@ import { NODE_STREAM } from "./events.ts";
 import { localAgentsWire } from "./local-agents.ts";
 import { registerTaskWireRoutes } from "./tasks-routes.ts";
 import { registerSharedWireRoutes } from "./shared-routes.ts";
+import { registerContextWireRoutes } from "./context-routes.ts";
+import { registerHandoffWireRoutes } from "./handoff-routes.ts";
 import type { NetworkBase, NetworkService } from "./types.ts";
 import { errorText } from "./util.ts";
 
@@ -86,6 +89,7 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 	const health = new HealthService({ db: base.db, ompCli: base.ompCli, runtime: base.runtime, startedAt: base.startedAt, bus: base.bus, log: base.log });
 	// Also installs the plain 404 for every path outside /api/v1. Fastify's defaults (case-sensitive, no trailing-slash folding) keep signed paths exact.
 	installErrorHandler(app);
+	installBoundedClose(app);
 
 	// Keep the exact bytes (the digest covers them); never fail before authentication on malformed JSON.
 	app.removeAllContentTypeParsers();
@@ -101,10 +105,11 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 	});
 
 	app.addHook("onRequest", async (request, reply) => {
-		// A WebSocket upgrade is only ever meant for the UI surface's `/ws`. For anything else keep what Node did before this
-		// listener had an upgrade handler: drop the connection without an answer.
+		// A WebSocket upgrade is only ever meant for the UI surface's sockets: `/ws` and the machine tools' `/ws/<tool>/…`. For anything
+		// else keep what Node did before this listener had an upgrade handler: drop the connection without an answer.
 		const upgrading = "upgrade" in request.raw && request.raw.upgrade === true;
-		if (upgrading && !(net.ui !== null && (request.raw.url ?? "").split("?")[0] === "/ws")) {
+		const upgradePath = (request.raw.url ?? "").split("?")[0] ?? "";
+		if (upgrading && !(net.ui !== null && (upgradePath === "/ws" || upgradePath.startsWith("/ws/")))) {
 			request.raw.socket.destroy();
 			reply.hijack();
 			return undefined;
@@ -372,6 +377,10 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 			if (net.tasks) registerTaskWireRoutes(api, { tasks: net.tasks, authenticate, requires, bodyOf });
 			// ------------------------------------------------------------------ /shared* (M5)
 			if (net.shared && net.tasks) registerSharedWireRoutes(api, { shared: net.shared, idempotency: net.tasks.idempotency, requires, bodyOf });
+			// ------------------------------------------------------------------ /context* (M6)
+			if (net.contexts && net.tasks) registerContextWireRoutes(api, { contexts: net.contexts, idempotency: net.tasks.idempotency, requires, bodyOf });
+			// ------------------------------------------------------------------ /handoffs* (M7)
+			if (net.handoffs && net.tasks) registerHandoffWireRoutes(api, { handoffs: net.handoffs, idempotency: net.tasks.idempotency, requires, bodyOf });
 			// ── REGISTRATION POINT: further wire route sets (shared sessions, ...) are registered here, next to the tasks routes. ──
 		},
 		{ prefix: API_PREFIX },

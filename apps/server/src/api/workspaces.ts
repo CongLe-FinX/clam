@@ -1,6 +1,6 @@
-import { CreateWorkspaceBody, routes, UpdateWorkspaceBody, type Workspace } from "@clam/contracts";
+import { AddWorkspaceMemberBody, CreateWorkspaceBody, routes, UpdateWorkspaceBody, type Workspace, type WorkspaceMember } from "@clam/contracts";
 import { projects, workspaceMembers, workspaces } from "@clam/database";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import type { RoutePluginOptions, ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
@@ -18,8 +18,15 @@ const toWorkspace = (row: Row, projectCount: number): Workspace => ({
 	updatedAt: row.updatedAt,
 });
 
+/** Chat folders (origin `chat`) are listed under Chats, so they do not count as projects. */
 function projectCount(ctx: ServerContext, workspaceId: string): number {
-	return ctx.db.select({ n: sql<number>`count(*)` }).from(projects).where(eq(projects.workspaceId, workspaceId)).get()?.n ?? 0;
+	return (
+		ctx.db
+			.select({ n: sql<number>`count(*)` })
+			.from(projects)
+			.where(and(eq(projects.workspaceId, workspaceId), ne(projects.origin, "chat")))
+			.get()?.n ?? 0
+	);
 }
 
 function requireWorkspace(ctx: ServerContext, id: string): Row {
@@ -45,6 +52,7 @@ export default async function workspaceRoutes(app: FastifyInstance, { ctx }: Rou
 			ctx.db
 				.select({ id: projects.workspaceId, n: sql<number>`count(*)` })
 				.from(projects)
+				.where(ne(projects.origin, "chat"))
 				.groupBy(projects.workspaceId)
 				.all()
 				.map((r) => [r.id, r.n]),
@@ -98,4 +106,13 @@ export default async function workspaceRoutes(app: FastifyInstance, { ctx }: Rou
 		publishSessionRemovals(ctx, sessionIds);
 		return reply.status(204).send();
 	});
+
+	// Members (M6): this node and the paired peers that share the workspace.
+	app.get<{ Params: { id: string } }>(routes.workspaceMembers(":id"), (req): WorkspaceMember[] => ctx.contexts.members.list(req.params.id));
+	app.post<{ Params: { id: string } }>(routes.workspaceMembers(":id"), (req, reply): WorkspaceMember[] => {
+		const members = ctx.contexts.members.add(req.params.id, AddWorkspaceMemberBody.parse(req.body));
+		reply.status(201);
+		return members;
+	});
+	app.delete<{ Params: { id: string; nodeId: string } }>(routes.workspaceMember(":id", ":nodeId"), (req): WorkspaceMember[] => ctx.contexts.members.remove(req.params.id, req.params.nodeId));
 }

@@ -201,7 +201,7 @@ describe("B restarts", () => {
 		await promptAndWait(pair.b, newSessionId, "b works after the restart");
 		await eventually(async () => (await transcriptTexts(pair.b, newSessionId)).includes("FAKE: b works after the restart"), "the resumed session's answer");
 		expect((await sessionOn(pair.b, newSessionId)).kind).toBe("local");
-		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo.branch);
+		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo?.branch);
 
 		// A returns: it learns the change from B (queued before the restart, or by asking) and mirrors the restarted driver
 		await pair.start("a");
@@ -347,7 +347,7 @@ describe("former-driver work is finished at boot", () => {
 		expect(remoteBranches(pair.origin)).toContain(rescue);
 		expect(git(pair.origin, "show", `${rescue}:UNSAVED.md`)).toBe("uncommitted on A\n");
 		expect(git(pair.origin, "show", `${rescue}:LOCAL_COMMIT.md`)).toBe("committed on A, never pushed\n");
-		expect(() => git(pair.origin, "show", `${shared.repo.branch}:UNSAVED.md`)).toThrow();
+		expect(() => git(pair.origin, "show", `${shared.repo?.branch}:UNSAVED.md`)).toThrow();
 		// a participant again: a mirror of B (which fills up) and its own agent session
 		const mirror = await sessionOn(pair.a, former.mirrorSessionId as string);
 		expect(mirror).toMatchObject({ kind: "mirror", archived: false });

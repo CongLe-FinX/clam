@@ -86,7 +86,9 @@ function getHighlighter(): Promise<HighlighterCore> {
 			import("shiki/themes/github-dark-default.mjs"),
 			import("shiki/themes/github-light-default.mjs"),
 		]);
-		return createHighlighterCore({ themes: [dark.default, light.default], langs: [], engine: createJavaScriptRegexEngine() });
+		// github-light's comment and function colours fall just under 4.5:1 on our code surface; darken those two.
+		const lightTheme = JSON.parse(JSON.stringify(light.default).replaceAll("#6e7781", "#57606a").replaceAll("#8250df", "#6639ba")) as typeof light.default;
+		return createHighlighterCore({ themes: [dark.default, lightTheme], langs: [], engine: createJavaScriptRegexEngine() });
 	})();
 	return hlPromise;
 }

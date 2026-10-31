@@ -34,7 +34,7 @@ Legend: ✅ **Supported** (RPC) · 🟦 **Supported via CLI** · 🟨 **Partial 
 | Done vs yielded | `prompt_result`/`agent_end` = agent yielded; **session settled** only when no run, queue, or background job can wake it (`session_settled`, `get_state.isSettled`) | ✅ |
 | Shutdown | Closing stdin → graceful exit 0; host must keep reading stdout until exit | ✅ |
 | Errors | `success:false` + `error` (+ machine `code`, e.g. `session_busy`, `stale_cursor`, `entry_not_found`); malformed JSONL → `parse` error response, process continues | ✅ |
-| Process flags useful to a host | `--mode rpc`, `--no-ui`, `--cwd`, `--session-dir`, `--model provider/id`, `--thinking`, `--no-session`, `--profile`, `--approval-mode`, `--auto-approve`, `--max-cost` | ✅ [rpc.md], [cli] |
+| Process flags useful to a host | `--mode rpc`, `--mode rpc-ui`, `--no-ui`, `--cwd`, `--session-dir`, `--model provider/id`, `--thinking`, `--no-session`, `--profile`, `--approval-mode`, `--auto-approve`, `--max-cost` | ✅ [rpc.md], [cli] |
 
 The adapter implements: ready handshake → `negotiate_protocol` (v2) → `open_session`; id-correlated commands with per-command timeouts; chunk reassembly; unsolicited frame routing. Never depend on frames arriving in command order.
 
@@ -44,7 +44,7 @@ The adapter implements: ready handshake → `negotiate_protocol` (v2) → `open_
 
 | FR-04 requirement | OMP surface | Status | How CL Agent Mesh uses it / gap |
 | --- | --- | --- | --- |
-| OMP CLI RPC adapter | `omp --mode rpc --no-ui --cwd <project>` | ✅ | `@clam/agent-runtime` omp adapter (child per active session) |
+| OMP CLI RPC adapter | `omp --mode rpc-ui [--no-ui] --cwd <project>` | ✅ | `@clam/agent-runtime` omp adapter (child per active session); the control process stays `--mode rpc --no-ui` |
 | Pluggable runtime | — | n/a | CL-side adapter interface; OMP is implementation #1 |
 | **Session browsing** | Disk: `~/.omp/agent/sessions/<encoded-cwd>/<ts>_<id>.jsonl` ([session.md]); RPC: `get_messages_page`, `get_messages`, `get_entries`, `get_tree`, `get_branch_messages`; `switch_session{sessionPath}` | ✅ / 🟨 | CLAM keeps its own session index (`agent_sessions`) and one OMP directory per CLAM session (`<dataDir>/sessions/<id>`), so browsing = listing CLAM rows. Message paging uses `get_messages_page` (≤256, cursor bound to session id+leaf+count; fails `session_busy` while streaming/compacting, `stale_cursor` if the snapshot changes). While streaming the server serves history from the session JSONL (documented format) and merges live events. **Gap:** browsing OMP sessions created *outside* CLAM (the user's terminal sessions under `~/.omp/agent/sessions`) is possible read-only by file listing but is not offered in M1 — importing them would need `omp session` semantics decided per milestone. |
 | **Create session** | `new_session`; `open_session{sessionDir,provider?,modelId?}` | ✅ | `open_session` with a fresh CLAM directory starts a new OMP session; returns `{cancelled, resumed:false, sessionId, sessionFile}` |
@@ -55,7 +55,7 @@ The adapter implements: ready handshake → `negotiate_protocol` (v2) → `open_
 | **Stream events** | `AgentSessionEvent` frames: `agent_start`, `turn_start`, `message_start`, `message_update{assistantMessageEvent: text_delta\|thinking_delta\|toolcall_delta\|…_end\|done\|error}`, `message_end`, `turn_end`, `agent_end`, `queue_update`, `prompt_result`, `session_settled`, `goal_updated`, compaction events, `notice`, `available_commands_update` | ✅ | Normalized to contracts `SessionEvent` (`message_delta` with `kind: text\|thinking\|toolCall`, etc.). Caveat: `agent_end.messages` may be compacted — keep messages accumulated from the stream. `set_event_filter` can drop noisy events |
 | **Model selection** | `get_available_models`, `set_model{provider,modelId}`, `cycle_model`, `set_thinking_level`, `get_available_thinking_levels`, `cycle_thinking_level`; CLI `omp models --json` | ✅ / 🟦 | `POST /sessions/:id/model` / `/thinking`; catalog from `GET /omp/models` (CLI JSON incl. cost + `contextWindow`) |
 | **Model roles** | Config key `modelRoles` (record); CLI `omp config get modelRoles --json` / `omp config set modelRoles '<json>'` | 🟦 | See §4 |
-| **Tool execution tracking** | `tool_execution_start{toolCallId,toolName,args,intent?}`, `tool_execution_update{partialResult}`, `tool_stream_update`, `tool_execution_end{result,isError}`; `get_state.todoPhases`; `get_subagents`, `set_subagent_subscription`, `cancel_subagent`, `steer_subagent` | ✅ | → `tool_start`/`tool_update`/`tool_end`. Subagent events default **off** (`set_subagent_subscription`); enabling them is out of M1 scope |
+| **Tool execution tracking** | `tool_execution_start{toolCallId,toolName,args,intent?}`, `tool_execution_update{partialResult}`, `tool_stream_update`, `tool_execution_end{result,isError}`; `get_state.todoPhases`; `get_subagents`, `set_subagent_subscription`, `cancel_subagent`, `steer_subagent` | ✅ | → `tool_start`/`tool_update`/`tool_end`. Subagents (progress level), `ask` and the todo plan are surfaced: §10 |
 | **Approvals** | `--approval-mode`, tool tiers, `extension_ui_request` dialogs | 🟨 | See §5 |
 | **Context usage** | `get_state.contextUsage {tokens, contextWindow, percent}`; `get_session_stats.contextUsage` | ✅ verified live | → `SessionLiveState.contextUsage`. `compact`, `set_auto_compaction` available for user-driven compaction (not wired in M1) |
 | **Cost tracking** | `get_session_stats {tokens{input,output,reasoning,cacheRead,cacheWrite,total}, cost, premiumRequests, …}`; per-message `usage` on assistant messages; `get_state.usageLimit?` | ✅ verified live | Session-level cost is OMP's own estimate from catalog prices; labelled `omp-recorded`. Models with `pricingStatus` unpriced contribute no cost (OMP reports `unpricedRequests` in `omp stats`) — shown as "Unpriced", never guessed |
@@ -131,7 +131,7 @@ Net M1 capability: **login/logout via RPC for flows without secret prompts; API 
 | Setting the mode for a host-run process | `--approval-mode` flag; `NodeSettings.approvalMode` → flag on spawn | ✅ |
 | Do prompts reach an RPC host? | Docs: *"RPC, ACP, and other hosts without an approval dialog get a select with the same choices and the full details"* (Approve / Approve `<tool>` for this session / Deny; plus `Approve File`, `Always Approve File`, … in `always-ask-cached`) | ✅ verified live (`always-ask`): `extension_ui_request` `select`, title `"Allow tool: bash\nCommand: ls"`, options `["Approve","Approve bash for this session","Deny"]` |
 | Behaviour under `--no-ui` | *"Under `--no-ui`, tools requiring approval fail closed with a no-interactive-UI error rather than sending an approval dialog"* ([rpc.md]) | ✅ documented |
-| Net design | `yolo` ⇒ spawn `--no-ui`. Non-yolo ⇒ spawn **without** `--no-ui` so approval dialogs arrive as `extension_ui_request` (`select`), normalized to `SessionEvent.ui_request`, answered via `POST /sessions/:id/ui-response` → `extension_ui_response {id, value}` / `{cancelled:true}` | ✅ implemented by ServerCore; request shape verified live. Runtime also exposes pending approvals at `GET /sessions/:id/ui-requests`. Idle reaping never touches a runtime with a pending approval |
+| Net design | Always `--mode rpc-ui` (plain `rpc` has no `ask` tool, §10.1); `yolo` ⇒ add `--no-ui` (extensions headless; approvals never needed). Non-yolo ⇒ no `--no-ui` so approval dialogs arrive as `extension_ui_request` (`select`), normalized to `SessionEvent.ui_request`, answered via `POST /sessions/:id/ui-response` → `extension_ui_response {id, value}` / `{cancelled:true}` | ✅ implemented by ServerCore; request shape verified live. Runtime also exposes pending approvals at `GET /sessions/:id/ui-requests`. Idle reaping never touches a runtime with a pending approval or question |
 | Timeouts | Dialogs may carry `timeout`; on timeout OMP resolves to the default (deny/undefined) and emits `cancel {targetId}`; the UI closes the dialog and ignores late answers | ✅ documented |
 | Headless subagents | Run with yolo; any call resolving to `prompt` is rejected | ✅ documented |
 | Safety | In `yolo` a bare critical-command override (e.g. `rm -rf /`) is ignored; only explicit tool/user `prompt`/`deny` policies still apply. **Approval is not a sandbox.** CL surfaces the active approval mode prominently and recommends a non-`yolo` mode | ✅ documented |
@@ -172,6 +172,7 @@ Mixing rule: a number from `omp stats` is never presented as quota, and a quota 
 | Primitive | What it does | Use in CL Agent Mesh |
 | --- | --- | --- |
 | RPC `handoff {customInstructions?}` | Generates a **handoff summary** of the current session (see `omp://handoff-generation-pipeline.md`); fails while streaming; returns `{savedPath?}` or `null` | Source of the "relevant conversation summary" and "plan + remaining TODOs" inside the handoff manifest (summary text only; reviewed for secrets) |
+| `RuntimeSession.handoffSummary(customInstructions?)` | CL wrapper of RPC `handoff`: resolves `{text, savedPath}` (text read from `savedPath`, else from the newest `compactionSummary` message of the transcript, else `null`); rejects `invalid_state` while a turn runs. The command commits the document as a compaction entry, so the runtime's own context shrinks to it — call it only when the work is about to move (handoff source, M7) | Conversation summary of the handoff manifest (`generatedBy: "omp-handoff"`) |
 | RPC `fork {entryId?}` / `branch {entryId}` | New session file from a point in history; `parentSession` recorded; `session_busy` while busy | Task branching/retry (M8); not a cross-machine mechanism |
 | RPC `navigate_tree`, `get_tree`, `get_entries` | Tree navigation within one session file | Plan/progress inspection |
 | CLI `omp session pack <jsonl\|id> <tar>` | Packs a session **with artifacts and image blobs** into a tar | Optional **attachment** to a handoff for audit/reference |
@@ -191,11 +192,53 @@ Constraints:
 
 **Used since M4: `set_host_tools` and the host tool sub-protocol.** `@clam/agent-runtime` sends `set_host_tools` after `open_session` (and after every restart) with the definitions of the node's `HostToolProvider` (`AgentRuntime.setHostToolProvider`; the server's provider is the `HostToolRegistry` of `apps/server/src/services/host-tool-registry.ts`, the `mesh_*` tools being one set), dispatches every `host_tool_call` frame concurrently to the provider with a per-call `AbortController` (aborted by `host_tool_cancel` and process exit) and answers with `host_tool_update` / `host_tool_result` (`isError` when the provider throws or reports an error; text clipped to 100 000 characters). Verified live with omp 18.14: tools are called directly **only with `loadMode: "essential"`** — an omitted `loadMode` makes OMP treat them as *discoverable* and mount them under `xd://`, where the model needs two extra turns (`read xd://<tool>`, then `write`) before it can call one. CL registers every `mesh_*` tool as `essential`. Executed host tools show up in the session UI through the normal `tool_start`/`tool_end` events. Also used: `--max-cost <usd>` (a delegated task's `maxCostUsd`; `prompt_result.status = "error"` when the limit is reached) and a per-session `--approval-mode` override at spawn.
 
-Not used: `set_host_uri_schemes`, `goal`, `btw`, `compact`, `set_auto_compaction`, `set_todos`, `bash`/`abort_bash`, live voice, dictation, word prediction, `set_ask_dialog` (opt-in `ask` dialogs — if enabled the host must answer with `answers`), `set_subagent_subscription`.
+Not used: `set_host_uri_schemes`, `goal`, `btw`, `compact`, `set_auto_compaction`, `set_todos`, `bash`/`abort_bash`, live voice, dictation, word prediction. `set_ask_dialog`, `set_subagent_subscription`, `get_subagents`, `get_subagent_messages`, `cancel_subagent` and `steer_subagent` are used: see §10.
 
 ---
 
-## 10. Summary matrix
+## 10. Ask, subagents and the todo plan (verified live, omp 18.14.0)
+
+### 10.1 Process mode: `rpc-ui`, not `rpc`
+
+Probed with the real binary (`ask` prompt, model haiku): **under `--mode rpc` the agent has no `ask` tool at all** — in every approval mode, with or without `--no-ui`, the tool call answers `Tool ask not found` (`tool_execution_end … isError:true`). Only `--mode rpc-ui` keeps the tool UI that `ask` needs. The adapter therefore always spawns `--mode rpc-ui`, adding `--no-ui` only in `yolo` (extensions headless; the `ask` tool UI stays on). Verified:
+
+| Spawn | `ask` | Approval-needing tool (bash, `always-ask`) |
+| --- | --- | --- |
+| `--mode rpc` / `--mode rpc --no-ui` (before) | ❌ `Tool ask not found` | n/a (`--no-ui`: fails closed) / `select` dialog |
+| `--mode rpc-ui --no-ui` (yolo) | ✅ `extension_ui_request {method:"ask"}` | **fails closed**: `Tool "bash" requires approval but no interactive UI available` (verified with `--approval-mode always-ask`) |
+| `--mode rpc-ui` (non-yolo) | ✅ | ✅ `select` dialog (Approve / Approve bash for this session / Deny) |
+
+After `open_session` the adapter sends `set_ask_dialog {enabled:true}` (a build that refuses it keeps working: `ask` degrades to one `select` per question with `optionDetails`) and `set_subagent_subscription {level:"progress"}`.
+
+### 10.2 `ask`
+
+`extension_ui_request {method:"ask", id, questions:[{id, question, header?, options:[{label, description?, preview?}], multi?, recommended?}], timeout?}`; the request arrives **before** the `tool_execution_start` frame of the `ask` call. Normalised to `SessionEvent` `ui_request` with `questions`, `timeoutMs` and `raisedAt` (`PendingUiRequest`); it is also served by `GET /sessions/:id/ui-requests`, so a reload or another device sees it. Answered with `POST /sessions/:id/ui-response {requestId, answers:[{id, selectedOptions, customInput?}]}` (exactly one of `value`/`answers`), sent as `extension_ui_response {id, answers}`. The adapter validates the shape exactly as OMP does (one entry per question in order, matching ids, exact labels without duplicates, a single-select takes one option **or** free text, `customInput` trimmed and dropped when empty) and answers `400 runtime_invalid_argument` with the reason instead of letting OMP fail the whole tool call. `value: null` sends `{cancelled:true}`.
+
+* **Cancel stops the run.** Captured from omp: a cancelled `ask` is a failed tool call (`"Ask tool was cancelled by the user"`, `details:{}`) and the prompt ends `status:"aborted"`. The UI says so on its cancel button.
+* **Timeout.** OMP answers every question with its `recommended` option, else the first, then emits `cancel {targetId}`; the mapper reports `ui_request_resolved {outcome:"timed_out", answers:<those defaults>}` (an earlier `cancel` is `outcome:"cancelled"`). The tool result carries `timedOut`.
+* **Result details.** Several questions: `details.results[{id, question, options, multi, selectedOptions, customInput?, timedOut?}]`. One question: the same fields at the **top level** of `details`, without an id. Both reach the UI as `toolDetails: {results:[…]}` (`UiMessage.toolDetails`, `tool_end.toolDetails`).
+* `ui_request_resolved` carries `outcome` (`answered|cancelled|timed_out|abandoned`) and, for an `ask`, the `answers` the agent received. Questions and approvals raise `AgentSession.pendingRequests` (session-list badge, background notification) and `SessionLiveState.awaiting` (mirrors).
+
+### 10.3 Subagents
+
+`set_subagent_subscription` is `off` by default. The adapter uses `"progress"` and never `"events"`: measured on a two-subagent echo task, `subagent_event` frames were 56 frames / 56 KB against 20 progress frames / 25 KB for the whole run, each carrying full `message_update` snapshots — and CLAM runs the parent with `messageUpdates: "delta"`. Live transcripts come from `get_subagent_messages` instead (incremental `fromByte`/`nextByte`, complete newline-terminated records only; the web view refetches when the subagent reports a change and polls every 5 s while it runs).
+
+* Frames: `subagent_lifecycle {payload:{id, agent, status: started|completed|failed|aborted, sessionFile?, parentToolCallId?, index, detached?}}` and `subagent_progress {payload:{index, agent, assignment?, parentToolCallId?, progress:{id, status, description, lastIntent, currentTool, currentToolArgs, recentTools[], recentOutput[], toolCount, requests, tokens, cost, durationMs, resolvedModel, contextTokens, contextWindow, completionPercent, stage, …}}}` (~150 ms apart per subagent). Normalised to `subagent_upsert {subagent}` (the whole snapshot, progress throttled to one per 250 ms per subagent, status changes immediate) and `subagent_remove`.
+* OMP forgets a subagent the moment it ends (`get_subagents` → `[]`; its transcript stays reachable by id for the life of the process). CLAM keeps finished ones in a roster (`SubagentTracker`), saved next to the conversation (`<sessionDir>/clam-subagents.json`, atomic write, debounced). A stopped runtime therefore still answers `GET /sessions/:id/subagents` (`live:false`, entries that were running reported `aborted`) and serves transcripts from the saved `sessionFile` (the path always comes from the roster, never from a request).
+* `cancel_subagent {subagentId}` → `{cancelled}` (false = not running; idempotent), `steer_subagent {subagentId, message}` (waits for acceptance; `Subagent not running: <id>` otherwise). Routes: `GET /sessions/:id/subagents`, `GET …/subagents/:subId/messages?fromByte=`, `POST …/cancel`, `POST …/steer {message}`.
+* Detached spawns (`detached:true`) outlive an aborted parent turn; stopping the parent does not stop them.
+
+### 10.4 Todo plan
+
+The `todo` tool (`op`: `init | start | done | rm | drop | block | unblock | append | view`) returns `details {op, phases[{name, tasks[{content, status}]}], completedTasks?}`; `get_state.todoPhases` stays the source of the live plan (refreshed on every `todo` tool end). The UI shows the plan chip above the composer, the side-panel list and, per `todo` call, what changed (`todoChange` in `apps/web/src/features/session/omp/plan-model.ts`).
+
+### 10.5 Group chat
+
+In a shared session **any human member can answer, on any member machine**: the driver replicates its pending questions and approvals to the participants inside the mirrored `state` (`SessionLiveState.requests`), the card shows on every machine's group view, and an answer given on a participant machine travels to the driver as `POST /shared/:id/answer` (epoch-fenced, validated by the same code as a local answer, first answer wins with `409 already_answered`). Every card then shows "Answered by Person@`<machine>`" and the group chat gets one system line; a driver change withdraws the card. Details: [shared-sessions.md §4.2a](./shared-sessions.md#42a-questions-and-approvals-answered-from-any-member-machine). Only a driver too old to replicate the request still gets the read-only strip ("The agent asked a question — Answer on `<machine>`", fed by `SessionLiveState.awaiting`).
+
+---
+
+## 11. Summary matrix
 
 | Area | M1 status |
 | --- | --- |
@@ -210,7 +253,8 @@ Not used: `set_host_uri_schemes`, `goal`, `btw`, `compact`, `set_auto_compaction
 | Test provider/model | 🟨 CL-implemented tiny prompt |
 | Sessions create/resume/page/abort/stream | ✅ |
 | Tool tracking | ✅ |
-| Approvals | ✅ yolo (`--no-ui`) and non-yolo (select dialogs, verified live in `always-ask`) |
+| Approvals | ✅ yolo (`rpc-ui --no-ui`) and non-yolo (`rpc-ui`, select dialogs, verified live in `always-ask`) |
+| Clarifying questions (`ask`), subagents, todo plan | ✅ §10 (verified live, yolo and `always-ask`) |
 | Context usage, per-session cost | ✅ |
 | OMP-recorded usage dashboard | ✅ (24 h window — labelled) |
 | Provider quota | ✅ when `omp usage` reports it; otherwise "Unavailable" |

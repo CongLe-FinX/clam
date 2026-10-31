@@ -11,6 +11,7 @@ export function ConfirmDialog({
 	danger,
 	loading,
 	onConfirm,
+	children,
 }: {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
@@ -20,6 +21,8 @@ export function ConfirmDialog({
 	danger?: boolean;
 	loading?: boolean;
 	onConfirm: () => void;
+	/** Extra controls between the message and the buttons (e.g. an opt-in checkbox). */
+	children?: ReactNode;
 }) {
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
@@ -28,6 +31,7 @@ export function ConfirmDialog({
 					<DialogTitle>{title}</DialogTitle>
 					<DialogDescription>{description}</DialogDescription>
 				</DialogHeader>
+				{children}
 				<DialogFooter>
 					<Button variant="ghost" onClick={() => onOpenChange(false)}>
 						Cancel

@@ -257,7 +257,7 @@ describe("TaskInjector", () => {
 
 		const done = h.ctx.tasks.store.update(task.id, {
 			status: "succeeded",
-			result: { summary: "All green now", autoCompleted: false, branch: "clam/beta/fix-abc123", commit: "0123456789abcdef", pushed: true, compareUrl: "https://github.com/octo/r/compare/main...x", artifacts: [] },
+			result: { summary: "All green now", autoCompleted: false, branch: "clam/beta/fix-abc123", commit: "0123456789abcdef", pushed: true, compareUrl: "https://github.com/octo/r/compare/main...x", artifacts: [], files: null },
 		});
 		expect(await h.ctx.tasks.injector.injectStatusNote(done)).toBe(true);
 		expect(h.ctx.tasks.store.get(task.id).notifiedStatus).toBe("succeeded");
@@ -382,8 +382,11 @@ describe("MeshHostTools", () => {
 			.filter(Boolean)
 			.map((l) => JSON.parse(l) as { kind: string; names?: string[] })
 			.find((r) => r.kind === "host_tools");
-		// the mesh tools of the task engine, then the shared-session tools (`mesh_team`, `mesh_say`)
-		expect(registered?.names).toEqual([...MESH_HOST_TOOLS, ...SHARED_HOST_TOOLS]);
+		// the mesh tools of the task engine, the shared-session tools (`mesh_team`, `mesh_say`) and the project-memory tools of M6, in registration order within each group
+		expect(registered?.names).toEqual(expect.arrayContaining([...MESH_HOST_TOOLS, ...SHARED_HOST_TOOLS]));
+		const names = registered?.names ?? [];
+		expect(names.filter((n) => (MESH_HOST_TOOLS as readonly string[]).includes(n))).toEqual([...MESH_HOST_TOOLS]);
+		expect(names.filter((n) => (SHARED_HOST_TOOLS as readonly string[]).includes(n))).toEqual([...SHARED_HOST_TOOLS]);
 	});
 
 	it("mesh_agents lists this node, each peer with delegation permission and its agents", async () => {
@@ -541,7 +544,7 @@ describe("MeshHostTools", () => {
 			const done = a.ctx.tasks.store.update(task.id, {
 				status: "succeeded",
 				reason: null,
-				result: { summary: "Parser ported", autoCompleted: true, branch: "clam/beta/port-1", commit: "abcdef0123456789", pushed: false, compareUrl: null, artifacts: [{ artifactId: "art_1", name: "task.patch", sha256: "0".repeat(64), size: 10 }] },
+				result: { summary: "Parser ported", autoCompleted: true, branch: "clam/beta/port-1", commit: "abcdef0123456789", pushed: false, compareUrl: null, artifacts: [{ artifactId: "art_1", name: "task.patch", sha256: "0".repeat(64), size: 10 }], files: null },
 			});
 			const finished = (await run(session, "mesh_task", { taskId: done.id })).text;
 			expect(finished).toContain("Status: succeeded");

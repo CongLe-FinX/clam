@@ -31,7 +31,7 @@ export default function AgentsPage() {
 			{workspaceId ? <WorkspaceCrumb workspaceId={workspaceId} /> : null}
 			<PageHeader
 				title="Agents"
-				description="Agents are the identities OMP sessions run under on this node. Name them and describe what they're good at; this is only a label and never changes how a session behaves."
+				description="Agents are the identities OMP sessions run under on this machine. Name them and describe what they're good at; this is only a label and never changes how a session behaves."
 			/>
 			{agents.isPending ? (
 				<div aria-busy className="grid gap-3 sm:grid-cols-2">
@@ -176,7 +176,7 @@ function EditForm({ agent, onClose }: { agent: Agent; onClose: () => void }) {
 		>
 			<DialogHeader>
 				<DialogTitle>Edit agent</DialogTitle>
-				<DialogDescription>Changes apply to this node only.</DialogDescription>
+				<DialogDescription>Changes apply to this machine only.</DialogDescription>
 			</DialogHeader>
 			<Field label="Name" error={nameInvalid ? "Name is required." : null}>
 				{(id) => <Input id={id} value={name} maxLength={64} autoComplete="off" aria-invalid={nameInvalid} onChange={(e) => setName(e.target.value)} />}

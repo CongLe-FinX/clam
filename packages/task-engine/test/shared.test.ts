@@ -121,6 +121,54 @@ describe("shared texts", () => {
 	});
  });
 
+describe("files mode (no git repository)", () => {
+	const base = {
+		sharedSessionId: "shs_1",
+		title: "T",
+		from: { nodeName: "node-a", agentName: "Ada" },
+		to: { nodeName: "node-b", agentName: "Bob" },
+		epoch: 2,
+		checkpoint: { seq: 3, at: "2030-01-01T00:00:00.000Z", commit: null, pushed: false },
+		branch: null,
+		headCommit: null,
+		treeNote: null,
+		files: { fileCount: 4, applied: ["a.txt", "b.txt"], kept: [], rescued: 0 },
+	} as const;
+
+	it("the brief talks about a working folder, not a repository or a branch", () => {
+		const brief = buildSharedBrief({ sharedSessionId: "shs_1", title: "T", goal: "g", driver: { agentName: "Ada", nodeName: "node-a" }, self: { agentName: "Bob", nodeName: "node-b" }, repo: null, others: [], agentMessageLimit: 12 });
+		expect(brief).toContain("## Working folder");
+		expect(brief).toContain("no git repository");
+		expect(brief).not.toContain("## Repository");
+		expect(brief).not.toContain("Shared branch");
+	});
+
+	it("a takeover says which file changes after the last bundle may be missing; a transfer says nothing is missing", () => {
+		const takeover = buildContinuationNote({ ...base, reason: "takeover" });
+		expect(takeover).toContain("folder bundle of 4 file(s)");
+		expect(takeover).toContain("restored from that checkpoint's bundle (2 file(s) written");
+		expect(takeover).toContain("File changes node-a made after 2030-01-01T00:00:00.000Z");
+		expect(takeover).toContain("NOT in this folder and may be missing");
+		expect(takeover).not.toContain("branch");
+		const transfer = buildContinuationNote({ ...base, reason: "transfer" });
+		expect(transfer).toContain("every file is in the bundle");
+		expect(transfer).toContain("Nothing is missing");
+		expect(transfer).not.toContain("NOT in this folder");
+	});
+
+	it("reports kept files and rescued local edits", () => {
+		const note = buildContinuationNote({ ...base, reason: "takeover", files: { fileCount: 4, applied: [], kept: ["keep.txt"], rescued: 2 } });
+		expect(note).toContain("kept as they are: keep.txt");
+		expect(note).toContain("2 local file(s) of this node that differed from the checkpoint were overwritten after a copy was saved as a rescue bundle");
+	});
+
+	it("the post-checkpoint digest does not promise git pushes", () => {
+		const note = buildContinuationNote({ ...base, reason: "takeover", afterCheckpoint: "User: hi" });
+		expect(note).toContain("unless they were part of the bundle");
+		expect(note).not.toContain("pushed");
+	});
+});
+
 describe("buildPostCheckpointDigest", () => {
 	const text = (role: string, t: string): DigestMessage => ({ role, content: [{ type: "text", text: t }] });
 

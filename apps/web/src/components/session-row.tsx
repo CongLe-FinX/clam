@@ -1,17 +1,22 @@
 import type { AgentSession } from "@clam/contracts";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { memo } from "react";
+import { warmHandlers } from "@/features/session/preload.ts";
 import { cn, formatCompact, formatCost, relativeTime } from "@/lib/utils";
 import { StatusDot } from "@/ui/status-dot";
-import { SessionKindBadge, sessionDot } from "./session-status.tsx";
+import { PendingBadge, SessionKindBadge, sessionDot } from "./session-status.tsx";
 
 /** One session in any list: status dot, title, project, model, tokens, cost, recency. Whole row is a link. */
 export const SessionRow = memo(function SessionRow({ session, projectName, className }: { session: AgentSession; projectName?: string; className?: string }) {
 	const tokens = session.stats?.tokens.total;
+	const qc = useQueryClient();
+	const warm = warmHandlers(qc, session.id, session.status);
 	return (
 		<Link
 			to="/sessions/$sessionId"
 			params={{ sessionId: session.id }}
+			{...warm}
 			preload="intent"
 			className={cn(
 				"group flex min-h-14 items-center gap-3 border-b px-4 py-2.5 outline-none transition-colors last:border-b-0 hover:bg-surface-2 focus-visible:bg-surface-2 coarse:min-h-16",
@@ -23,6 +28,7 @@ export const SessionRow = memo(function SessionRow({ session, projectName, class
 				<span className="flex min-w-0 items-center gap-2">
 					<span className="truncate text-[13px] font-medium">{session.title || "Untitled session"}</span>
 					<SessionKindBadge session={session} className="shrink-0" />
+					<PendingBadge session={session} className="shrink-0" />
 				</span>
 				<span className="flex min-w-0 items-center gap-1.5 truncate text-xs text-subtle">
 					{projectName ? <span className="truncate">{projectName}</span> : null}

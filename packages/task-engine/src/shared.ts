@@ -117,7 +117,8 @@ export interface SharedBriefInput {
 	driver: { agentName: string | null; nodeName: string };
 	/** The agent being briefed and its node. */
 	self: { agentName: string | null; nodeName: string };
-	repo: { url: string; branch: string };
+	/** git mode; null in files mode (no repository: the working folder travels as bundles). */
+	repo: { url: string; branch: string } | null;
 	/** Other participants (agent@node) besides the driver and self. */
 	others: string[];
 	agentMessageLimit: number;
@@ -129,8 +130,14 @@ export function buildSharedBrief(i: SharedBriefInput): string {
 	L.push(`You are: ${i.self.agentName ?? "agent"}@${i.self.nodeName} — a PARTICIPANT agent.`);
 	L.push(`Driver: ${i.driver.agentName ?? "agent"}@${i.driver.nodeName} (their agent does the main work in its own session)`);
 	if (i.others.length > 0) L.push(`Other participants: ${i.others.join(", ")}`);
-	L.push("", "## Goal", "", i.goal.trim() || i.title, "", "## Repository", "", `- Repo: ${i.repo.url}`, `- Shared branch: ${i.repo.branch} (the driver commits checkpoints there; do not commit to it yourself)`);
-	L.push("- You are NOT the lead: you may answer, plan, review and try things in your own clone of the repository on this node, but you must not edit, commit or push the shared branch: only the lead's checkpoints go there, and what you change here stays local unless you are asked to deliver it. Only a takeover or hand-over (done by a human) makes this node the lead.");
+	L.push("", "## Goal", "", i.goal.trim() || i.title);
+	if (i.repo) {
+		L.push("", "## Repository", "", `- Repo: ${i.repo.url}`, `- Shared branch: ${i.repo.branch} (the driver commits checkpoints there; do not commit to it yourself)`);
+		L.push("- You are NOT the lead: you may answer, plan, review and try things in your own clone of the repository on this node, but you must not edit, commit or push the shared branch: only the lead's checkpoints go there, and what you change here stays local unless you are asked to deliver it. Only a takeover or hand-over (done by a human) makes this node the lead.");
+	} else {
+		L.push("", "## Working folder", "", "- There is no git repository: the driver's working folder travels between the nodes as a bundle at every checkpoint, and this session's working directory holds the copy this node received.");
+		L.push("- You are NOT the lead: you may answer, plan, review and try things in this folder, but what you change here is not shared with the team and is replaced (never silently: local edits are kept aside) when this node takes over from a checkpoint. Only a takeover or hand-over (done by a human) makes this node the lead.");
+	}
 	L.push("", "## Working in the group chat", "");
 	L.push(
 		"- This shared session is a GROUP CHAT: the owner (a human, from any node) and one agent per node talk in one timeline that every node keeps a copy of. Your own session here is your private workspace.",
@@ -155,7 +162,10 @@ export interface ContinuationInput {
 	epoch: number;
 	reason: "takeover" | "transfer";
 	checkpoint: { seq: number; at: string; commit: string | null; pushed: boolean } | null;
-	branch: string;
+	/** git mode: the shared branch. null in files mode. */
+	branch: string | null;
+	/** files mode: the folder was restored from the bundle of this checkpoint (instead of a git branch). */
+	files?: { fileCount: number; applied: readonly string[]; kept: readonly string[]; rescued: number } | null;
 	/** The commit the working tree was put on, when known. */
 	headCommit: string | null;
 	/** Why the working tree is not exactly at the checkpoint, when so (for example "the branch tip is newer than the snapshot"). */
@@ -168,19 +178,27 @@ export interface ContinuationInput {
 
 /** The prompt that opens the continued session on the node that took over: where it stands and what may be missing. */
 export function buildContinuationNote(i: ContinuationInput): string {
-	const where = i.checkpoint ? `checkpoint ${i.checkpoint.seq} (${i.checkpoint.commit ? `commit ${i.checkpoint.commit.slice(0, 12)}` : "no commit"}${i.checkpoint.pushed ? "" : ", not pushed"}, taken ${i.checkpoint.at})` : "the last session snapshot";
+	const filesMode = i.files != null;
+	const where = i.checkpoint && filesMode ? `checkpoint ${i.checkpoint.seq} (folder bundle of ${i.files?.fileCount} file(s), taken ${i.checkpoint.at})` : i.checkpoint ? `checkpoint ${i.checkpoint.seq} (${i.checkpoint.commit ? `commit ${i.checkpoint.commit.slice(0, 12)}` : "no commit"}${i.checkpoint.pushed ? "" : ", not pushed"}, taken ${i.checkpoint.at})` : "the last session snapshot";
 	const head = `${MESH_MARKER} shared session ${i.sharedSessionId} · "${i.title.replace(/\s+/g, " ").replace(/"/g, "'").trim()}" · driver changed (epoch ${i.epoch})`;
 	const L = [head, ""];
 	if (i.reason === "transfer") {
 		L.push(
 			`The driver role was handed over to this node (${i.to.nodeName}) by ${i.from.agentName ?? "agent"}@${i.from.nodeName}. Continuing from ${where}.`,
-			`That checkpoint was taken at the hand-over: it contains ALL of ${i.from.nodeName}'s work, every file change is committed on the branch and the conversation above is complete. Nothing is missing.`,
+			`That checkpoint was taken at the hand-over: it contains ALL of ${i.from.nodeName}'s work, ${filesMode ? "every file is in the bundle this folder was restored from" : "every file change is committed on the branch"} and the conversation above is complete. Nothing is missing.`,
 		);
 		if (i.interrupted) L.push(`${i.from.nodeName} stopped a running turn for the hand-over, so its last step may have been cut off: look at the last messages above and at the working tree before you carry on.`);
 	} else {
-		L.push(`Continuing on ${i.to.nodeName} from ${where}. ${i.from.nodeName} did not hand over (it was unreachable) — work done there after that checkpoint may be missing: uncommitted edits, unpushed commits and everything after ${i.checkpoint?.at ?? "the checkpoint"}.`);
+		L.push(`Continuing on ${i.to.nodeName} from ${where}. ${i.from.nodeName} did not hand over (it was unreachable) — work done there after that checkpoint may be missing: ${filesMode ? "file edits that were never bundled" : "uncommitted edits, unpushed commits"} and everything after ${i.checkpoint?.at ?? "the checkpoint"}.`);
 	}
-	L.push(`The working tree is on branch ${i.branch}${i.headCommit ? ` at ${i.headCommit.slice(0, 12)}` : ""}.`);
+	if (filesMode && i.files) {
+		L.push(`There is no git repository: the working folder was restored from that checkpoint's bundle (${i.files.applied.length} file(s) written, the rest was already identical).`);
+		if (i.reason === "takeover") L.push(`File changes ${i.from.nodeName} made after ${i.checkpoint?.at ?? "that checkpoint"} (new or edited files that were never bundled) are NOT in this folder and may be missing.`);
+		if (i.files.kept.length > 0) L.push(`These files already existed here with different content and were kept as they are: ${i.files.kept.slice(0, 20).join(", ")}.`);
+		if (i.files.rescued > 0) L.push(`${i.files.rescued} local file(s) of this node that differed from the checkpoint were overwritten after a copy was saved as a rescue bundle.`);
+	} else {
+		L.push(`The working tree is on branch ${i.branch}${i.headCommit ? ` at ${i.headCommit.slice(0, 12)}` : ""}.`);
+	}
 	if (i.treeNote) L.push(i.treeNote);
 	if (i.afterCheckpoint) {
 		const cp = i.checkpoint;
@@ -188,7 +206,7 @@ export function buildContinuationNote(i: ContinuationInput): string {
 		L.push(
 			"",
 			`--- What ${i.from.nodeName}'s agent did after ${label} ---`,
-			`This is a digest of the former driver's conversation after the snapshot you are continuing from (the conversation above stops at ${label}). The file changes it made after ${cp?.commit ? `commit ${cp.commit.slice(0, 12)}` : "that checkpoint"} are NOT in this working tree${cp && !cp.pushed ? "; that checkpoint was never pushed either, so even its own commit may be missing" : " unless they were pushed to the branch"}. Treat it as information on what was attempted, and verify the files before relying on it.`,
+			`This is a digest of the former driver's conversation after the snapshot you are continuing from (the conversation above stops at ${label}). The file changes it made after ${cp?.commit ? `commit ${cp.commit.slice(0, 12)}` : "that checkpoint"} are NOT in this working tree${filesMode ? " unless they were part of the bundle" : cp && !cp.pushed ? "; that checkpoint was never pushed either, so even its own commit may be missing" : " unless they were pushed to the branch"}. Treat it as information on what was attempted, and verify the files before relying on it.`,
 			"",
 			i.afterCheckpoint,
 			"--- end ---",
@@ -196,7 +214,7 @@ export function buildContinuationNote(i: ContinuationInput): string {
 	}
 	L.push(
 		"",
-		"You are now the DRIVER of this shared session: your session does the work, and the other nodes mirror it. Continue the work the conversation above was doing: check the working tree and the recent git log against it, then carry on with the task. Talk to the team with `mesh_say` and look at it with `mesh_team`.",
+		"You are now the DRIVER of this shared session: your session does the work, and the other nodes mirror it. Continue the work the conversation above was doing: check the working folder (and the recent git log, if there is one) against it, then carry on with the task. Talk to the team with `mesh_say` and look at it with `mesh_team`.",
 	);
 	return L.join("\n");
 }

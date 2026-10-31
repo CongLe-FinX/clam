@@ -48,12 +48,15 @@ export const TaskResult = z.object({
 	/** GitHub compare URL for the pushed branch, when known. */
 	compareUrl: z.string().nullable(),
 	artifacts: z.array(z.object({ artifactId: z.string(), name: z.string(), sha256: z.string(), size: z.number().int() })),
+	/** deliverAs = files: the files the executor created/changed, as one bundle (preview + apply on the sender). */
+	files: z.object({ artifactId: z.string(), sha256: z.string(), size: z.number().int(), fileCount: z.number().int() }).nullable(),
 });
 export type TaskResult = z.infer<typeof TaskResult>;
 
 export const TaskDeliverAs = z.enum([
-	"summary", // answer only, no git changes expected
-	"branch", // executor works on a task branch, commits + pushes it (patch artifact if it cannot push)
+	"summary", // answer only, no file changes expected
+	"branch", // git projects: executor works on a task branch, commits + pushes it (patch artifact if it cannot push)
+	"files", // any project, git or not: executor works in its own folder and returns the changed files as a bundle
 ]);
 export type TaskDeliverAs = z.infer<typeof TaskDeliverAs>;
 
@@ -74,7 +77,10 @@ export const Task = z.object({
 	status: TaskStatus,
 	/** Ownership epoch / fencing token (docs §9). 0 for a fresh task. */
 	epoch: z.number().int(),
-	repo: z.object({ url: z.string(), branch: z.string().nullable(), commit: z.string().nullable() }),
+	/** null when the task is not tied to a git repository (deliverAs summary/files). */
+	repo: z.object({ url: z.string(), branch: z.string().nullable(), commit: z.string().nullable() }).nullable(),
+	/** Input files sent along with the task (a bundle taken from the sender's project). */
+	inputFiles: z.object({ artifactId: z.string(), sha256: z.string(), size: z.number().int(), fileCount: z.number().int() }).nullable(),
 	/** Local project this task belongs to on THIS node (origin project on the sender, execution project on the executor). */
 	projectId: z.string().nullable(),
 	sender: TaskParty,
@@ -100,7 +106,7 @@ export const Task = z.object({
 });
 export type Task = z.infer<typeof Task>;
 
-export const TaskEventType = z.enum(["status", "progress", "tool", "message", "result", "note"]);
+export const TaskEventType = z.enum(["status", "progress", "tool", "message", "result", "note", "late_result"]);
 export const TaskEvent = z.object({
 	seq: z.number().int(),
 	type: TaskEventType,
@@ -145,11 +151,22 @@ export const CreateTaskBody = z.object({
 	targetNodeId: z.string().min(1),
 	/** Omit to let the executor choose its agent. */
 	targetAgentId: z.string().optional(),
-	/** Local project whose linked GitHub repository the executor will work on. */
-	projectId: z.string().min(1),
+	/**
+	 * Sender's local project. Optional: without it the task carries no repository and runs in a fresh folder on the
+	 * executor (deliverAs must then be summary or files). A project without a git repository works the same way.
+	 */
+	projectId: z.string().min(1).optional(),
+	/**
+	 * Workspace the task belongs to (the peer must be a member). Defaults to the project's workspace; without a project it
+	 * is required unless the target node is a member of exactly one workspace of this node.
+	 */
+	workspaceId: z.string().min(1).optional(),
 	title: z.string().trim().min(1).max(200),
 	description: z.string().trim().min(1).max(50_000),
-	deliverAs: TaskDeliverAs.default("branch"),
+	/** Default: `branch` for a project with a linked GitHub repository, `files` otherwise. */
+	deliverAs: TaskDeliverAs.optional(),
+	/** Project-relative files/folders to send along as input (any project; copied as a bundle, size-capped). */
+	inputPaths: z.array(z.string().min(1)).max(500).optional(),
 	/** Base branch for the executor (defaults to the repo's default branch). */
 	baseBranch: z.string().optional(),
 	constraints: TaskConstraints.default({}),

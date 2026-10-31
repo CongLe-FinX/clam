@@ -1,13 +1,16 @@
-import { ArrowUp, Clock, CornerDownRight, Loader2, RotateCw, Square } from "lucide-react";
+import { ArrowUp, Clock, CornerDownRight, Loader2, Paperclip, RotateCw, Square } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { UploadDock, useProjectUploads } from "@/features/projects/uploads.tsx";
 import { useIsMobile } from "@/hooks/use-breakpoint";
 import { errorMessage } from "@/lib/api";
+import { filesFromClipboard, hasFiles } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Kbd } from "@/ui/kbd";
 import { Tip } from "@/ui/tooltip";
-import { ModelPicker, ThinkingPicker } from "./model-pickers.tsx";
+import { ModelPicker, ModelSettings, ThinkingPicker } from "./model-pickers.tsx";
+import { useSessionEnv } from "./session-env.ts";
 import { isBusy, type SessionStream, useStreamMeta } from "./stream-store.ts";
 
 const draftKey = (id: string) => `clam.draft:${id}`;
@@ -28,6 +31,8 @@ function writeDraft(id: string, value: string): void {
 }
 
 const coarsePointer = typeof matchMedia === "function" ? matchMedia("(pointer: coarse)") : null;
+/** Browsers with `field-sizing: content` grow the textarea natively: no JS measuring per keystroke. */
+const NATIVE_SIZING = typeof CSS !== "undefined" && typeof CSS.supports === "function" && CSS.supports("field-sizing", "content");
 
 /** Why sending is blocked right now, or null when the composer can send. */
 function useBlockedReason(stream: SessionStream): { reason: string | null; restartable: boolean; loading: boolean } {
@@ -67,6 +72,12 @@ export function Composer({
 	const [mode, setMode] = useState<"steer" | "followUp">("steer");
 	const [restarting, setRestarting] = useState(false);
 	const ref = useRef<HTMLTextAreaElement>(null);
+	const { projectId } = useSessionEnv();
+	const uploads = useProjectUploads(projectId);
+	const fileInput = useRef<HTMLInputElement>(null);
+	const dragDepth = useRef(0);
+	const [dragging, setDragging] = useState(false);
+	const announced = useRef(new Set<number>());
 	const mobile = useIsMobile();
 	const touch = mobile || (coarsePointer?.matches ?? false);
 	const busy = useStreamMeta(stream, isBusy);
@@ -92,15 +103,21 @@ export function Composer({
 		}
 	}, [fill]);
 
-	// Auto-grow. Re-measured when the width changes (placeholder/text wrapping depends on it).
-	useLayoutEffect(() => {
+	// Auto-grow (fallback for browsers without `field-sizing`): one scrollHeight read per change, plus a single width observer
+	// because wrapping (and so the height) depends on the width.
+	const fit = useCallback(() => {
 		const el = ref.current;
 		if (!el) return;
-		const fit = () => {
-			el.style.height = "auto";
-			el.style.height = `${Math.min(el.scrollHeight, touch ? 132 : 240)}px`;
-		};
-		fit();
+		el.style.height = "auto";
+		el.style.height = `${Math.min(el.scrollHeight, touch ? 132 : 200)}px`;
+	}, [touch]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: value/placeholder change the height
+	useLayoutEffect(() => {
+		if (!NATIVE_SIZING) fit();
+	}, [fit, value, placeholder]);
+	useEffect(() => {
+		const el = ref.current;
+		if (NATIVE_SIZING || !el) return;
 		let width = el.clientWidth;
 		const ro = new ResizeObserver(() => {
 			if (el.clientWidth === width) return;
@@ -109,7 +126,17 @@ export function Composer({
 		});
 		ro.observe(el);
 		return () => ro.disconnect();
-	}, [value, touch, placeholder]);
+	}, [fit]);
+
+	// A finished upload lands in the project folder: reference it in the draft so the agent knows which file is meant.
+	useEffect(() => {
+		const done = uploads.items.filter((i) => i.status === "done" && !announced.current.has(i.id));
+		if (done.length === 0) return;
+		for (const i of done) announced.current.add(i.id);
+		const refs = done.map((i) => `\`${i.path}\``).join(" ");
+		setValue((cur) => (cur.trim() ? `${cur.replace(/\s+$/, "")} ${refs} ` : `${refs} `));
+		ref.current?.focus();
+	}, [uploads.items]);
 
 	const submit = useCallback(async () => {
 		const text = value.trim();
@@ -159,8 +186,8 @@ export function Composer({
 	const followUps = queued?.followUp ?? [];
 
 	return (
-		<div className={cn("shrink-0 px-3 pt-1 sm:px-4", keyboardOpen ? "pb-2" : "pb-3 pb-safe", className)}>
-			<div className="mx-auto w-full max-w-3xl">
+		<div className={cn("shrink-0 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-1 sm:px-4", keyboardOpen ? "pb-2" : "pb-3 pb-safe", className)}>
+			<div className="mx-auto w-full max-w-[60rem]">
 				{steering.length + followUps.length > 0 ? (
 					<ul aria-label="Queued messages" className="scrollbar-none mb-2 flex gap-1.5 overflow-x-auto">
 						{steering.map((q, i) => (
@@ -194,9 +221,44 @@ export function Composer({
 					</div>
 				) : null}
 
-				<div className="flex flex-col rounded-2xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border-strong)] transition-shadow focus-within:shadow-[inset_0_0_0_1px_var(--accent),0_0_0_3px_var(--accent-soft)]">
+				<div
+					className={cn(
+						"relative flex flex-col rounded-2xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border-strong)] transition-shadow focus-within:shadow-[inset_0_0_0_1px_var(--accent),0_0_0_3px_var(--accent-soft)]",
+						dragging && "shadow-[inset_0_0_0_2px_var(--accent)]",
+					)}
+					onDragEnter={(e) => {
+						if (!hasFiles(e)) return;
+						dragDepth.current++;
+						setDragging(true);
+					}}
+					onDragOver={(e) => {
+						if (!hasFiles(e)) return;
+						e.preventDefault();
+						e.dataTransfer.dropEffect = "copy";
+					}}
+					onDragLeave={(e) => {
+						if (!hasFiles(e)) return;
+						dragDepth.current = Math.max(0, dragDepth.current - 1);
+						if (dragDepth.current === 0) setDragging(false);
+					}}
+					onDrop={(e) => {
+						if (!hasFiles(e)) return;
+						e.preventDefault();
+						dragDepth.current = 0;
+						setDragging(false);
+						uploads.upload(Array.from(e.dataTransfer.files), "");
+					}}
+				>
 					<textarea
 						ref={ref}
+						onPaste={(e) => {
+							// Screenshots and copied files become uploads; rich text (e.g. spreadsheet cells) pastes as text.
+							if (e.clipboardData.types.includes("text/html")) return;
+							const files = filesFromClipboard(e);
+							if (files.length === 0) return;
+							e.preventDefault();
+							uploads.upload(files, "");
+						}}
 						value={value}
 						rows={1}
 						onChange={(e) => setValue(e.target.value)}
@@ -212,10 +274,31 @@ export function Composer({
 						aria-label="Message"
 						enterKeyHint={touch ? "enter" : "send"}
 						autoCapitalize="sentences"
-						className="scrollbar-thin block max-h-60 min-h-11 w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-sm leading-relaxed outline-none placeholder:text-subtle"
+						className="scrollbar-thin block max-h-32 min-h-11 w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-base leading-relaxed outline-none [field-sizing:content] placeholder:text-subtle md:max-h-[12.5rem] md:text-sm"
 					/>
+					<UploadDock uploads={uploads} />
+					{dragging ? (
+						<div aria-hidden className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl bg-accent-soft text-xs font-medium text-accent">
+							Drop to add to the project folder
+						</div>
+					) : null}
 					<div className="flex items-center gap-1.5 px-2 pb-2">
 						<div className="flex min-w-0 flex-1 items-center gap-1.5">
+							<input
+								ref={fileInput}
+								type="file"
+								multiple
+								hidden
+								onChange={(e) => {
+									uploads.upload(Array.from(e.target.files ?? []), "");
+									e.target.value = "";
+								}}
+							/>
+							<Tip label="Attach files to the project folder">
+								<Button size="icon" variant="ghost" aria-label="Attach files" onClick={() => fileInput.current?.click()} className="rounded-xl">
+									<Paperclip />
+								</Button>
+							</Tip>
 							{busy ? (
 								<div role="radiogroup" aria-label="Delivery while the agent is working" className="flex shrink-0 rounded-lg bg-surface-2 p-0.5 shadow-[inset_0_0_0_1px_var(--border)]">
 									{(
@@ -241,7 +324,8 @@ export function Composer({
 									))}
 								</div>
 							) : null}
-							<div className="flex min-w-0 items-center gap-1.5 md:hidden">
+							<ModelSettings stream={stream} className="max-w-[10.5rem] sm:hidden" />
+							<div className="hidden min-w-0 items-center gap-1.5 sm:flex md:hidden">
 								<ModelPicker stream={stream} className="max-w-[9.5rem]" />
 								<ThinkingPicker stream={stream} />
 							</div>
@@ -260,7 +344,7 @@ export function Composer({
 								</Button>
 							</Tip>
 						) : null}
-						<Button size="icon" variant="primary" aria-label={busy ? (mode === "steer" ? "Send steering message" : "Queue follow-up") : "Send message"} disabled={!trimmed || blocked.reason !== null} onClick={() => void submit()} className="rounded-xl">
+						<Button size="icon" variant={trimmed && blocked.reason === null ? "primary" : "secondary"} aria-label={busy ? (mode === "steer" ? "Send steering message" : "Queue follow-up") : "Send message"} disabled={!trimmed || blocked.reason !== null} onClick={() => void submit()} className="rounded-xl">
 							<ArrowUp />
 						</Button>
 					</div>

@@ -302,11 +302,11 @@ function NodeSummary({ active, crashed }: { active: number | null; crashed: numb
 				<Tile label="Active" value={active === null ? null : String(active)} hint={s ? `of ${s.maxConcurrentRuntimes} max` : undefined} accent={(active ?? 0) > 0} />
 				<Tile label="Crashed" value={crashed === null ? null : String(crashed)} danger={(crashed ?? 0) > 0} />
 				<Tile label="Idle timeout" value={settings.isPending ? null : s ? `${s.runtimeIdleTimeoutMin} min` : "—"} />
-				<Tile label="Node memory" value={health.isPending ? null : h ? formatBytes(h.memory.rss) : "—"} hint={h ? "RSS" : undefined} />
+				<Tile label="Machine memory" value={health.isPending ? null : h ? formatBytes(h.memory.rss) : "—"} hint={h ? "RSS" : undefined} />
 			</dl>
 			<div className="flex flex-col gap-2 rounded-xl bg-surface-1 p-3.5 shadow-[inset_0_0_0_1px_var(--border)]">
 				<div className="flex items-center justify-between gap-2">
-					<span className="text-2xs font-semibold uppercase tracking-wider text-subtle">Node health</span>
+					<span className="text-2xs font-semibold uppercase tracking-wider text-subtle">Machine health</span>
 					{h ? (
 						<span className="inline-flex items-center gap-1.5 text-xs">
 							<StatusDot status={h.status} label={h.status} />

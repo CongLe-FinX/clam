@@ -1,6 +1,6 @@
 import type { AgentSession, Checkpoint, Participant, SharedSession, SharedSessionDetail } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowRightLeft, Camera, Check, Clock, ExternalLink, GitBranch, GitCommitHorizontal, LogOut, TriangleAlert, UserMinus, UserPlus, Users } from "lucide-react";
+import { ArrowRightLeft, Camera, Check, Clock, ExternalLink, FolderSync, GitBranch, LogOut, TriangleAlert, UserMinus, UserPlus, Users } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { errorMessage } from "@/lib/api";
@@ -11,8 +11,9 @@ import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { Skeleton } from "@/ui/skeleton";
 import { StatusDot } from "@/ui/status-dot";
-import { branchUrl, commitUrl, NODE_STATUS_LABEL, nodeDot, PARTICIPANT_STATE_LABEL, participantLabel, remoteSessionUrl, ROLE_LABEL, shortCommit, teamOf } from "./format.ts";
+import { branchUrl, NODE_STATUS_LABEL, nodeDot, PARTICIPANT_STATE_LABEL, participantLabel, remoteSessionUrl, ROLE_LABEL, teamOf } from "./format.ts";
 import { useCheckpointNow, useLeaveShared, useNodeUiUrl, useRemoveParticipant, useSharedDetail } from "./hooks.ts";
+import { CheckpointFacts, FilesInfoButton } from "./mode.tsx";
 
 type TeamTab = "members" | "checkpoints";
 
@@ -54,7 +55,7 @@ function MemberRow({ shared, p, onTransfer, onRemove }: { shared: SharedSession;
 				<span className="min-w-0 flex-1 basis-28 truncate text-[13px] font-medium" title={participantLabel(p)}>
 					{participantLabel(p)}
 				</span>
-				{self ? <Badge variant="outline">this node</Badge> : null}
+				{self ? <Badge variant="outline">this machine</Badge> : null}
 				{isDriver ? <Badge variant="accent">{ROLE_LABEL.driver}</Badge> : <Badge variant="neutral">{ROLE_LABEL.participant}</Badge>}
 			</div>
 			<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-subtle">
@@ -105,7 +106,7 @@ function Members({ shared, onAddAgent }: { shared: SharedSession; onAddAgent: ()
 	const gone = shared.participants.filter((p) => p.state !== "invited" && p.state !== "active");
 	const iAmDriver = shared.localRole === "driver";
 	const me = selfOf(shared);
-	const branch = branchUrl(shared.repo.url, shared.repo.branch);
+	const branch = shared.repo ? branchUrl(shared.repo.url, shared.repo.branch) : null;
 
 	return (
 		<div className="flex flex-col gap-3 p-3">
@@ -126,17 +127,25 @@ function Members({ shared, onAddAgent }: { shared: SharedSession; onAddAgent: ()
 			) : null}
 			<dl className="flex flex-col gap-1.5 rounded-lg bg-surface-2/60 p-3 text-2xs text-subtle">
 				<div className="flex items-center gap-2">
-					<dt className="w-16 shrink-0">Branch</dt>
-					<dd className="flex min-w-0 items-center gap-1 font-mono text-muted-foreground">
-						<GitBranch className="size-3 shrink-0" aria-hidden />
-						{branch ? (
-							<a href={branch} target="_blank" rel="noreferrer noopener" className="truncate hover:text-foreground hover:underline">
-								{shared.repo.branch}
-							</a>
-						) : (
-							<span className="truncate">{shared.repo.branch}</span>
-						)}
-					</dd>
+					<dt className="w-16 shrink-0">{shared.vcs === "git" ? "Branch" : "Sync"}</dt>
+					{shared.vcs === "git" && shared.repo ? (
+						<dd className="flex min-w-0 items-center gap-1 font-mono text-muted-foreground">
+							<GitBranch className="size-3 shrink-0" aria-hidden />
+							{branch ? (
+								<a href={branch} target="_blank" rel="noreferrer noopener" className="truncate hover:text-foreground hover:underline">
+									{shared.repo.branch}
+								</a>
+							) : (
+								<span className="truncate">{shared.repo.branch}</span>
+							)}
+						</dd>
+					) : (
+						<dd className="flex min-w-0 items-center gap-1 text-muted-foreground">
+							<FolderSync className="size-3 shrink-0" aria-hidden />
+							<span className="truncate">Folder sync · no repository</span>
+							<FilesInfoButton />
+						</dd>
+					)}
 				</div>
 				<div className="flex items-center gap-2">
 					<dt className="w-16 shrink-0">Epoch</dt>
@@ -155,7 +164,7 @@ function Members({ shared, onAddAgent }: { shared: SharedSession; onAddAgent: ()
 				open={removing !== null}
 				onOpenChange={(o) => !o && setRemoving(null)}
 				title={`Remove ${removing ? participantLabel(removing) : ""}?`}
-				description="Its live view and agent session on that node are torn down. Its work stays in its clone and on any branch it already pushed."
+				description="Its live view and agent session on that machine are torn down. Its work stays in its clone and on any branch it already pushed."
 				confirmLabel="Remove"
 				danger
 				loading={remove.isPending}
@@ -165,7 +174,7 @@ function Members({ shared, onAddAgent }: { shared: SharedSession; onAddAgent: ()
 				open={leaving}
 				onOpenChange={setLeaving}
 				title="Leave this shared session?"
-				description="Your live view and your agent's session for it are torn down on this node. You can be invited again later."
+				description="Your live view and your agent's session for it are torn down on this machine. You can be invited again later."
 				confirmLabel="Leave"
 				danger
 				loading={leave.isPending}
@@ -178,7 +187,7 @@ function Members({ shared, onAddAgent }: { shared: SharedSession; onAddAgent: ()
 // ───────────────────────────── checkpoints ─────────────────────────────
 
 function CheckpointItem({ shared, c }: { shared: SharedSession; c: Checkpoint }) {
-	const url = c.commit ? commitUrl(shared.repo.url, c.commit) : null;
+	const git = shared.vcs === "git";
 	const holders = shared.participants.filter((p) => p.nodeId !== c.nodeId && p.state === "active");
 	const names = new Map(shared.participants.map((p) => [p.nodeId, participantLabel(p)]));
 	return (
@@ -191,31 +200,18 @@ function CheckpointItem({ shared, c }: { shared: SharedSession; c: Checkpoint })
 					{relativeTime(c.at)}
 				</span>
 				<span className="tabular font-mono text-2xs text-subtle">epoch {c.epoch}</span>
-				{c.pushed ? (
+				{git && c.commit && c.pushed ? (
 					<Badge variant="success">
 						<Check aria-hidden /> Pushed
 					</Badge>
-				) : c.commit ? (
+				) : git && c.commit ? (
 					<Badge variant="warning" title="The push was refused or has not happened yet; the commit exists on the driver node.">
 						<TriangleAlert aria-hidden /> Not pushed
 					</Badge>
 				) : null}
 			</div>
 			<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-				{c.commit ? (
-					<span className="inline-flex items-center gap-1 font-mono">
-						<GitCommitHorizontal className="size-3.5 text-subtle" aria-hidden />
-						{url ? (
-							<a href={url} target="_blank" rel="noreferrer noopener" className="hover:text-foreground hover:underline">
-								{shortCommit(c.commit)}
-							</a>
-						) : (
-							shortCommit(c.commit)
-						)}
-					</span>
-				) : (
-					<span className="text-subtle">No file changes</span>
-				)}
+				<CheckpointFacts shared={shared} c={c} />
 				{c.snapshot ? (
 					<span title={`sha256 ${c.snapshot.sha256}`}>
 						Snapshot · {c.snapshot.messageCount} messages · {formatBytes(c.snapshot.size)}
@@ -251,7 +247,9 @@ function Checkpoints({ shared, checkpoints }: { shared: SharedSession; checkpoin
 		<div className="flex flex-col gap-3 p-3">
 			<div className="flex items-center gap-2">
 				<p className="min-w-0 flex-1 text-xs text-muted-foreground">
-					A checkpoint commits the work to the shared branch and ships a snapshot of the conversation to the team. Another node can continue from the latest one.
+					{shared.vcs === "git"
+						? "A checkpoint commits the work to the shared branch and ships a snapshot of the conversation to the team. Another machine can continue from the latest one."
+						: "A checkpoint bundles the working folder (no Git needed) and ships it with a snapshot of the conversation to the team. Another machine can continue from the latest one — work done after it is lost."}
 				</p>
 			</div>
 			{driver ? (
@@ -285,7 +283,7 @@ export function TeamPanel({ session, onAddAgent }: { session: AgentSession; onAd
 			<EmptyState
 				icon={Users}
 				title="Not shared yet"
-				description="Add an agent from another node to work on this session together: it follows live, discusses with you, and can take over if this node goes offline."
+				description="Add an agent from another machine to work on this session together: it follows live, discusses with you, and can take over if this machine goes offline."
 				action={
 					canShare ? (
 						<Button variant="primary" onClick={onAddAgent}>

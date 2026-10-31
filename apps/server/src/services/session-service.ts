@@ -1,9 +1,10 @@
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import type { ApprovalMode, RuntimeSession } from "@clam/agent-runtime";
-import { placeSessionFile } from "@clam/agent-runtime/omp";
+import { placeSessionFile, readSubagentRoster, readSubagentTranscript } from "@clam/agent-runtime/omp";
 import {
 	type AgentSession,
+	type PendingUiRequest,
 	type MessagesPage,
 	type CreateSessionBody,
 	type RuntimeStatus,
@@ -13,6 +14,9 @@ import {
 	type SetModelBody,
 	type SetThinkingBody,
 	type UpdateSessionBody,
+	type CancelSubagentResult,
+	type SubagentMessagesPage,
+	type SubagentsPage,
 	type UiResponseBody,
 	type PromptBody,
 } from "@clam/contracts";
@@ -21,6 +25,7 @@ import { agentSessions, agents, nodeEvents, projects, providerUsage } from "@cla
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
+import { CHAT_RENDERING_GUIDANCE } from "./agent-guidance.ts";
 import { newId } from "./ids.ts";
 
 type SessionRow = typeof agentSessions.$inferSelect;
@@ -45,13 +50,17 @@ export interface SessionViews {
 	status(sessionId: string): AgentSession["status"];
 	messages(sessionId: string, query: { cursor?: string; limit?: number }): MessagesPage;
 	state(sessionId: string): SessionLiveState;
+	/** The questions/approvals the driver's agent is waiting for, as replicated to this mirror (none for a moved copy). */
+	pendingRequests(sessionId: string): PendingUiRequest[];
+	/** A person on this machine answers one of them: forwarded to the driver, which validates it and answers its runtime. Rejects `409 already_answered` when somebody was first. */
+	respond(sessionId: string, input: UiResponseInput): Promise<void>;
 }
 
 /** Refuses a session that is about to be deleted while it is still part of an active shared session. */
 export type SessionRemoveGuard = (row: { id: string; kind: string; sharedSessionId: string | null }) => void;
 
 /** Refuses a prompt to a session that must not change now (the driving session while its hand-over checkpoint is being taken). */
-export type SessionPromptGuard = (row: { id: string; kind: string; sharedSessionId: string | null }) => void;
+export type SessionPromptGuard = (row: { id: string; kind: string; sharedSessionId: string | null }, input: { clientId: string }) => void;
 
 export type CreateSessionInput = z.infer<typeof CreateSessionBody>;
 export type UpdateSessionInput = z.infer<typeof UpdateSessionBody>;
@@ -104,6 +113,8 @@ export class SessionService {
 	private views: SessionViews | null = null;
 	private removeGuard: SessionRemoveGuard | null = null;
 	private promptGuard: SessionPromptGuard | null = null;
+	/** Further guards (the handoff fence refuses prompts for sessions of fenced tasks); all must pass. */
+	private readonly extraPromptGuards: SessionPromptGuard[] = [];
 
 	constructor(ctx: ServerContext) {
 		this.ctx = ctx;
@@ -123,6 +134,11 @@ export class SessionService {
 		this.promptGuard = guard;
 	}
 
+	/** Add a guard that runs next to the one `setPromptGuard` installs. */
+	addPromptGuard(guard: SessionPromptGuard): void {
+		this.extraPromptGuards.push(guard);
+	}
+
 	// ------------------------------------------------------------------ wiring
 
 	/** Forward runtime events/status to the bus and apply their persistence side effects. Idempotent. */
@@ -131,6 +147,7 @@ export class SessionService {
 		this.started = true;
 		// Every process is gone at boot, whatever the previous run left behind.
 		this.ctx.db.update(agentSessions).set({ status: "stopped" }).run();
+		this.ctx.turnOutputs.start();
 		this.disposers.push(
 			this.ctx.runtime.onEvent((sessionId, event) => this.onRuntimeEvent(sessionId, event)),
 			this.ctx.runtime.onStatus((status) => this.onRuntimeStatus(status)),
@@ -139,6 +156,7 @@ export class SessionService {
 
 	dispose(): void {
 		for (const dispose of this.disposers.splice(0)) dispose();
+		this.ctx.turnOutputs.dispose();
 		this.started = false;
 	}
 
@@ -160,6 +178,9 @@ export class SessionService {
 			this.queueUsageFlush(sessionId);
 		} else if (event.type === "state") {
 			this.persistFromState(sessionId, event.state);
+		} else if (event.type === "ui_request" || event.type === "ui_request_resolved") {
+			// The badge in session lists follows the pending count.
+			this.publishUpsert(sessionId);
 		}
 	}
 
@@ -214,6 +235,7 @@ export class SessionService {
 			kind: row.kind === "mirror" ? "mirror" : "local",
 			sharedSessionId: row.sharedSessionId,
 			movedTo: row.movedTo ?? null,
+			pendingRequests: this.isViewed(row) ? (this.views?.pendingRequests(row.id).length ?? 0) : (this.ctx.runtime.get(row.id)?.pendingUiRequests().length ?? 0),
 			createdAt: row.createdAt,
 			updatedAt: row.updatedAt,
 		};
@@ -244,7 +266,7 @@ export class SessionService {
 	// ------------------------------------------------------------------ CRUD
 
 	/** `options.agentId` picks a specific local agent (delegated tasks run under the agent the sender chose); default: the node's first OMP agent. */
-	create(input: CreateSessionInput, options: { agentId?: string | null; sharedSessionId?: string | null } = {}): AgentSession {
+	create(input: CreateSessionInput & { projectId: string }, options: { agentId?: string | null; sharedSessionId?: string | null } = {}): AgentSession {
 		const project = this.ctx.db.select().from(projects).where(eq(projects.id, input.projectId)).get();
 		if (!project) throw ApiError.notFound("Project");
 		const agent = options.agentId
@@ -433,6 +455,7 @@ export class SessionService {
 			sessionDir: row.sessionDir,
 			// Only a brand-new conversation takes the requested model; a resumed one keeps what it was using.
 			model: row.runtimeSessionId ? null : row.model,
+			appendSystemPrompt: CHAT_RENDERING_GUIDANCE,
 			...this.spawnOverrides.get(id),
 		});
 		this.persistBinding(row, session);
@@ -487,7 +510,8 @@ export class SessionService {
 	prompt(id: string, input: PromptInput): Promise<{ promptId: string }> {
 		const row = this.get(id);
 		try {
-			this.promptGuard?.(row);
+			this.promptGuard?.(row, input);
+			for (const guard of this.extraPromptGuards) guard(row, input);
 		} catch (error) {
 			return Promise.reject(error);
 		}
@@ -511,7 +535,9 @@ export class SessionService {
 
 	private async sendPrompt(row: SessionRow, input: PromptInput): Promise<{ promptId: string }> {
 		const rt = await this.runtime(row.id);
-		const accepted = await rt.prompt({ message: input.message, clientId: input.clientId, streamingBehavior: input.streamingBehavior });
+		// M6 project memory: the first prompt of a brand-new session carries the project's memory section (`ContextService.promptWithMemory`).
+		const message = await this.ctx.contexts.promptWithMemory(row, rt, input.message);
+		const accepted = await rt.prompt({ message, clientId: input.clientId, streamingBehavior: input.streamingBehavior });
 		const set: Partial<typeof agentSessions.$inferInsert> = { updatedAt: new Date().toISOString() };
 		if (row.title === DEFAULT_TITLE) set.title = titleFromPrompt(input.message);
 		this.ctx.db.update(agentSessions).set(set).where(eq(agentSessions.id, row.id)).run();
@@ -544,14 +570,69 @@ export class SessionService {
 
 	async respondToUi(id: string, input: UiResponseInput): Promise<void> {
 		const row = this.get(id);
+		if (row.kind === "mirror" && row.movedTo === null) {
+			if (!this.views) throw ApiError.unavailable("Shared sessions are not running");
+			return this.views.respond(id, input);
+		}
 		if (this.isViewed(row)) throw this.readOnlyError(row);
 		const rt = this.ctx.runtime.get(id);
 		if (!rt) throw ApiError.conflict("The session's agent runtime is not running");
 		await rt.respondToUiRequest(input);
 	}
 
-	pendingUiRequests(id: string) {
+	pendingUiRequests(id: string): PendingUiRequest[] {
+		if (this.isViewed(this.get(id))) return this.views?.pendingRequests(id) ?? [];
 		return this.ctx.runtime.get(id)?.pendingUiRequests() ?? [];
+	}
+
+	// ------------------------------------------------------------------ subagents
+
+	/** The session's subagents: the live roster of its runtime, or the last snapshot saved next to the conversation while it is stopped. */
+	async subagents(id: string): Promise<SubagentsPage> {
+		const row = this.get(id);
+		if (this.isViewed(row)) return { subagents: [], live: false };
+		const rt = this.ctx.runtime.get(id);
+		if (rt) {
+			const state = rt.status().state;
+			return { subagents: rt.subagents(), live: state === "ready" || state === "busy" };
+		}
+		const roster = await readSubagentRoster(row.sessionDir);
+		return { subagents: roster?.subagents.map((s) => s.subagent) ?? [], live: false };
+	}
+
+	/** The subagent's own transcript from `fromByte` on; served from the running process or, when it is gone, from the saved transcript file. */
+	async subagentMessages(id: string, subagentId: string, fromByte: number): Promise<SubagentMessagesPage> {
+		const row = this.get(id);
+		if (this.isViewed(row)) throw ApiError.notFound("Subagent");
+		const rt = this.ctx.runtime.get(id);
+		if (rt) {
+			if (!rt.subagents().some((s) => s.id === subagentId)) throw ApiError.notFound("Subagent");
+			return rt.subagentMessages(subagentId, fromByte);
+		}
+		const found = (await readSubagentRoster(row.sessionDir))?.subagents.find((s) => s.subagent.id === subagentId);
+		if (!found?.sessionFile) throw ApiError.notFound("Subagent");
+		return readSubagentTranscript(found.sessionFile, fromByte);
+	}
+
+	/** Stop one running subagent; the parent turn goes on. Not running (or no process) answers `cancelled: false`. */
+	async cancelSubagent(id: string, subagentId: string): Promise<CancelSubagentResult> {
+		const row = this.get(id);
+		if (this.isViewed(row)) throw this.readOnlyError(row);
+		const rt = this.ctx.runtime.get(id);
+		if (!rt || !rt.subagents().some((s) => s.id === subagentId)) return { cancelled: false };
+		const state = rt.status().state;
+		if (state !== "ready" && state !== "busy") return { cancelled: false };
+		return rt.cancelSubagent(subagentId);
+	}
+
+	async steerSubagent(id: string, subagentId: string, message: string): Promise<void> {
+		const row = this.get(id);
+		if (this.isViewed(row)) throw this.readOnlyError(row);
+		const rt = this.ctx.runtime.get(id);
+		const state = rt?.status().state;
+		if (!rt || (state !== "ready" && state !== "busy")) throw ApiError.conflict("The session's agent runtime is not running");
+		if (!rt.subagents().some((s) => s.id === subagentId)) throw ApiError.notFound("Subagent");
+		await rt.steerSubagent(subagentId, message);
 	}
 
 	/** Stop the session's runtime, or start it (reopening the conversation) when it is not running. */

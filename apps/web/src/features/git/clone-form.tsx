@@ -157,7 +157,7 @@ export default function CloneForm({ workspaceId, workspaceField, onClose }: { wo
 		if (pick) setAccountId(pick.id);
 	}, [accountId, accounts.data]);
 
-	// Default target: ~/clam/<owner>/<repo> (made absolute with the node's home directory).
+	// Default target: ~/clam/<owner>/<repo> (made absolute with the machine's home directory).
 	useEffect(() => {
 		if (pathTouched) return;
 		setPath(repo && home ? `${home}/clam/${repo.owner}/${repo.name}` : "");
@@ -222,7 +222,7 @@ export default function CloneForm({ workspaceId, workspaceField, onClose }: { wo
 							<span className="tabular font-mono">{op.percent !== null ? `${Math.round(op.percent)}%` : ""}</span>
 						</div>
 						<Progress value={op.percent ?? 100} className={cn(op.percent === null && "animate-pulse")} />
-						<p className="text-2xs text-subtle">The clone keeps running on the node if you close this dialog.</p>
+						<p className="text-2xs text-subtle">The clone keeps running on the machine if you close this dialog.</p>
 					</div>
 				)}
 				<DialogFooter>

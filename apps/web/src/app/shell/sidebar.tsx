@@ -6,10 +6,15 @@ import {
 	BookMarked,
 	ChevronRight,
 	Command,
+	Folder,
 	FolderGit2,
 	GitBranch,
+	Globe,
 	LayoutDashboard,
 	ListChecks,
+	MessageSquarePlus,
+	MessagesSquare,
+	Monitor,
 	Moon,
 	Network,
 	PanelLeftClose,
@@ -17,6 +22,7 @@ import {
 	Plus,
 	Settings,
 	Sun,
+	Terminal,
 	TerminalSquare,
 	Waypoints,
 	Layers,
@@ -24,11 +30,14 @@ import {
 	Users,
 	type LucideIcon,
 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { MILESTONES } from "@/lib/milestones";
+import { useChats } from "@/features/chats/hooks";
+import { useActiveHandoffCount } from "@/features/handoff/api";
+import { warmHandlers } from "@/features/session/preload";
 import { isAwaitingApproval, isPendingInvite, taskNeedsAttention, usePairingRequests, useProjects, useSharedInvites, useSharedSessions, useTasks, useWorkspaces } from "@/lib/queries";
 import { useUi } from "@/lib/store";
-import { toggleTheme, useResolvedTheme } from "@/lib/theme";
+import { cycleTheme, THEME_LABEL, type ThemePref, useThemePref } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
@@ -41,7 +50,7 @@ import { NodeStatusCard, NodeStatusDot } from "./node-status.tsx";
 export const rowClass =
 	"group/row relative flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 text-[13px] text-muted-foreground outline-none transition-colors duration-150 hover:bg-surface-2 hover:text-foreground data-[status=active]:bg-surface-3 data-[status=active]:text-foreground coarse:h-11 [&_svg]:size-4 [&_svg]:shrink-0";
 
-type StaticTo = "/" | "/workspaces" | "/node/sessions" | "/node/projects" | "/node/runtime" | "/node/git" | "/network/nodes" | "/network/agents" | "/tasks" | "/shared" | "/settings";
+type StaticTo = "/" | "/chats" | "/workspaces" | "/node/sessions" | "/node/projects" | "/node/runtime" | "/node/git" | "/terminal" | "/browser" | "/network/nodes" | "/network/agents" | "/tasks" | "/shared" | "/handoffs" | "/settings";
 
 function NavLink({ to, icon: Icon, label, rail, exact, badge, badgeNoun = "pairing request" }: { to: StaticTo; icon: LucideIcon; label: string; rail: boolean; exact?: boolean; badge?: number; badgeNoun?: string }) {
 	const link = (
@@ -94,7 +103,7 @@ function SectionLabel({ children, action }: { children: string; action?: React.R
 	);
 }
 
-function WsLink({ ws, to, icon: Icon, label }: { ws: Workspace; to: "agents" | "tasks" | "activity"; icon: LucideIcon; label: string }) {
+function WsLink({ ws, to, icon: Icon, label }: { ws: Workspace; to: "agents" | "tasks" | "activity" | "context" | "members"; icon: LucideIcon; label: string }) {
 	return (
 		<Link to={`/workspaces/$workspaceId/${to}`} params={{ workspaceId: ws.id }} preload="intent" className={cn(rowClass, "h-7 coarse:h-10")}>
 			<Icon />
@@ -134,20 +143,90 @@ function WorkspaceNode({ ws }: { ws: Workspace }) {
 			{expanded ? (
 				<div className="ml-3 mt-0.5 flex flex-col gap-px border-l pl-2">
 					{projects.isLoading ? <Skeleton className="m-1 h-5 w-28" /> : null}
-					{projects.data?.map((p) => (
+					{projects.data?.filter((p) => p.origin !== "chat").map((p) => (
 						<Link key={p.id} to="/projects/$projectId" params={{ projectId: p.id }} preload="intent" className={cn(rowClass, "h-7 coarse:h-10")}>
-							<FolderGit2 />
+							{p.vcs === "none" ? <Folder /> : <FolderGit2 />}
 							<span className="truncate">{p.name}</span>
 						</Link>
 					))}
-					{projects.data?.length === 0 ? <span className="px-2 py-1 text-2xs text-subtle">No projects yet</span> : null}
+					{projects.data?.filter((p) => p.origin !== "chat").length === 0 ? <span className="px-2 py-1 text-2xs text-subtle">No projects yet</span> : null}
 					<WsLink ws={ws} to="agents" icon={Bot} label="Agents" />
 					<WsLink ws={ws} to="tasks" icon={ListChecks} label="Tasks" />
-					<DisabledNav icon={BookMarked} label="Shared Context" milestone={MILESTONES.sharedContext} />
+					<WsLink ws={ws} to="context" icon={BookMarked} label="Shared Context" />
+					<WsLink ws={ws} to="members" icon={Users} label="Members" />
 					<WsLink ws={ws} to="activity" icon={Activity} label="Activity" />
 				</div>
 			) : null}
 		</div>
+	);
+}
+
+function NewChatButton({ rail }: { rail: boolean }) {
+	const openDialog = useUi((s) => s.openDialog);
+	const setDrawerOpen = useUi((st) => st.setDrawerOpen);
+	const open = () => {
+		setDrawerOpen(false);
+		openDialog({ kind: "new-chat" });
+	};
+	if (rail)
+		return (
+			<Tip label="New chat" side="right">
+				<Button variant="soft" size="icon" aria-label="New chat" onClick={open} className="mx-auto mb-1">
+					<MessageSquarePlus />
+				</Button>
+			</Tip>
+		);
+	return (
+		<Button variant="soft" size="lg" onClick={open} className="mb-1 w-full justify-start gap-2 px-3 text-[13px] coarse:min-h-12">
+			<MessageSquarePlus /> New chat
+		</Button>
+	);
+}
+
+const CHATS_SHOWN = 6;
+
+/** Recent chats (sessions without a repository) under their own heading, not mixed into the project tree. */
+function ChatsSection() {
+	const { chats, isPending } = useChats();
+	const params = useParams({ strict: false }) as { sessionId?: string };
+	const qc = useQueryClient();
+	const shown = chats.slice(0, CHATS_SHOWN);
+	return (
+		<>
+			<SectionLabel
+				action={
+					<Link to="/chats" preload="intent" className="rounded-md px-1 text-2xs font-medium normal-case tracking-normal text-subtle outline-none hover:text-foreground">
+						{chats.length > CHATS_SHOWN ? `All ${chats.length}` : "All"}
+					</Link>
+				}
+			>
+				Chats
+			</SectionLabel>
+			<div className="flex flex-col gap-px">
+				{isPending ? <Skeleton className="mx-1 my-1 h-6" /> : null}
+				{shown.map((s) => (
+					<Link
+						key={s.id}
+						to="/sessions/$sessionId"
+						params={{ sessionId: s.id }}
+						{...warmHandlers(qc, s.id, s.status)}
+						preload="intent"
+						aria-current={params.sessionId === s.id ? "page" : undefined}
+						className={cn(rowClass, params.sessionId === s.id && "bg-surface-3 text-foreground")}
+					>
+						<MessagesSquare />
+						<span className="min-w-0 flex-1 truncate">{s.title || "Untitled chat"}</span>
+						{s.pendingRequests > 0 ? (
+							<span role="img" aria-label="Waiting for your answer" title="Waiting for your answer" className="relative grid size-2 shrink-0 place-items-center">
+								<span aria-hidden className="absolute inline-flex size-full animate-[clam-pulse-ring_1.6s_ease-out_infinite] rounded-full bg-warning" />
+								<span aria-hidden className="relative size-2 rounded-full bg-warning" />
+							</span>
+						) : null}
+					</Link>
+				))}
+				{!isPending && chats.length === 0 ? <span className="px-2 py-1 text-2xs text-subtle">No chats yet — start one above</span> : null}
+			</div>
+		</>
 	);
 }
 
@@ -158,27 +237,34 @@ export function NavTree({ rail = false, onNavigate }: { rail?: boolean; onNaviga
 	const attention = (useTasks().data ?? []).filter(taskNeedsAttention).length;
 	// Invitations to answer plus shared discussions with unread messages.
 	const sharedAttention = (useSharedInvites().data ?? []).filter(isPendingInvite).length + (useSharedSessions().data ?? []).filter((s) => s.unreadMessages > 0).length;
+	const handoffs = useActiveHandoffCount();
 	const openDialog = useUi((s) => s.openDialog);
 	return (
 		<nav aria-label="Primary" className="flex flex-col px-2 pb-3" onClick={(e) => (e.target as HTMLElement).closest("a") && onNavigate?.()}>
+			<NewChatButton rail={rail} />
 			<NavLink to="/" icon={LayoutDashboard} label="Overview" rail={rail} exact />
 
 			{rail ? (
 				<>
 					<div className="my-2 h-px bg-border" />
+					<NavLink to="/chats" icon={MessagesSquare} label="Chats" rail />
 					<NavLink to="/workspaces" icon={Layers} label="Workspaces" rail />
 					<NavLink to="/node/sessions" icon={TerminalSquare} label="Agent Sessions" rail />
 					<NavLink to="/node/projects" icon={FolderGit2} label="Projects" rail />
 					<NavLink to="/node/git" icon={GitBranch} label="Git" rail />
 					<NavLink to="/node/runtime" icon={Cpu} label="Runtime" rail />
+					<NavLink to="/terminal" icon={Terminal} label="Terminal" rail />
+					<NavLink to="/browser" icon={Globe} label="Browser" rail />
 					<div className="my-2 h-px bg-border" />
-					<NavLink to="/network/nodes" icon={Network} label="Connected Nodes" rail badge={waiting} />
+					<NavLink to="/network/nodes" icon={Network} label="Machines" rail badge={waiting} />
 					<NavLink to="/network/agents" icon={Bot} label="Agent Directory" rail />
 					<NavLink to="/tasks" icon={ListChecks} label="Tasks" rail badge={attention} badgeNoun="task" />
 					<NavLink to="/shared" icon={Users} label="Shared Sessions" rail badge={sharedAttention} badgeNoun="shared-session update" />
+					<NavLink to="/handoffs" icon={Waypoints} label="Handoffs" rail badge={handoffs} badgeNoun="active handoff" />
 				</>
 			) : (
 				<>
+					<ChatsSection />
 					<SectionLabel
 						action={
 							<Tip label="New workspace" side="right">
@@ -213,20 +299,22 @@ export function NavTree({ rail = false, onNavigate }: { rail?: boolean; onNaviga
 						) : null}
 					</div>
 
-					<SectionLabel>My Node</SectionLabel>
+					<SectionLabel>This Machine</SectionLabel>
 					<div className="flex flex-col gap-px">
 						<NavLink to="/node/sessions" icon={TerminalSquare} label="Agent Sessions" rail={false} />
 						<NavLink to="/node/projects" icon={FolderGit2} label="Projects" rail={false} />
 						<NavLink to="/node/runtime" icon={Cpu} label="Runtime" rail={false} />
 						<NavLink to="/node/git" icon={GitBranch} label="Git" rail={false} />
+						<NavLink to="/terminal" icon={Terminal} label="Terminal" rail={false} />
+						<NavLink to="/browser" icon={Globe} label="Browser" rail={false} />
 					</div>
 
 					<SectionLabel>Agent Network</SectionLabel>
-					<NavLink to="/network/nodes" icon={Network} label="Connected Nodes" rail={false} badge={waiting} />
+					<NavLink to="/network/nodes" icon={Network} label="Machines" rail={false} badge={waiting} />
 					<NavLink to="/network/agents" icon={Bot} label="Agent Directory" rail={false} />
 					<NavLink to="/tasks" icon={ListChecks} label="Tasks" rail={false} badge={attention} badgeNoun="task" />
 					<NavLink to="/shared" icon={Users} label="Shared Sessions" rail={false} badge={sharedAttention} badgeNoun="shared-session update" />
-					<DisabledNav icon={Waypoints} label="Handoffs" milestone={MILESTONES.handoffs} />
+					<NavLink to="/handoffs" icon={Waypoints} label="Handoffs" rail={false} badge={handoffs} badgeNoun="active handoff" />
 				</>
 			)}
 		</nav>
@@ -241,12 +329,17 @@ export function Logo({ className }: { className?: string }) {
 	);
 }
 
+const THEME_ICON: Record<ThemePref, LucideIcon> = { system: Monitor, light: Sun, dark: Moon };
+const NEXT_THEME: Record<ThemePref, ThemePref> = { system: "light", light: "dark", dark: "system" };
+
+/** Cycles System → Light → Dark; the icon shows the current preference. Settings → General has the full picker. */
 export function ThemeToggle({ className }: { className?: string }) {
-	const theme = useResolvedTheme();
+	const pref = useThemePref();
+	const Icon = THEME_ICON[pref];
 	return (
-		<Tip label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}>
-			<Button variant="ghost" size="icon" className={className} onClick={toggleTheme} aria-label="Toggle theme">
-				{theme === "dark" ? <Sun /> : <Moon />}
+		<Tip label={`Theme: ${THEME_LABEL[pref]} · switch to ${THEME_LABEL[NEXT_THEME[pref]]}`}>
+			<Button variant="ghost" size="icon" className={className} onClick={cycleTheme} aria-label={`Theme: ${THEME_LABEL[pref]}. Switch to ${THEME_LABEL[NEXT_THEME[pref]]}`}>
+				<Icon />
 			</Button>
 		</Tip>
 	);
@@ -281,7 +374,7 @@ export function Sidebar({ mode }: { mode: "full" | "rail" }) {
 	const rail = mode === "rail" || collapsedPref;
 	return (
 		<aside
-			className={cn("flex h-full shrink-0 flex-col border-r bg-surface-1 pt-safe", rail ? "w-14" : "w-[17rem]")}
+			className={cn("flex h-full shrink-0 flex-col border-r bg-surface-1 pb-safe pl-[env(safe-area-inset-left)] pt-safe", rail ? "w-14" : "w-[17rem]")}
 			aria-label="Sidebar"
 		>
 			<div className={cn("flex items-center gap-2 px-3 pb-2 pt-3", rail && "flex-col px-2")}>
@@ -289,7 +382,7 @@ export function Sidebar({ mode }: { mode: "full" | "rail" }) {
 				{rail ? null : (
 					<div className="flex min-w-0 flex-1 flex-col leading-tight">
 						<span className="truncate text-[13px] font-semibold tracking-tight">CL Agent Mesh</span>
-						<span className="truncate text-2xs text-subtle">Local node</span>
+						<span className="truncate text-2xs text-subtle">This machine</span>
 					</div>
 				)}
 				{rail ? <NodeStatusDot /> : null}

@@ -1,6 +1,6 @@
 # CL Agent Mesh — Agent Network Protocol (`/api/v1`)
 
-Status: **M5 implemented** (shared sessions, §5.9a — one capability, twelve additive endpoints, see [shared-sessions.md](./shared-sessions.md)); M4 implemented — everything of M3 (transport, identity, request signing, pairing, heartbeat, `GET /node/info`, `GET /node/health`, `POST /node/pair`, `GET /agents`, `GET /events` stream `node`, `POST /node/announce`, `POST /node/revoke`) plus the task endpoints `POST /tasks`, `GET /tasks/:id`, `POST /tasks/:id/cancel`, `POST /tasks/:id/messages`, `GET /tasks/:id/artifacts/:artifactId`, the `task.updated` frame on the `node` stream, the `(peer, Idempotency-Key)` response store (§6) and the durable outbox (§7). `POST /artifacts`, `/context/sync`, `/handoffs` and the `handoff:` event streams (§5.9–5.12, §5.14 upload, §9 beyond epoch checks) are **specification for M6–M7**: the listener answers `404` for them today. Code is authoritative: `packages/agent-network` (signing, verification, client, wire schemas incl. the task payloads, pairing cryptography), `packages/task-engine` (state machine, epoch/budget rules, texts) and `apps/server/src/network` + `apps/server/src/tasks` (listener, services). Where this text says "implemented as", it documents a decision taken in M3/M4. The local UI API (`/api/local`, [contracts `routes`](../packages/contracts/src/routes.ts)) is a different surface and never crosses nodes.
+Status: **M7 implemented** (handoffs, §5.10–5.12 plus the additive `POST /handoffs/:id/state`, `GET /handoffs/:id`, `GET /handoffs/:id/artifacts/:artifactId` and `POST /tasks/:id/executor`, one capability `handoff.receive`, see [handoff-protocol.md §11](./handoff-protocol.md#11-implemented-as-m7)); M6 implemented (workspace/project context sync, §5.9 — `POST /context/sync` and the additive `POST /context/membership`, one capability `context.sync`, see [github-integration.md §9](./github-integration.md#9-clmesh-layout-versioned-in-the-repo) for the Git half); M5 implemented (shared sessions, §5.9a — one capability, twelve additive endpoints, see [shared-sessions.md](./shared-sessions.md)); M4 implemented — everything of M3 (transport, identity, request signing, pairing, heartbeat, `GET /node/info`, `GET /node/health`, `POST /node/pair`, `GET /agents`, `GET /events` stream `node`, `POST /node/announce`, `POST /node/revoke`) plus the task endpoints `POST /tasks`, `GET /tasks/:id`, `POST /tasks/:id/cancel`, `POST /tasks/:id/messages`, `GET /tasks/:id/artifacts/:artifactId`, the `task.updated` frame on the `node` stream, the `(peer, Idempotency-Key)` response store (§6) and the durable outbox (§7). `POST /artifacts`, `/handoffs` and the `handoff:` event streams (§5.9–5.12, §5.14 upload, §9 beyond epoch checks) are **specification for M6–M7**: the listener answers `404` for them today. Code is authoritative: `packages/agent-network` (signing, verification, client, wire schemas incl. the task payloads, pairing cryptography), `packages/task-engine` (state machine, epoch/budget rules, texts), `packages/context-engine` (context versions, conflict rules, context wire schemas) and `apps/server/src/network` + `apps/server/src/tasks` + `apps/server/src/context` (listener, services). Where this text says "implemented as", it documents a decision taken in M3/M4. The local UI API (`/api/local`, [contracts `routes`](../packages/contracts/src/routes.ts)) is a different surface and never crosses nodes.
 
 Goals: nodes of one person's mesh exchange tasks, messages, context references, artifacts and handoffs over HTTPS with mutual authentication, such that every call is attributable, replay-safe, idempotent, ordered and fenced against duplicate execution. The **OMP RPC is never exposed** on this API or over any network.
 
@@ -203,11 +203,12 @@ Delegates a task. The caller is the task's **sender**, the answering node its **
 interface CreateTaskRequest {
   taskId: Id;                            // `tsk_<ULID>` chosen by the sender; stable across retries
   workspaceId: Id;                       // must be a workspace both nodes are (non-revoked) members of
-  projectRef: { repoUrl: string; branch?: string | null; commit?: string | null };  // the task's GitHub repository (+ base branch); the executor maps it to one of ITS projects
+  projectRef?: { repoUrl: string; branch?: string | null; commit?: string | null } | null;  // the task's GitHub repository (+ base branch); the executor maps it to one of ITS projects. ABSENT for a task without a git repository (deliverAs summary/files); required for deliverAs "branch"
+  inputFiles?: { artifactId: Id; sha256: string; size: number; fileCount: number } | null;   // input bundle the sender holds; the executor downloads it with GET /tasks/:id/inputs/:artifactId (§5.8c)
   title: string;                         // ≤ 200
   description: string;                   // ≤ 50 000: the instructions
   targetAgentId?: Id;                    // omitted = the executor chooses its agent
-  deliverAs: "summary" | "branch";       // additive to §5.5 as first drafted; default "branch"
+  deliverAs: "summary" | "branch" | "files";   // additive to §5.5 as first drafted; default "branch". "files": no git — the executor works in a folder of its own and returns what it created/changed as one bundle
   constraints: { maxCostUsd?: number; deadline?: IsoDate; approvalMode?: "always-ask" | "always-ask-cached" | "write" | "yolo" };  // advisory; see §10
   epoch: number;                         // ownership epoch (0 for a fresh task)
   correlationId: Id;
@@ -219,7 +220,8 @@ interface TaskRecord {                   // wire.TaskRecord — the executor's v
   agentId?: Id | null; agentName?: string | null; reason?: string | null;   // reason: why rejected / failed / blocked
   createdAt: IsoDate; updatedAt: IsoDate; startedAt?: IsoDate | null; finishedAt?: IsoDate | null;
   result?: { summary: string; autoCompleted: boolean; branch: string | null; commit: string | null; pushed: boolean; compareUrl: string | null;
-             artifacts: { artifactId: Id; name: string; sha256: string; size: number }[] } | null;
+             artifacts: { artifactId: Id; name: string; sha256: string; size: number }[];
+             files: { artifactId: Id; sha256: string; size: number; fileCount: number } | null } | null;   // files: deliverAs "files" — the result bundle (an artifact of the task, fetched with GET /tasks/:id/artifacts/:artifactId)
   cost?: number | null;                  // executor-reported spend, USD
   lastEventSeq: number;                  // seq of the latest task event
 }
@@ -227,6 +229,8 @@ interface TaskRecord {                   // wire.TaskRecord — the executor's v
 // 403 forbidden: workspace unknown to the executor or the caller is not one of its members, or tasks.send not granted
 // 400 invalid_request: malformed body, repository that is not on github.com, unknown targetAgentId (code unknown_agent)
 ```
+
+**Tasks without git (`projectRef` absent).** There is no repository to match, so there is no project matching either. The executor runs the task in a **managed folder created for this task** (`<dataDir>/projects/<id>`, a normal project of the task's workspace with `managed: true`) — created when a human accepts without choosing a project, or when the peer's `autoAcceptTasks` policy accepts it — or, when the human on the executor accepts into a local project, in that project's folder (it must belong to the task's workspace: `409 project_mismatch`). Before the agent starts, the executor downloads and applies `inputFiles` (§5.8c; a file that already exists in a chosen project with other content is kept and listed in the brief; a download that cannot succeed fails the task with the reason) and records the folder's state as the base of the result. For `deliverAs: "files"` it bundles, when the agent is done, only the files that are **new or changed since that base** (default excludes, 25 MiB per file / in total; text files that look like credentials are left out of the bundle and named in the summary; `files` is null when nothing changed) as an artifact and reports it in `result.files`; `deliverAs: "summary"` returns no files. The sender previews and applies the bundle through its local API (`GET /tasks/:id/files/preview?projectId=`, `POST /tasks/:id/files/apply`): a file whose local copy changed since the task's input bundle (or, against another project, that exists and differs) is a conflict and is only replaced when listed in `overwrite`; nothing is ever deleted.
 
 **What the executor does with it.** It stores the task as `offered` (first event, seq 1) and resolves the repository to local projects: the normalized GitHub `owner/name` (`normalizeRepoUrl`, case-insensitive; credentials in a URL are dropped) is compared with the repository linked to each local project. **Auto-accept** happens only when the sender's peer row has `autoAcceptTasks` **and exactly one** project matches; otherwise the task waits as `offered` until a human on the executor accepts it (choosing the project, or cloning the repository first) or rejects it with a reason (`rejected`, terminal). An accepted task is queued as `accepted` and starts when no other task holds the working tree of the same project (one running task per project).
 
@@ -270,6 +274,10 @@ Capability by **role of the receiver**: the executor needs the sender to hold `t
 
 **Injection.** A received message — and a human-authored message on this node — is injected into the local agent session of the task as a prompt: the executing session on the executor, the delegating session (`sender.sessionId`, only when an agent created the task) on the sender. Delivery follows the agent's state: idle → plain prompt (wakes the agent), busy + `instruction` → `steer`, busy otherwise → `followUp`. The text starts with the line `[CL Agent Mesh] task <taskId> · "<title>" · from <agent>@<node> · kind <kind>` and ends with a one-line reminder of how to reply. When the executor finishes, the sender's delegating session gets the note `[CL Agent Mesh] task <taskId> · "<title>" · status <status>` with summary, branch and compare URL.
 
+### 5.8c `GET /tasks/:id/inputs/:artifactId` — the task's executor only
+
+The reverse of §5.8b: serves the **input bundle** of a task THIS node delegated (`tar.gz`, `Content-Length`, `Content-Digest: sha-256=:…:`, `Content-Disposition: attachment`). The caller must be the **executor** of that outgoing task **and hold `tasks.receive` granted by the sender** (the capability the executor already needs to report back); `artifactId` must be the one announced in the task's `inputFiles` — `404` for anyone else, for another artifact, for unknown tasks and for tasks this node executes, `403` without `tasks.receive`. The sender built the bundle when it created the task (`@clam/workspace-files`, default excludes, capped at **25 MiB**, **text files scanned for credentials: a hit refuses the task with `422 input_contains_secrets`**, rule names only). The executor verifies the digest from the task and extracts with sha256-verified, atomic, symlink-free writes.
+
 ### 5.8b `GET /tasks/:id/artifacts/:artifactId` — the task's sender only
 
 Serves a stored task artifact (today: the patch of a refused push) with `Content-Type`, `Content-Length`, `Content-Disposition: attachment`, `Content-Digest: sha-256=:…:` and the bytes. Only the **sender** of a task the caller delegated to this node may fetch it (`404` for anyone else, for unknown artifacts, and for tasks that are not executed here). Artifacts are stored on the executor under `<dataDir>/artifacts/<taskId>/` with their sha256, capped at **25 MiB**, and **text artifacts are scanned for credentials with the git engine's secret scanner before they are stored — a hit refuses the artifact** (the task reports it in the result note instead; the finding's content is never echoed). The sender's local route `GET /api/local/tasks/:id/artifacts/:artifactId` fetches it on demand from the executor (signed request, size cap, sha256 verified against the result's entry) and streams it to the UI; only artifacts listed in the task result are downloadable.
@@ -293,9 +301,12 @@ Additive in M5 (section number `5.9a` because `5.9` and up keep their numbers). 
 | `POST /shared/:id/messages` | any participant node → each other (its own messages) | `SharedMessageRequest` | `202 {messageId, accepted:true}` |
 | `POST /shared/:id/messages/sync` | any participant node → any other | `SharedMessagesSyncRequest` | `200 SharedMessagesSyncResponse` |
 | `POST /shared/:id/mirror` | driver → participant | `SharedMirrorRequest` | `200 SharedMirrorAccepted` |
+| `POST /shared/:id/answer` | participant → driver | `SharedAnswerRequest` | `200 SharedAnswerAccepted {ok:true, outcome: answered | cancelled}` |
 | `POST /shared/:id/checkpoints` | driver → participant | `SharedCheckpointNotice` | `202 {ok:true}` |
 | `POST /shared/:id/checkpoints/:seq/ack` | participant → driver | `SharedCheckpointAck` | `200 {ok:true}` |
 | `GET /shared/:id/snapshots/:seq` | participant → driver | — | `200` octet-stream |
+| `GET /shared/:id/files/:seq` | participant → driver | — | `200` octet-stream (files mode: the folder bundle, `tar.gz`) |
+| `GET /shared/:id/attachments/:attId` | member → any member that holds the bytes | — | `200` octet-stream with `Content-Digest: sha-256=…` (a file posted in the group chat; `404` for non-members and unknown ids). `SharedMessageRequest` gained `attachments: [{id,name,mimeType,size,sha256}]` (default `[]`; `body` may be empty when files are present) |
 | `POST /shared/:id/driver` | new driver → every participant | `SharedDriverNotice` | `200 {ok:true}` |
 | `POST /shared/:id/membership` | leaver or driver → participants | `SharedMembershipRequest` | `200 {ok:true}` |
 | `POST /shared/:id/transfer` | driver → chosen participant (last step of a hand-over) | `SharedTransferRequest` | `202 SharedTransferAccepted` |
@@ -330,7 +341,13 @@ The log order on every node is `(hlc, origin.nodeId, messageId)`. A **system** m
 * `{type:"sync", epoch, streamId, seq ≥ 0, index, final, messages: UiMessage[], state?}` — a full replay in chunks: `index` 0 resets the mirror, chunks must arrive in order (`409 mirror_resync` otherwise), the `final` chunk carries `state` (a `SessionLiveState`) and sets `lastSeq = seq`.
 Answer `SharedMirrorAccepted {applied, lastSeq}`. Not stored in the response store.
 
+**Pending questions and approvals travel inside `state`.** The `state` of a mirror frame (the `state` event and the `final` chunk of a `sync`) may carry `requests: {pending: PendingUiRequest[], resolved: {requestId, outcome: answered | cancelled | timed_out | abandoned, answers?, answeredBy?: {nodeId, machine}, at}[], at}` — the driver's unanswered OMP `ask` questions and approvals (`confirm` / `select` / `input` / `editor`) and how its latest ones ended (`at` = the driver's clock, for rebasing `raisedAt`). It is deliberately **not** a new `SharedMirrorEvent.type`: the `type` enum of this endpoint is closed, so an old node would answer `400` to every batch containing one. Inside `state` an old node's `SessionLiveState` parse strips the unknown key and everything else keeps working (such a driver only sends `awaiting`, and the participant UI falls back to a read-only strip).
+
+**`POST /shared/:id/answer`** — `SharedAnswerRequest {epoch ≥ 1, requestId, value | answers}`, exactly one of: `value` (`confirm` → boolean, `select` / `input` / `editor` → string, `null` cancels) or `answers` (`ask`: `{id, selectedOptions: string[], customInput?}` per question, in order). Sent by a participant whose person answered a replicated request; only the **driver** serves it. Checks, in order: unknown shared id, caller not an **active participant** → `404`; `epoch` lower than the receiver's → `409 stale_epoch` (`details.currentEpoch`, `driverNodeId`: the driver changed, the question belonged to a runtime that no longer drives); higher → `409 epoch_unknown` and the receiver reconciles; the receiver does not drive → `409 conflict`; the request is not pending → `409 already_answered` (`details {requestId, outcome, answeredBy: {nodeId, machine} | null}`, somebody was first or it timed out) or `409 request_closed` (unknown or long gone). The driver then validates with the same rules as a local answer (`400 invalid_request` for a wrong option / shape; the question stays open) and answers its runtime. **First answer wins**: the runtime applies one answer synchronously, any later one is `already_answered`. Mutating, so it requires `Idempotency-Key` and runs under the response store of §6: a retry of the same call replays the stored `200` instead of answering `already_answered`. The driver replicates the resolution (`state.requests.resolved`) to every participant and posts a system line to the group chat. Behaviour: [shared-sessions.md §4.2a](./shared-sessions.md#42a-questions-and-approvals-answered-from-any-member-machine).
+
 **`POST /shared/:id/checkpoints`** — `SharedCheckpointNotice {seq, epoch, branch, commit?, pushed, snapshot? {sha256 (64 hex), size, messageCount}, model?, note?, at}`. Stale or unknown epoch: see above. The receiver records it (idempotent by `seq`) and downloads the snapshot when `snapshot` is present.
+
+**Files mode (no git repository), additive.** `SharedInviteRequest` carries `vcs: "git" | "files"` (default `git`); `repo` is required for `git` and absent for `files`. `SharedCheckpointNotice.branch` is optional (absent in files mode) and gains `files: {sha256, size, fileCount}` — the bundle of the driver's working folder, downloaded with `GET /shared/:id/files/:seq` exactly like the snapshot (active participants only, `Content-Length`, `Content-Digest`, 100 MiB cap, `404` when not held; `Content-Disposition` filename `working-folder.tar.gz`). `SharedCheckpointAck` becomes `{sha256?, size?, files?: {sha256, size}}`: the participant acknowledges once it holds **everything** the notice announced, each part verified against its digest. `SharedStateResponse` gains `vcs` (`branch` is absent in files mode) and `lastCheckpoint.filesSha256`. A node that does not know `vcs` treats an invite without `repo` as malformed (`400`). Behaviour: [shared-sessions.md §11](./shared-sessions.md#11-files-mode-shared-sessions-without-a-git-repository-migration-0006_nogit).
 
 **`GET /shared/:id/snapshots/:seq`** — streams the checkpoint's snapshot (OMP session archive, `application/octet-stream`) with `Content-Length`, `Content-Digest: sha-256=:<base64>:` and `Content-Disposition: attachment; filename="session-snapshot.tar"`. Allowed for **active participants** only (`404` otherwise or when the file is not held). The receiver verifies size and sha-256 against the notice **while writing**, refuses anything above **100 MiB**, stores it `0600`, and then acknowledges.
 
@@ -348,70 +365,125 @@ Answer `SharedMirrorAccepted {applied, lastSeq}`. Not stored in the response sto
 
 **Additive error codes (M5):** `capability_missing` (409, sender side and when the receiver lacks the grant), `not_driver`, `driver_online`, `no_snapshot`, `snapshot_invalid`, `stale_epoch`, `epoch_unknown`, `split_brain`, `mirror_resync` (409), `session_read_only`, `session_moved`, `shared_session_active` (409, local), `agent_message_limit` (429, local), `forbidden` (403) and `idempotency_conflict` (409) also on group messages (a pushed message whose origin is not the sender; a message id or per-origin sequence already used), and git-related refusals (`not_a_git_repo`, `git_operation_in_progress`, `shared_branch_failed`, `git_fetch_failed`, `git_checkout_failed`, all 409, local). The full list with meanings is in [shared-sessions.md §7](./shared-sessions.md#7-error-codes).
 
+**Additive error codes (answers):** `already_answered` (409, `details.answeredBy`), `request_closed` (409); the local-only `driver_unreachable` (503) and `unsupported_driver` (409) are what a participant's UI call answers when the answer could not be delivered or the driver is an older node without this route.
+
 ### 5.9 `POST /context/sync` — `context.sync`
 
-Exchanges **references and shareable snapshots**, never private conversation history.
+**Implemented in M6** (`apps/server/src/network/context-routes.ts`, logic in `apps/server/src/context/sync.ts`, pure rules in `@clam/context-engine`, schemas `ContextSyncRequest`/`ContextSyncResponse` in `packages/context-engine/src/wire.ts`). Replicates the **shareable contexts** of a workspace between its member nodes — memory, plans, decisions, summaries, notes; never private contexts and never conversation history. It works with or without git: the projects need no repository. Every node keeps its own copy (SQLite); there is no leader.
 
 ```ts
+interface WireVersion {                      // one version of a shareable context
+  contextId: string; type: "memory" | "plan" | "decision" | "summary" | "note";
+  projectKey: string | null;                 // github:<owner>/<name> | name:<project> | null (workspace-wide)
+  originNodeId: string; contextCreatedAt: string;
+  version: number; sha256: string;           // sha-256 over the canonical title + body ("clam-context-v1\n(live|deleted)\n<title>\n\n<body>")
+  title: string; body: string; deleted: boolean;     // deleted = tombstone (body is "")
+  base: { version; sha256 } | null; merged: { version; sha256 }[];   // edited-from / resolved-by this version
+  ancestors: string[];                       // "<version>:<sha256>" of everything it descends from, nearest first, ≤ 256
+  author: ContextAuthor; versionOriginNodeId: string; createdAt: string;
+}
 interface ContextSyncRequest {
-  workspaceId: Id; projectId?: Id;
-  have: { contextId: Id; version: number; sha256: string }[];     // sender's index
-  push?: { contextId: Id; type: string; version: number; sha256: string; body: string }[];  // shareable only
+  workspaceId: Id;
+  have: { contextId; version; sha256; deleted? }[];   // ≤ 400: the sender's head of each context it talks about
+  push: WireVersion[];                                // ≤ 40, ≤ ~640 KiB serialized (a context is ≤ 200 000 characters; the request ≤ 1 MiB)
 }
 interface ContextSyncResponse {
-  want: { contextId: Id; sinceVersion: number }[];                 // what the receiver is missing
-  accepted: { contextId: Id; version: number }[];
-  conflicts: { contextId: Id; localVersion: number; remoteVersion: number }[];  // never auto-merged
+  want: { contextId; sinceVersion }[];                // heads the receiver does not hold: the sender pushes them next
+  accepted: { contextId; version; sha256 }[];         // pushes applied (or already held) and have entries it holds: the RECEIVER's head after applying
+  conflicts: { contextId; localVersion; remoteVersion }[];   // concurrent edits, never auto-merged
+  ahead: { contextId; version; sha256 }[];            // the receiver's head descends from what was offered: it is ahead (and pushes to the sender itself)
+  rejected: { contextId; reason }[];                  // unknown to be applied: other workspace, private on the receiver, sha256 mismatch, not canonical
 }
 ```
 
-Large or git-resident content is exchanged via Git (`.clmesh/`) and `contextRefs`; this endpoint carries indexes and small snapshots (≤ 1 MiB each).
+**Authorisation.** Signed request from a paired peer holding `context.sync` (granted by the receiver); the workspace must exist on the receiver **and** the caller must be an active member of it in the receiver's own `workspace_members` (`403 forbidden` otherwise, the same answer for an unknown workspace). Mutating, so `Idempotency-Key` is required and the response store applies (§6); a replay answers `Idempotent-Replay: true`.
 
-### 5.10 `POST /handoffs` — `handoff.send` / `handoff.receive`
+**Receiver rules** (the engine's `applyIncoming`, per pushed entry; the entry is first checked: canonical title/body, `sha256` really is the hash of the text, the context is in this workspace and is shareable here — a context that is private on the receiver is never overwritten):
 
-Source proposes a handoff. Manifest schema in [handoff-protocol.md](./handoff-protocol.md#2-manifest).
+| Incoming vs the receiver's head | Result | Answer |
+| --- | --- | --- |
+| nothing held | the context is created (bound to the local project with the same `projectKey`, if any) | `accepted` |
+| same `(version, sha256)` | nothing | `accepted` |
+| the head is in the incoming ancestry or is its `base` (**fast-forward**) | the head moves; an open conflict is closed when the new head descends from (or equals the text of) the competing version | `accepted` |
+| the incoming version is in the head's ancestry (**stale**) | nothing; the sender is behind, so the receiver pushes its head back | `ahead` |
+| same text, different history | the longer history (higher version) wins on both sides | `accepted` / `ahead` |
+| concurrent, one side a deletion | **an edit beats a deletion** on both sides (the context comes back / the deletion is ignored) | `accepted` / `ahead` |
+| concurrent edits | the head stays, the incoming version is kept as the **competing version**; both nodes report `sync.state = "conflict"`; **never merged** | `conflicts` |
+
+A **resolution** (`POST /api/local/contexts/:id/resolve`) is a new version that lists both versions it resolves (`merged`) and descends from both, so every node that holds either one fast-forwards onto it. A context in conflict cannot be edited until resolved. Two people resolving with the same text produce the same version and converge without a new conflict.
+
+**Have-index.** For every entry in `have` that was not pushed: unknown → `want` (an unknown tombstone needs no answer); the same head → `accepted`; the receiver is ahead → `ahead` (and it pushes); held only as the competing version → `conflicts` (and it pushes its head so the conflict shows on both sides); otherwise → `want`. `have` is how a node that was offline learns what it lacks without anyone shipping every body.
+
+**Sender side** (all through the durable outbox, §7, kind `context.sync`):
+
+* **On change** of a shareable context (create, edit, delete, resolve, mark shareable, or a version applied from another peer — relayed to the other members) each eligible peer gets one item `{have: [head], push: [head version]}`; an item for an older version of the same context that has not gone out is cancelled (one item per `(peer, context)` at a time). Idempotency key `context.sync:<peer>:<context>:<version>:<sha256[:16]>`. A peer is **eligible** when it is an active member of the workspace here, not revoked, and granted this node `context.sync` (`received_capabilities`).
+* **On peer online / URL change / pairing and every `reconcileMs` (30 s)**: a *round* — have-only items (≤ 400 entries each) for every shareable context whose acknowledged state at that peer is unknown or behind; answers with `want` are followed by pushes (a fresh idempotency key each, one push in flight per `(peer, context)`).
+* `context_replicas` records what each peer acknowledged (`holds`, `behind`, `ahead`, `conflict`) — it drives `Context.sync.syncedTo`/`state` and stops two nodes in conflict from offering each other what they already have. A peer that was offline simply finds its items pending; nothing consumes attempts while it is offline.
+* A **retraction** (the creating node stops sharing a context) sends a tombstone to every member; the receivers delete their copy (the old text of a deleted context is blanked everywhere). Sharing again later sends a version that descends from the tombstone, which brings the context back.
+
+**`POST /context/membership`** — `context.sync`, `Idempotency-Key`. `{workspaceId, workspaceName, action: "add" | "remove", ownerNodeId, permissions[]}`. `add`: the sender added this node to the workspace; the receiver creates the workspace locally under the same id if it has none (a name clash gets the sender's name appended), records itself and the sender (role `owner` when `ownerNodeId` is the sender) and reactivates a revoked row; `remove`: the sender revoked this node for that workspace — the receiver marks the sender's row revoked (nothing about that workspace is exchanged any more, pending items are cancelled). The sender enqueues it (kind `context.member`) and starts the workspace's reconcile once it was delivered. Adding needs the peer's `context.sync` grant to this node (`409 capability_missing` otherwise).
+
+Large or git-resident content is exchanged through Git (`.clmesh/`, [github-integration.md §9](./github-integration.md#9-clmesh-layout-versioned-in-the-repo)); this endpoint carries indexes and snapshots, each context at most ~900 KiB serialized (a larger one stays `pending` and is logged).
+
+### 5.10 `POST /handoffs` — `handoff.receive`
+
+**Implemented (M7).** Source proposes a handoff of a task it executes. Manifest schema in [handoff-protocol.md](./handoff-protocol.md#2-manifest) (adapted for work without git: `vcs` = `git | files | none`; the engine's `HandoffManifest` is authoritative). Capability: the receiving node checks that the caller holds **`handoff.receive`** (`handoff.send` is unused: one capability, granted in both directions like `sessions.share`).
 
 ```ts
 interface CreateHandoffRequest {
   handoffId: Id; taskId: Id;
   fromEpoch: number; toEpoch: number;     // toEpoch === fromEpoch + 1
-  manifest: HandoffManifest;              // JSON, no secrets
-  manifestSha256: string;
+  manifest: HandoffManifest;              // JSON, no secrets (secret-scanned on both nodes)
+  manifestSha256: string;                 // SHA-256 of the canonical bytes of the document AS DELIVERED
   expiresAt: IsoDate;
 }
-// 201 { handoffId: Id; state: "received" }
-// 409 stale_epoch if fromEpoch != the receiver's known epoch for the task
+// 201 { handoffId: Id; state: "received" }   (200 for a replay)
+// 409 stale_epoch  if fromEpoch != the receiver's known epoch for the task   (details.currentEpoch)
+// 409 competing_handoff  another live handoff holds (task, toEpoch)
+// 400 manifest_invalid | secret_detected | hash mismatch | expired | not addressed to this node
 ```
+
+Policy refusals (capacity, the task's sender is not a paired workspace member holding `tasks.receive` for us, the user declined) are **not** HTTP errors: the receiver persists the handoff `rejected` and tells the source with `POST /handoffs/:id/state`.
 
 ### 5.11 `POST /handoffs/:id/accept` — `handoff.receive`
 
-Target tells the source it agrees to take the work and is starting the restore steps.
+Target tells the source it agrees to take the work and is starting the restore steps. Source clock decides the restore window.
 
 ```ts
-interface AcceptHandoffRequest { epoch: number; targetAgentId?: Id }
-// 200 { handoffId: Id; state: "accepted" | "rejected"; reason?: string }
+interface AcceptHandoffRequest { epoch: number; targetAgentId?: Id; targetAgentName?: string; acceptedAt: IsoDate }
+// 200 { handoffId: Id; state: "accepted" | "rejected"; reason?: string; deadlineAt?: IsoDate }
 ```
 
 ### 5.12 `POST /handoffs/:id/ack` — `handoff.receive`
 
-**Durable acknowledgement**, sent by the target only after steps 1–7 succeeded and the acknowledgement has been written to the target's database.
+**Durable acknowledgement**, sent by the target only after steps 1–7 succeeded and the acknowledgement has been written to the target's database (the `acked` row and the outbox item are one transaction).
 
 ```ts
 interface AckHandoffRequest {
   epoch: number;                          // the new epoch the target will own
   targetSessionId: Id;                    // the NEW runtime session on the target
   manifestSha256: string;
-  validation: { gitCommit: string; workspaceClean: boolean; depsOk: boolean };
+  validation: { gitCommit?: string; workspaceClean: boolean; depsOk: boolean };
   ackedAt: IsoDate;
+  fencingToken: string;                   // <taskId>:<epoch>:<sig> signed by the TARGET (§9)
 }
-// 200 { handoffId: Id; state: "acked"; fencingToken: string }
+// 200 { handoffId: Id; state: "acked"; fencingToken: string; sourceLastEventSeq: number }
+// 409 stale_epoch   the source reclaimed / cancelled / the epoch moved: the target must never acquire the epoch
 ```
 
-`fencingToken` is defined in §9. The source must not release ownership before receiving a valid ack.
+The source verifies hash, epoch, that the caller is the pinned target, and the token with the target's pinned key; it persists `acked` **before** answering and releases afterwards. A duplicate ack is answered identically.
+
+### 5.12a Additive handoff calls (M7)
+
+* `POST /handoffs/:id/state` (both directions, `handoff.receive`, key): `{epoch, state, summary?, failure?:{code, detail, step?}, deadlineAt?, targetSessionId?, at}`. Target → source: progress states, `rejected`, `failed`, `cancelled`, `owner`, `resumed`, `completed`. Source → target: `cancelled`, `reclaimed`, `expired`, `released`, `extended` (+`deadlineAt`). Idempotent per `(state, epoch)`.
+* `GET /handoffs/:id` (`handoff.receive`): this node's side — `{handoffId, role, state, taskId, fromEpoch, toEpoch, taskEpoch, manifestSha256?, deadlineAt?, ackAt?, targetSessionId?, fencingToken?, failure?, lastEventSeq?}`. The authoritative answer for recovery and reconcile (§8.2). `404` when the caller is not the counterpart (and for a node that holds no row).
+* `GET /handoffs/:id/artifacts/:artifactId` (`handoff.receive`, source only serves its target): the folder bundle / working-tree patch / base manifest / opt-in transcript pack with `Content-Digest`; the transcript pack is only served when the user opted in for that handoff.
+* `POST /tasks/:id/executor` (`tasks.receive` granted by the sender; key): the new executor tells the task's **sender** it continues the task: `{epoch, handoffId, manifestSha256, fencingToken, fromNodeId, agentId?, agentName?, sessionId?, eventSeqBase, at}`. The sender requires `epoch > current`, the previous executor as `fromNodeId` (or a skipped hop), and a token that verifies with the caller's pinned key; then it follows the new executor (peer, executor columns, epoch, event base) and retargets its pending outbox items. `403 invalid_fencing_token`, `409 stale_epoch`.
+* While a task is moving, the executor answers messages/cancel from the sender with `503 handoff_in_progress` (frozen) or `503 handed_off` (released), both with `Retry-After: 2`, so the sender's outbox keeps retrying until the executor changed.
 
 ### 5.13 `GET /events` — SSE — `events.read`
 
-Server-Sent Events stream of everything the receiver wants the caller to know. The stream is **`node`**, with event `type`s `agents_changed`, `health`, `peer_revoked`, `peer_updated` and, since M4, **`task.updated`**: `{taskId, seq, status}`, addressed to the one peer the task is exchanged with (audience-scoped like `peer_updated`: every other subscriber receives the frame with an empty payload so `seq` stays gap-free). It is a pure hint — the receiver polls `GET /tasks/:id?since=` — so a lost or late frame costs nothing. Per-task streams (`task:<id>`) are served to the **local UI** over `/ws` (topics `tasks`, `task:<id>`); on the wire the task's events travel in `GET /tasks/:id?since=`. Handoff streams arrive with M7. See §8 for ordering, resume and the quick-tunnel caveat.
+Server-Sent Events stream of everything the receiver wants the caller to know. The stream is **`node`**, with event `type`s `agents_changed`, `health`, `peer_revoked`, `peer_updated` and, since M4, **`task.updated`**: `{taskId, seq, status}`, addressed to the one peer the task is exchanged with (audience-scoped like `peer_updated`: every other subscriber receives the frame with an empty payload so `seq` stays gap-free). It is a pure hint — the receiver polls `GET /tasks/:id?since=` — so a lost or late frame costs nothing. Per-task streams (`task:<id>`) are served to the **local UI** over `/ws` (topics `tasks`, `task:<id>`); on the wire the task's events travel in `GET /tasks/:id?since=`. Handoff progress is not a stream on `node`: it travels with `POST /handoffs/:id/state` and `GET /handoffs/:id` (§5.12a). See §8 for ordering, resume and the quick-tunnel caveat.
 
 ```
 GET /api/v1/events[?stream=node][&cursor=<opaque>]
@@ -469,6 +541,8 @@ Signed, best-effort notice that the sender revoked the receiver: `{ reason?: str
 
 Senders deliver mutating requests **at least once** from a durable `outbox` table (survives restarts); receivers dedupe via idempotency. **Implemented as (M4):** one row per logical call — `task.create` (`POST /tasks`), `task.message` (`POST /tasks/:id/messages`, both directions) and `task.cancel` — holding method, path, the exact body, the idempotency key (`<kind>:<taskId|messageId>`, so enqueueing the same logical call twice is a no-op) and the correlation id; every attempt re-sends **the same body with the same key**, with a fresh nonce/request id/timestamp. The outbox worker ticks every second and also runs when a peer comes back online (`peer` status `offline → online/degraded`) or its address changes. Rules:
 
+The same outbox carries the shared-session kinds (M5, `shared.*`) and the context kinds (M6): `context.sync` (`POST /context/sync`: one item per `(peer, context)` for a change — a newer item replaces an undelivered older one — and have-only round items for reconciliation; refId = the context id or `round:<workspaceId>`) and `context.member` (`POST /context/membership`). Their delivery rules are the ones above; ordering between items does not matter for context sync (every push carries its ancestry), only that a membership notice goes out before the workspace's pushes, which the sender guarantees by starting the reconcile after the notice was delivered.
+
 * Items are sent per peer, oldest first; an item is **never sent while an earlier item of the same task is still pending** (a message or cancel never overtakes the `task.create`; if the create dies, its dependents die with it). Different tasks proceed independently.
 * A peer that is `offline`/`revoked` is not contacted: its items stay `pending` and **do not consume attempts** — time spent offline is not a failure. Transport failures against an `online` peer (no HTTP answer) keep the item pending with full-jitter backoff and never kill it; the heartbeat decides when the peer counts as offline.
 * An HTTP answer from the peer is classified by the table below. Retryable answers use `decideAfterFailure` (max **10** attempts, then `dead`); permanent answers are `dead` at once. `401 clock_skew` is retried. `dead` is visible: a dead `task.create` fails the task on the sender (`Could not deliver the task to <peer>: <error>`), a dead `task.message` shows `delivery: failed` on the message, a dead `task.cancel` is logged and re-armed if the user cancels again.
@@ -497,7 +571,7 @@ A peer that fails 3 consecutive heartbeats is marked `offline` (§12); queued ou
 
 ```
 id: <cursor>
-event: <type>                  // agents_changed | health | peer_revoked | peer_updated | task.updated | stream.reset  (M7: handoff.*)
+event: <type>                  // agents_changed | health | peer_revoked | peer_updated | task.updated | stream.reset  
 data: {"stream":"node","seq":42,"eventId":"evt_node_42","at":"2026-10-31T05:52:42.212Z",
        "correlationId":"corr_node_42","type":"agents_changed","payload":{…}}
 ```
@@ -520,7 +594,8 @@ Every task has a monotonically increasing **ownership epoch** (integer). Exactly
 * Every mutating call about a task (`cancel`, `messages`, event emission, result submission, artifact association) carries the epoch it was issued under (`epoch` in the body; `X-Clam-Fencing-Token` header on writes that change task state). Receivers reject anything with `epoch < currentEpoch` with `409 stale_epoch` and `details.currentEpoch`.
 * A node that was the owner at epoch *n* and sees epoch *n+1* (on return from being offline, or through any `/events`/`GET /tasks/:id` response) **must** stop executing the task before doing anything else (see [handoff-protocol.md §8](./handoff-protocol.md#8-duplicate-execution-prevention-when-the-source-returns)).
 * **Implemented as (M5), shared sessions:** the same idea with a different owner of the epoch: a shared session has one `epoch` (1 at creation), the *driver* is the node that works, and the epoch rises when a participant takes over or the driver transfers the role. Driver-only calls carry it (`409 stale_epoch` / `epoch_unknown`, §5.9a); a returning former driver learns the higher epoch from the new driver's notice or from `GET /shared/:id` and becomes a read-only participant. No signed fencing tokens: the epoch is checked against the pinned, signed sender.
-* **Implemented as (M4):** every task row carries `epoch` (always 0 until M7). `cancel` and `messages` carry it in the body and are checked with `checkEpoch`: lower → `409 stale_epoch` with `details.currentEpoch`, higher → `409 conflict`; the sender's mirror ignores a record with a lower epoch and adopts a higher one. Fencing tokens, `X-Clam-Fencing-Token` and `task_assignments`/`handoffs` arrive with M7. State changes use compare-and-set (`TaskStore.transition` with an expected-status guard inside one SQLite transaction).
+* **Implemented as (M7):** `tasks.epoch` is the epoch this node owns, `tasks.highest_seen_epoch` the highest ever seen and `tasks.fenced` set when the node released the task or saw a higher epoch (boot fence scan before any runtime spawn; sessions of fenced tasks are never started, resumed or prompted; a result that still arrives is stored as a `late_result` event). The token is created by the **target** at step 8 (`makeFencingToken` over `taskId|epoch|handoffId|manifestSha256`, node key) and verified by the source (ack) and by the task's sender (executor notice, §5.12a) with the target's pinned key. The source reclaims with a tombstone epoch `n+1`; a stale ack is `409 stale_epoch`.
+* **Implemented as (M4):** every task row carries `epoch` (0 at creation; M7 raises it by handoff). `cancel` and `messages` carry it in the body and are checked with `checkEpoch`: lower → `409 stale_epoch` with `details.currentEpoch`, higher → `409 conflict`; the sender's mirror ignores a record with a lower epoch and adopts a higher one. Fencing tokens, `X-Clam-Fencing-Token` and `task_assignments`/`handoffs` arrive with M7. State changes use compare-and-set (`TaskStore.transition` with an expected-status guard inside one SQLite transaction).
 
 ---
 
@@ -537,10 +612,13 @@ Every task has a monotonically increasing **ownership epoch** (integer). Exactly
   | `POST /tasks/:id/cancel` | caller holds `tasks.cancel` and is the task's sender |
   | `GET /tasks/:id` | caller is paired and is the task's sender or executor |
   | `GET /tasks/:id/artifacts/:artifactId` | caller is the task's sender (no capability) |
+  | `GET /tasks/:id/inputs/:artifactId` | caller is the task's executor **and** holds `tasks.receive` (granted by the sender) |
 
   Before queueing, the sender's own node also requires the matching capability in `received_capabilities` (`tasks.send` to delegate or message, `tasks.receive` to message back, `tasks.cancel` to cancel a delivered task): `409 capability_missing` with `details.missing`. Granting `tasks.send` never obliges execution: the executor's `autoAcceptTasks` policy (a flag per peer, editable in the peer's settings, default off) decides whether a human must accept first.
 * **Workspace scoping:** `workspaceId` in a request must be one both nodes are members of; the receiver enforces membership from its own `workspace_members` table.
 * **Shared sessions (M5).** One capability, `sessions.share`, checked on the receiving node for every `/shared*` endpoint (§5.9a). It is **not** in the default pairing grant: each user enables it per peer, and shared sessions need it granted in **both** directions (what the peer grants us decides what our UI offers; what we grant decides what the peer may reach: mirror, thread, snapshots).
+* **Handoffs (M7).** One capability, `handoff.receive`, checked on the receiving node for every `/handoffs*` call (§5.10–5.12a). It is **not** in the default pairing grant: each user enables it per peer and handoffs need it granted in **both** directions (what the peer grants us decides what our UI offers as a handoff target; what we grant decides what the peer may reach: accept/ack/state, artifacts). `POST /tasks/:id/executor` needs `tasks.receive` (the sender granted it to the new executor, like any executor → sender call). `handoff.send` exists in the capability enum but nothing checks it.
+* **Context sync (M6).** One capability, `context.sync`, checked on the receiving node for `POST /context/sync` and `POST /context/membership` (§5.9). It is **not** in the default pairing grant: each user enables it per peer, and syncing needs it granted in **both** directions (what the peer grants us decides what our UI and our outbox may send to it — `409 capability_missing` when adding a member; what we grant decides what it may push to us). Besides the capability, the caller must be an active member of the workspace in the receiver's `workspace_members`.
 * **Roles** are named bundles of capabilities (`owner`, `admin`, `member`, `observer`); roles are a UI convenience — enforcement uses capabilities only. Orchestration never hard-codes role names.
 * **Receiver autonomy:** a node may always reject a task (`rejected`, reason) or require human acceptance (`offered`). Granting `tasks.send` never obliges execution.
 * **Tool approval is local policy.** A delegated task runs under the receiving node's `approvalMode` (the sender's `constraints.approvalMode` can only request something **equal or stricter**, never looser — `strictestApprovalMode`); the executing session gets it as a per-session override at spawn.
@@ -621,4 +699,7 @@ Implementation details (M3):
 * Deprecations are announced in `GET /node/info` (`deprecations[]`) at least one minor release before removal (none exist yet, so the field is absent).
 * M3's additive surface: `POST /node/announce`, `POST /node/revoke`, error codes `unknown_peer` / `peer_revoked` / `digest_mismatch` / `fingerprint_mismatch` / `url_unreachable`, `agents[].activeSessions`, `agentsRevision` and `grantedCapabilities` in the authenticated health answer, `stream.reset`, and `status`/`reason` on the pairing confirm.
 * M4's additive surface: `POST /tasks`, `GET /tasks/:id[?since=]`, `POST /tasks/:id/cancel`, `POST /tasks/:id/messages`, `GET /tasks/:id/artifacts/:artifactId`; the `task.updated` node event; the task wire schemas (`wire.CreateTaskRequest`, `TaskRecord`, `GetTaskResponse`, `CancelTaskRequest`, `TaskMessageRequest`, `TaskMessageAccepted`); message kind `question`; `deliverAs` and `sender` on the create request; `result.artifacts[].size`; error codes `capability_missing` (409, sender-side), `stale_epoch` and `idempotency_conflict` now emitted, `agent_message_limit` (429, local tool result), `artifact_contains_secrets` (422), `artifact_too_large` (413).
+* Work without git (additive, same wave as M6): `deliverAs: "files"`; `projectRef` optional and `inputFiles` on `CreateTaskRequest`; `result.files`; `GET /tasks/:id/inputs/:artifactId` (§5.8c); `vcs` on shared invites and state, optional `repo`/`branch`, `files` on checkpoint notices and acks, `GET /shared/:id/files/:seq` (§5.9a); error codes `input_contains_secrets` (422), `input_too_large` (413), `inputs_unavailable`, `no_result_files`, `files_conflict`, `no_files`, `files_failed`, `invalid_bundle`, `unsafe_path`, `workspace_required`.
+* Context sync (M6, §5.9): `POST /context/sync` was specified earlier with `projectId?` and `push[] {contextId, type, version, sha256, body}`; as built, project scope travels as `projectKey` inside each `WireVersion`, versions carry `base`/`merged`/`ancestors`/`deleted`, and the answer gains `ahead` and `rejected` (receivers ignore unknown fields). `POST /context/membership` is additive. Both use the capability `context.sync`.
 * M5's additive surface: the capability `sessions.share`; `POST /shared/invites`, `POST /shared/:id/decision|messages|messages/sync|mirror|checkpoints|driver|membership|transfer`, `POST /shared/:id/checkpoints/:seq/ack`, `GET /shared/:id`, `GET /shared/:id/snapshots/:seq` (§5.9a); the `wire.Shared*` schemas; error codes `not_driver`, `driver_online`, `no_snapshot`, `snapshot_invalid`, `epoch_unknown`, `split_brain`, `mirror_resync`, `session_read_only`, `session_moved`, `shared_session_active`, git refusals; `capability_missing` and `stale_epoch` also on shared calls.
+* Answering from any member machine (additive, after M5): `POST /shared/:id/answer` (§5.9a, capability `sessions.share`, epoch-fenced, idempotent by key), `state.requests` inside the mirror's `state`, error codes `already_answered` and `request_closed`. Old nodes ignore the extra `state` key and answer `404` to the route (the participant's UI then says so).

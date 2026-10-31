@@ -1,8 +1,9 @@
 import type { HostToolCall, HostToolDefinition, HostToolResult } from "@clam/agent-runtime";
-import type { SharedMessage } from "@clam/contracts";
+import { ATTACHMENT_MAX_BYTES, type SharedMessage } from "@clam/contracts";
 import { agentSessions, agents } from "@clam/database";
 import { formatAuthor, parseSharedHostToolCall, SHARED_HOST_TOOL_DEFINITIONS, SHARED_HOST_TOOLS } from "@clam/task-engine";
 import { eq } from "drizzle-orm";
+import { z } from "zod";
 import { ApiError } from "../http/errors.ts";
 import { errorText } from "../network/util.ts";
 import type { HostToolSet } from "../services/host-tool-registry.ts";
@@ -10,6 +11,31 @@ import type { SharedHub } from "./hub.ts";
 import type { SharedRow } from "./store.ts";
 
 const EXCERPT_CHARS = 200;
+
+const SHARE_FILE_TOOL = "mesh_share_file";
+
+const SHARE_FILE_DEFINITION: HostToolDefinition = {
+	name: SHARE_FILE_TOOL,
+	label: "Mesh: share a file in the group chat",
+	description: `Post a file from your working folder into the group chat of the shared session as an attachment, so the human and every agent (on any node) can open, preview and download it: a report (md, pdf, docx), an image, audio, a video, a spreadsheet, a zip of results. Use it to DELIVER what you produced; the file is copied as it is now (later edits are not shared). Every member node stores it and the other agents get it copied into their own working folder. \`path\` is relative to your working folder (an absolute path inside it also works) and must name a regular file of at most ${Math.floor(ATTACHMENT_MAX_BYTES / 1024 ** 3)} GB. \`caption\` is an optional message shown with it (an at-sign mention in it wakes that agent, like in mesh_say).`,
+	parameters: {
+		type: "object",
+		properties: {
+			path: { type: "string", description: "File to share, relative to your working folder." },
+			caption: { type: "string", description: "Optional text posted with the file (max 2000 chars)." },
+		},
+		required: ["path"],
+		additionalProperties: false,
+	},
+	loadMode: "essential",
+};
+
+const ShareFileArgs = z
+	.object({
+		path: z.string({ error: "mesh_share_file: path is required" }).trim().min(1, "mesh_share_file: path must not be empty").max(4096),
+		caption: z.string().trim().max(2000, "mesh_share_file: caption must be at most 2000 characters").optional(),
+	})
+	.strict();
 
 /** A tool failure the agent should read and act on (never thrown past `execute`). */
 class ToolError extends Error {}
@@ -20,15 +46,16 @@ class ToolError extends Error {}
  * session or the participant agent session of an active shared session.
  */
 export class SharedHostTools implements HostToolSet {
-	readonly names: readonly string[] = SHARED_HOST_TOOLS;
+	readonly names: readonly string[] = [...SHARED_HOST_TOOLS, SHARE_FILE_TOOL];
 
 	constructor(private readonly hub: SharedHub) {}
 
 	definitions(_sessionId: string): HostToolDefinition[] {
-		return SHARED_HOST_TOOL_DEFINITIONS.map((definition) => ({ ...definition }));
+		return [...SHARED_HOST_TOOL_DEFINITIONS.map((definition) => ({ ...definition })), { ...SHARE_FILE_DEFINITION }];
 	}
 
 	async execute(call: HostToolCall): Promise<HostToolResult> {
+		if (call.toolName === SHARE_FILE_TOOL) return this.shareFile(call);
 		const parsed = parseSharedHostToolCall(call.toolName, call.arguments);
 		if (!parsed.ok) return { text: parsed.error, isError: true };
 		try {
@@ -39,6 +66,26 @@ export class SharedHostTools implements HostToolSet {
 			return { text: await this.say(shared, call.sessionId, tool.args) };
 		} catch (error) {
 			if (!(error instanceof ToolError) && !(error instanceof ApiError)) this.hub.log.warn({ err: errorText(error), tool: call.toolName }, "a shared host tool failed");
+			return { text: errorText(error, 1000), isError: true };
+		}
+	}
+
+	private async shareFile(call: HostToolCall): Promise<HostToolResult> {
+		const args = ShareFileArgs.safeParse(call.arguments ?? {});
+		if (!args.success) return { text: args.error.issues[0]?.message ?? "invalid arguments", isError: true };
+		try {
+			if (call.signal.aborted) return { text: "the call was cancelled", isError: true };
+			const shared = this.sharedOf(call.sessionId);
+			const agent = this.hub.ctx.db
+				.select({ id: agents.id, name: agents.name })
+				.from(agentSessions)
+				.innerJoin(agents, eq(agents.id, agentSessions.agentId))
+				.where(eq(agentSessions.id, call.sessionId))
+				.get();
+			const posted = await this.hub.attachments.shareFile(shared.id, call.sessionId, { path: args.data.path, caption: args.data.caption, agent: { id: agent?.id ?? null, name: agent?.name ?? null } });
+			return { text: `Posted ${posted.attachment.name} (${posted.attachment.mimeType}, ${posted.attachment.size} bytes) to the group chat (message ${posted.messageId}); every member node keeps it.` };
+		} catch (error) {
+			if (!(error instanceof ToolError) && !(error instanceof ApiError)) this.hub.log.warn({ err: errorText(error), tool: call.toolName }, "mesh_share_file failed");
 			return { text: errorText(error, 1000), isError: true };
 		}
 	}
@@ -63,7 +110,7 @@ export class SharedHostTools implements HostToolSet {
 		const driver = view.participants.find((p) => p.role === "driver");
 		const lines = [
 			`Shared session ${shared.id} · "${shared.title}" (a group chat: every member node keeps the same log; the final text of each of your turns is posted to it; an at-sign right before an agent name, a node name or the word all wakes them)`,
-			`Epoch ${shared.epoch}; shared branch ${shared.branch} (${shared.repoUrl})`,
+			shared.vcs === "files" ? `Epoch ${shared.epoch}; no git repository: the driver's working folder travels as a bundle at every checkpoint`: `Epoch ${shared.epoch}; shared branch ${shared.branch} (${shared.repoUrl})`,
 			`This node: ${this.hub.nodeName()} — ${shared.localRole === "driver" ? "you are the LEAD (driving session)" : "you are a participant agent"}`,
 			`Driver: ${driver ? formatAuthor({ kind: "agent", agentName: driver.agentName, nodeName: driver.nodeName }) : shared.driverNodeName}${driver ? ` (${driver.nodeStatus})` : ""}`,
 			"",
@@ -74,7 +121,7 @@ export class SharedHostTools implements HostToolSet {
 			lines.push(`- ${who}: ${p.role === "driver" ? "lead (driver)" : "participant"}, ${p.state}, node ${p.nodeStatus}${p.agentName ? " — can be mentioned by its agent name or its node name" : " — no agent"}`);
 		}
 		const last = view.lastCheckpoint;
-		lines.push("", last ? `Last checkpoint: #${last.seq}${last.commit ? ` commit ${last.commit.slice(0, 12)}` : ""}${last.pushed ? " (pushed)" : " (not pushed)"}, ${last.snapshot ? `session snapshot held by ${last.deliveredTo.length} participant(s)` : "no session snapshot"}, ${last.at}` : "No checkpoint has been taken yet.");
+		lines.push("", last ? `Last checkpoint: #${last.seq}${last.files ? ` folder bundle of ${last.files.fileCount} file(s)` : last.commit ? ` commit ${last.commit.slice(0, 12)}` : ""}${last.files ? "" : last.pushed ? " (pushed)" : " (not pushed)"}, ${last.snapshot ? `session snapshot held by ${last.deliveredTo.length} participant(s)` : "no session snapshot"}, ${last.at}` : "No checkpoint has been taken yet.");
 		const thread = this.hub.store.messages(shared.id).filter((m) => m.authorKind !== "system").slice(-6);
 		if (thread.length > 0) {
 			lines.push("", `Last ${thread.length} message(s) in the group chat:`);

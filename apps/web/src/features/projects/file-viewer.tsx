@@ -1,11 +1,12 @@
 import { type FileContent, routes } from "@clam/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AlertTriangle, ChevronRight, FileQuestion, FileX, RefreshCw, WrapText, X } from "lucide-react";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, ChevronRight, Download, FileQuestion, FileX, RefreshCw, WrapText, X } from "lucide-react";
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { CopyButton, HlLineView } from "@/components/code-block";
 import { LazyMarkdown } from "@/components/lazy-markdown";
-import { api, errorMessage } from "@/lib/api";
+import { api, errorMessage, localUrl } from "@/lib/api";
+import { isMediaKind, previewKind } from "@/lib/file-kind";
 import { type HlLine, highlightLines, langFromPath } from "@/lib/highlight";
 import { qk } from "@/lib/queries";
 import { cn, formatBytes, formatNumber } from "@/lib/utils";
@@ -44,10 +45,17 @@ function useWrapPref() {
 	return [wrap, set] as const;
 }
 
+const FilePreview = lazy(() => import("@/components/file-preview.tsx"));
+
 export function FileViewer({ projectId, path, className, onClose }: FileViewerProps) {
+	const kind = previewKind(path);
+	const media = isMediaKind(kind);
+	const rawUrl = localUrl(routes.projectRaw(projectId), { path });
+	const downloadUrl = localUrl(routes.projectRaw(projectId), { path, download: 1 });
 	const q = useQuery({
 		queryKey: qk.projectFile(projectId, path),
 		queryFn: ({ signal }) => api.get<FileContent>(routes.projectFile(projectId), { path }, { signal }),
+		enabled: !media,
 	});
 	const [wrap, setWrap] = useWrapPref();
 	const [mode, setMode] = useState<"preview" | "source">("preview");
@@ -99,7 +107,14 @@ export function FileViewer({ projectId, path, className, onClose }: FileViewerPr
 						</Button>
 					</Tip>
 				) : null}
-				<CopyButton text={path} label="Copy path" />
+				<span className="hidden sm:contents"><CopyButton text={path} label="Copy path" /></span>
+				<Tip label="Download">
+					<Button asChild variant="ghost" size="icon-sm">
+						<a href={downloadUrl} download={segments.at(-1)} aria-label={`Download ${segments.at(-1)}`}>
+							<Download />
+						</a>
+					</Button>
+				</Tip>
 				{data?.content != null ? <CopyButton text={data.content} label="Copy contents" /> : null}
 				{onClose ? (
 					<Tip label="Close file">
@@ -120,7 +135,11 @@ export function FileViewer({ projectId, path, className, onClose }: FileViewerPr
 			) : null}
 
 			<div className="min-h-0 flex-1">
-				{q.isPending ? (
+				{media ? (
+					<Suspense fallback={<ViewerSkeleton />}>
+						<FilePreview key={path} kind={kind} src={rawUrl} name={segments.at(-1) ?? path} />
+					</Suspense>
+				) : q.isPending ? (
 					<ViewerSkeleton />
 				) : q.error ? (
 					<EmptyState
@@ -134,9 +153,9 @@ export function FileViewer({ projectId, path, className, onClose }: FileViewerPr
 						}
 					/>
 				) : !data ? null : data.binary ? (
-					<EmptyState icon={FileQuestion} title="Binary file" description={`This file can’t be shown as text (${formatBytes(data.size)}).`} />
+					<EmptyState icon={FileQuestion} title="Binary file" description={`This file can’t be shown as text (${formatBytes(data.size)}).`} action={<DownloadLink href={downloadUrl} name={segments.at(-1) ?? path} />} />
 				) : data.content === null ? (
-					<EmptyState icon={FileQuestion} title="File too large to preview" description={`This file is ${formatBytes(data.size)}, which exceeds the preview limit.`} />
+					<EmptyState icon={FileQuestion} title="File too large to preview" description={`This file is ${formatBytes(data.size)}, which exceeds the preview limit.`} action={<DownloadLink href={downloadUrl} name={segments.at(-1) ?? path} />} />
 				) : isMd && mode === "preview" ? (
 					<div className="scrollbar-thin h-full overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
 						<div className="mx-auto max-w-3xl">
@@ -229,5 +248,15 @@ function CodeView({ content, lang, wrap }: { content: string; lang: string | nul
 			</div>
 			<span className="sr-only">{formatNumber(lines.length)} lines</span>
 		</div>
+	);
+}
+
+function DownloadLink({ href, name }: { href: string; name: string }) {
+	return (
+		<Button asChild size="sm" variant="outline">
+			<a href={href} download={name}>
+				<Download /> Download
+			</a>
+		</Button>
 	);
 }

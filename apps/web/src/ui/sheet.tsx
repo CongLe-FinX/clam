@@ -1,6 +1,6 @@
 import * as D from "@radix-ui/react-dialog";
 import { cva, type VariantProps } from "class-variance-authority";
-import type { ComponentProps, HTMLAttributes } from "react";
+import { type ComponentProps, type HTMLAttributes, type TouchEvent, useRef } from "react";
 import { cn } from "@/lib/utils";
 import { DialogOverlay } from "./dialog.tsx";
 
@@ -19,12 +19,49 @@ const sheetVariants = cva("fixed z-[61] flex flex-col bg-overlay shadow-pop outl
 	defaultVariants: { side: "right" },
 });
 
+/**
+ * Drag a bottom sheet down from its top edge (grab handle and header) to dismiss it: it follows the finger and either flies
+ * out (far enough or fast enough) or springs back. Uses the independent `translate` property so the open/close animation,
+ * which owns `transform`, is untouched.
+ */
+function useSwipeToDismiss(close: () => void) {
+	const drag = useRef<{ y: number; t: number; el: HTMLElement } | null>(null);
+	return {
+		onTouchStart(e: TouchEvent<HTMLElement>) {
+			const touch = e.touches[0];
+			if (!touch || touch.clientY - e.currentTarget.getBoundingClientRect().top > 72) return;
+			drag.current = { y: touch.clientY, t: performance.now(), el: e.currentTarget };
+			e.currentTarget.style.transition = "none";
+		},
+		onTouchMove(e: TouchEvent<HTMLElement>) {
+			const d = drag.current;
+			const touch = e.touches[0];
+			if (d && touch) d.el.style.translate = `0 ${Math.max(0, touch.clientY - d.y)}px`;
+		},
+		onTouchEnd(e: TouchEvent<HTMLElement>) {
+			const d = drag.current;
+			drag.current = null;
+			const touch = e.changedTouches[0];
+			if (!d || !touch) return;
+			const dy = Math.max(0, touch.clientY - d.y);
+			const fast = dy > 40 && dy / Math.max(1, performance.now() - d.t) > 0.5;
+			d.el.style.transition = "translate 180ms var(--ease-out-quint)";
+			if (dy > 110 || fast) {
+				d.el.style.translate = "0 100%";
+				setTimeout(close, 140);
+			} else d.el.style.translate = "0 0";
+		},
+	};
+}
+
 export function SheetContent({
 	side,
 	className,
 	children,
 	...props
 }: ComponentProps<typeof D.Content> & VariantProps<typeof sheetVariants>) {
+	const closeRef = useRef<HTMLButtonElement>(null);
+	const swipe = useSwipeToDismiss(() => closeRef.current?.click());
 	return (
 		<D.Portal>
 			<DialogOverlay />
@@ -35,9 +72,15 @@ export function SheetContent({
 					e.preventDefault();
 					(e.currentTarget as HTMLElement).focus({ preventScroll: true });
 				}}
+				{...(side === "bottom" ? swipe : {})}
 				{...props}
 			>
-				{side === "bottom" ? <div aria-hidden className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-border-strong" /> : null}
+				{side === "bottom" ? (
+					<>
+						<div aria-hidden className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-border-strong" />
+						<D.Close ref={closeRef} hidden tabIndex={-1} aria-hidden />
+					</>
+				) : null}
 				{children}
 			</D.Content>
 		</D.Portal>

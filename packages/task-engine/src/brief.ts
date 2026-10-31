@@ -6,10 +6,13 @@ export interface BriefInput {
 	description: string;
 	delegator: { agentName: string | null; nodeName: string };
 	executorNodeName: string;
-	repo: { url: string; branch: string | null; commit: string | null };
+	/** null: a task without a git repository. */
+	repo: { url: string; branch: string | null; commit: string | null } | null;
 	baseBranch: string | null;
 	workBranch: string | null;
-	deliverAs: "summary" | "branch";
+	deliverAs: "summary" | "branch" | "files";
+	/** Files the sender sent along, already placed in the working folder (paths relative to it). */
+	inputFiles?: { paths: string[]; notReplaced?: string[] } | null;
 	constraints: { maxCostUsd?: number; deadline?: string; approvalMode?: string };
 	priorMessages: { author: string; kind: MessageKind; text: string }[];
 	canAskDelegator: boolean;
@@ -20,16 +23,33 @@ export function buildBrief(i: BriefInput): string {
 	L.push(`# Delegated task: ${i.title}`, "", `Task id: ${i.taskId}`);
 	L.push(`Delegated by: ${i.delegator.agentName ?? "agent"}@${i.delegator.nodeName}`);
 	L.push(`Executing on: ${i.executorNodeName}`, "", "## Description", "", i.description, "");
-	L.push("## Repository", "", `- Repo: ${i.repo.url}`);
-	if (i.repo.branch) L.push(`- Branch checked out: ${i.repo.branch}`);
-	if (i.repo.commit) L.push(`- Commit: ${i.repo.commit}`);
-	if (i.baseBranch) L.push(`- Base branch: ${i.baseBranch}`);
-	if (i.workBranch) L.push(`- Work branch: ${i.workBranch}`);
+	if (i.repo) {
+		L.push("## Repository", "", `- Repo: ${i.repo.url}`);
+		if (i.repo.branch) L.push(`- Branch checked out: ${i.repo.branch}`);
+		if (i.repo.commit) L.push(`- Commit: ${i.repo.commit}`);
+		if (i.baseBranch) L.push(`- Base branch: ${i.baseBranch}`);
+		if (i.workBranch) L.push(`- Work branch: ${i.workBranch}`);
+	} else {
+		L.push("## Working folder", "", "- This task is not tied to a git repository: your session's working directory is the folder to work in.");
+		if (i.inputFiles && i.inputFiles.paths.length > 0) {
+			const shown = i.inputFiles.paths.slice(0, 40);
+			L.push(`- The delegator sent ${i.inputFiles.paths.length} input file(s), already placed in the folder: ${shown.join(", ")}${i.inputFiles.paths.length > shown.length ? `, … (${i.inputFiles.paths.length - shown.length} more)` : ""}.`);
+			if (i.inputFiles.notReplaced && i.inputFiles.notReplaced.length > 0) {
+				L.push(`- These input files were NOT placed because a different file with that name already exists in the folder: ${i.inputFiles.notReplaced.join(", ")}.`);
+			}
+		} else {
+			L.push("- No input files were sent; the folder may be empty.");
+		}
+	}
 	L.push("", "## Deliverable", "");
 	if (i.deliverAs === "branch") {
 		L.push(
 			`Deliver as: branch${i.workBranch ? ` (${i.workBranch})` : ""}.`,
 			"CL Agent Mesh commits and pushes your changes when you finish — do NOT run git commit/push or switch branches yourself. Just edit the files in the working tree.",
+		);
+	} else if (i.deliverAs === "files") {
+		L.push(
+			"Deliver as: files. Leave the result files in the working folder (create or edit them there); CL Agent Mesh returns the files you created or changed to the delegator when you finish — do NOT run git commands and do not try to send the files yourself. Mention what you produced in your summary.",
 		);
 	} else {
 		L.push("Deliver as: summary. No git changes expected; answer in your summary.");

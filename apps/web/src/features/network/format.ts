@@ -32,8 +32,8 @@ export const isStale = (fetchedAt: string, now = Date.now()): boolean => now - D
 /** The text a user pastes into chat to hand an invitation to someone. */
 export function invitationMessage(i: { url: string | null; fingerprint: string; code: string; expiresAt: string }): string {
 	return [
-		"Join my CL Agent Mesh node:",
-		i.url ? `URL: ${i.url}` : "URL: (this node has no public URL yet)",
+		"Join my CL Agent Mesh machine:",
+		i.url ? `URL: ${i.url}` : "URL: (this machine has no public URL yet)",
 		`Fingerprint: ${formatFingerprint(i.fingerprint)}`,
 		`Code: ${formatInvitationCode(i.code)}`,
 		`Expires: ${new Date(i.expiresAt).toLocaleTimeString()}`,

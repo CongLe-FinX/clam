@@ -37,6 +37,12 @@ export const Project = z.object({
 	/** Absolute local working directory on this node. */
 	path: z.string(),
 	repository: RepositoryRef.nullable(),
+	/** `git` when the directory is a git working tree; `none` for a plain folder (no repo needed for sessions, tasks or shared sessions). */
+	vcs: z.enum(["git", "none"]),
+	/** Created by CL Agent Mesh under its data dir (no path chosen by the user); deleting the project may delete it. */
+	managed: z.boolean(),
+	/** `chat` = the managed folder created for a chat started without a project (research, reports, media…); listed under Chats, not Projects. */
+	origin: z.enum(["user", "chat"]),
 	sessionCount: z.number().int(),
 	lastActivityAt: IsoDate.nullable(),
 	createdAt: IsoDate,
@@ -47,8 +53,11 @@ export type Project = z.infer<typeof Project>;
 export const CreateProjectBody = z.object({
 	workspaceId: z.string().min(1),
 	name: z.string().trim().min(1).max(80),
-	/** Must be an existing absolute directory; the server validates. */
-	path: z.string().min(1),
+	/**
+	 * An existing absolute directory (git or not). Omit to let CL Agent Mesh create an empty managed folder for the
+	 * project under its data dir — for work that has no repository at all.
+	 */
+	path: z.string().min(1).optional(),
 });
 export const UpdateProjectBody = z.object({
 	name: z.string().trim().min(1).max(80).optional(),

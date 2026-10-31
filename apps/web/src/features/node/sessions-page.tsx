@@ -82,7 +82,7 @@ export default function NodeSessionsPage() {
 		<div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 px-4 pt-5 sm:px-6 lg:px-8 lg:pt-7">
 			<PageHeader
 				title="Agent Sessions"
-				description="Every session on this node, across all projects."
+				description="Every session on this machine, across all projects."
 				actions={
 					<Button variant="primary" onClick={() => openDialog({ kind: "create-session" })}>
 						<Plus /> New session

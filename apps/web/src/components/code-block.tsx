@@ -1,4 +1,4 @@
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, WrapText } from "lucide-react";
 import { memo, useEffect, useState } from "react";
 import { type HlLine, highlightLines, resolveLang } from "@/lib/highlight";
 import { cn } from "@/lib/utils";
@@ -61,7 +61,7 @@ export function CopyButton({ text, className, label = "Copy" }: { text: string; 
 				onClick={() => {
 					void navigator.clipboard?.writeText(text).then(() => setDone(true));
 				}}
-				className={cn("grid size-7 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground coarse:size-10", className)}
+				className={cn("grid size-7 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring coarse:size-10", className)}
 			>
 				{done ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
 			</button>
@@ -69,16 +69,46 @@ export function CopyButton({ text, className, label = "Copy" }: { text: string; 
 	);
 }
 
-export const CodeBlock = memo(function CodeBlock({ code, lang, className, maxHeight = 420 }: { code: string; lang?: string | null; className?: string; maxHeight?: number }) {
+export const CodeBlock = memo(function CodeBlock({
+	code,
+	lang,
+	className,
+	maxHeight = 420,
+	hint,
+}: {
+	code: string;
+	lang?: string | null;
+	className?: string;
+	maxHeight?: number;
+	/** Small note in the header (e.g. “rendering when complete” for an open streaming fence). */
+	hint?: string;
+}) {
 	const lines = useHighlighted(code, lang);
+	const [wrap, setWrap] = useState(false);
 	const label = lang && lang !== "text" ? lang : null;
 	return (
-		<div className={cn("group/code overflow-hidden rounded-lg bg-surface-2 shadow-[inset_0_0_0_1px_var(--border)]", className)}>
-			<div className="flex h-8 items-center justify-between border-b px-3 text-2xs text-subtle">
-				<span className="font-mono">{label ?? "text"}</span>
-				<CopyButton text={code} className="-mr-2 size-6" />
+		<div className={cn("rich-card group/code overflow-hidden rounded-lg bg-surface-2 shadow-[inset_0_0_0_1px_var(--border-strong)]", className)}>
+			<div className="flex min-h-8 items-center justify-between gap-2 border-b px-3 text-2xs text-subtle coarse:min-h-11">
+				<span className="flex min-w-0 items-center gap-2">
+					<span className="font-mono">{label ?? "text"}</span>
+					{hint ? <span className="truncate italic">{hint}</span> : null}
+				</span>
+				<span className="-mr-2 flex items-center">
+					<Tip label={wrap ? "No wrap" : "Wrap lines"}>
+						<button
+							type="button"
+							aria-label="Wrap lines"
+							aria-pressed={wrap}
+							onClick={() => setWrap((v) => !v)}
+							className={cn("grid size-6 place-items-center rounded-md outline-none transition-colors hover:bg-surface-3 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring coarse:size-10", wrap && "bg-surface-3 text-foreground")}
+						>
+							<WrapText className="size-3.5" />
+						</button>
+					</Tip>
+					<CopyButton text={code} className="size-6" />
+				</span>
 			</div>
-			<pre className="scrollbar-thin overflow-auto px-3 py-2.5 font-mono text-[12.5px] leading-[1.6]" style={{ maxHeight }}>
+			<pre className={cn("scrollbar-thin overflow-auto px-3 py-2.5 font-mono text-[12.5px] leading-[1.6]", wrap && "whitespace-pre-wrap break-words")} style={{ maxHeight }}>
 				<code>{lines ? lines.map((l, i) => <div key={i}><HlLineView line={l} />{"\n"}</div>) : code}</code>
 			</pre>
 		</div>

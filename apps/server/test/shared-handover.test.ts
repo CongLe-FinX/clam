@@ -84,9 +84,9 @@ describe("hand-over to a node that is not a participant yet", () => {
 		expect(done.transfer).toMatchObject({ newSessionId: newSession_.id, newSessionUrl: null });
 		expect(readIn(pair.workB, "FEATURE.md")).toBe("feature v1\n");
 		expect(readIn(pair.workB, "SCRATCH.txt")).toBe("scratch\n");
-		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(started.body.repo.branch);
-		expect(remoteBranches(pair.origin)).toContain(started.body.repo.branch);
-		expect(git(pair.origin, "show", `${started.body.repo.branch}:FEATURE.md`)).toBe("feature v1\n");
+		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(started.body.repo?.branch);
+		expect(remoteBranches(pair.origin)).toContain(started.body.repo?.branch);
+		expect(git(pair.origin, "show", `${started.body.repo?.branch}:FEATURE.md`)).toBe("feature v1\n");
 
 		// the continuation note wakes B's agent: everything was handed over, continue the same work
 		await eventually(async () => (await transcriptTexts(pair.b, newSession_.id)).some((t) => t.includes("handed over to this node")), "the continuation note on B", 30_000);
@@ -149,7 +149,7 @@ describe("a driver that is mid-turn", () => {
 		expect(seen.phases.indexOf("stopping")).toBeLessThan(seen.phases.indexOf("checkpointing"));
 
 		// the file written before the interrupted turn is in the checkpoint commit on the shared branch and on B
-		expect(git(pair.origin, "show", `${shared.repo.branch}:PARTIAL.md`)).toBe("partial\n");
+		expect(git(pair.origin, "show", `${shared.repo?.branch}:PARTIAL.md`)).toBe("partial\n");
 		expect(readIn(pair.workB, "PARTIAL.md")).toBe("partial\n");
 		const onB = await waitForShared(pair.b, shared.id, (s) => s.localRole === "driver" && s.epoch === 2, "B is the driver");
 		await eventually(async () => (await transcriptTexts(pair.b, onB.localSessionId as string)).some((t) => t.includes("handed over to this node")), "the continuation note", 30_000);

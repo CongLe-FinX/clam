@@ -4,16 +4,28 @@ import { persist } from "zustand/middleware";
 export type GlobalDialog =
 	| { kind: "create-workspace" }
 	| { kind: "edit-workspace"; workspaceId: string }
-	| { kind: "create-project"; workspaceId?: string; mode?: "existing" | "clone" }
+	| { kind: "create-project"; workspaceId?: string; mode?: "existing" | "clone" | "empty" }
 	| { kind: "create-session"; projectId?: string }
+	| { kind: "new-chat" }
 	| { kind: "invite-node"; workspaceId?: string }
 	| { kind: "join-node" }
 	| { kind: "pairing-requests" }
 	| { kind: "delegate-task"; workspaceId?: string; projectId?: string; peerId?: string; agentId?: string }
 	| { kind: "handover"; sessionId: string; toNodeId?: string }
+	| { kind: "create-context"; workspaceId?: string; projectId?: string }
 	| null;
 
+/** Session page layouts are remembered per kind: a plain chat vs a project session. */
+export type SessionKind = "chat" | "project";
+export interface SessionPanelChoice {
+	left: boolean;
+	right: boolean;
+}
+
 interface UiState {
+	/** The user's last side-panel choice per session kind (unset → the viewport-dependent default). */
+	sessionPanels: Partial<Record<SessionKind, SessionPanelChoice>>;
+	setSessionPanels(kind: SessionKind, choice: SessionPanelChoice): void;
 	sidebarCollapsed: boolean;
 	expandedWorkspaces: string[];
 	drawerOpen: boolean;
@@ -30,6 +42,8 @@ interface UiState {
 export const useUi = create<UiState>()(
 	persist(
 		(set) => ({
+			sessionPanels: {},
+			setSessionPanels: (kind, choice) => set((s) => ({ sessionPanels: { ...s.sessionPanels, [kind]: choice } })),
 			sidebarCollapsed: false,
 			expandedWorkspaces: [],
 			drawerOpen: false,
@@ -51,7 +65,7 @@ export const useUi = create<UiState>()(
 		{
 			name: "clam.ui",
 			version: 1,
-			partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, expandedWorkspaces: s.expandedWorkspaces }),
+			partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, expandedWorkspaces: s.expandedWorkspaces, sessionPanels: s.sessionPanels }),
 		},
 	),
 );

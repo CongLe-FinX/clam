@@ -1,4 +1,4 @@
-import { LoginBody, SetPasswordBody, UpdateAccessBody, routes, type AccessStatus } from "@clam/contracts";
+import { LoginBody, SetPasswordBody, StepUpBody, UpdateAccessBody, routes, type AccessStatus } from "@clam/contracts";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { IssuedSession } from "../auth/service.ts";
 import { clearedSessionCookie, sessionCookie } from "../auth/token.ts";
@@ -37,9 +37,35 @@ export default async function accessRoutes(app: FastifyInstance, { ctx }: RouteP
 
 	app.get(routes.access, async (request): Promise<AccessStatus> => access.status(request.access));
 
-	app.patch(routes.access, async (request): Promise<AccessStatus> => {
-		if (request.access.via !== "loopback") throw new ApiError(403, "loopback_only", LOOPBACK_ONLY);
-		access.updateConfig(UpdateAccessBody.parse(request.body));
+	app.patch(routes.access, async (request, reply): Promise<AccessStatus> => {
+		const { password, ...patch } = UpdateAccessBody.parse(request.body);
+		const via = request.access.via;
+		if (via === "remote") {
+			// How the UI itself is exposed (on/off, session lifetime) stays with the person at the machine.
+			if (patch.remoteUiEnabled !== undefined || patch.sessionTtlHours !== undefined) throw new ApiError(403, "loopback_only", LOOPBACK_ONLY);
+			// Switching a machine tool ON from a signed-in remote session needs the owner password in the same request; OFF never does.
+			if (patch.remoteTerminalEnabled === true || patch.remoteBrowserEnabled === true) {
+				const session = request.access.session;
+				if (!session) throw new ApiError(401, "auth_required", "Sign in to continue");
+				if (!password) throw ApiError.badRequest("password is required to switch this on from a remote session");
+				const matched = await throttled(reply, () => access.verifyOwnerPassword(clientOf(request), password));
+				if (!matched) throw new ApiError(401, "invalid_credentials", "Invalid password");
+				access.updateConfig(patch, via);
+				access.elevate(session);
+				return access.status(request.access);
+			}
+		}
+		access.updateConfig(patch, via);
+		return access.status(request.access);
+	});
+
+	app.post(routes.accessStepUp, async (request, reply): Promise<AccessStatus> => {
+		const session = request.access.session;
+		if (request.access.via !== "remote" || !session) throw new ApiError(409, "step_up_not_required", "No re-entry of the password is needed on the local UI");
+		const body = StepUpBody.parse(request.body);
+		const matched = await throttled(reply, () => access.verifyOwnerPassword(clientOf(request), body.password));
+		if (!matched) throw new ApiError(403, "invalid_credentials", "Invalid password");
+		access.elevate(session);
 		return access.status(request.access);
 	});
 

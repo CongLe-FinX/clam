@@ -3,25 +3,33 @@ import { LOCAL_API_PREFIX } from "@clam/contracts";
 import fastify, { LogController, type FastifyInstance } from "fastify";
 import type { ServerContext } from "./context.ts";
 import accessRoutes from "./api/access.ts";
+import browserRoutes from "./api/browser.ts";
 import agentRoutes from "./api/agents.ts";
+import contextRoutes from "./api/contexts.ts";
+import handoffRoutes from "./api/handoffs.ts";
 import fsRoutes from "./api/fs.ts";
 import githubRoutes from "./api/github.ts";
 import gitRoutes from "./api/git.ts";
 import networkRoutes from "./api/network.ts";
 import nodeRoutes from "./api/node.ts";
 import ompRoutes from "./api/omp.ts";
+import projectFileRoutes from "./api/project-files.ts";
 import projectRoutes from "./api/projects.ts";
 import sessionRoutes from "./api/sessions.ts";
 import sharedRoutes from "./api/shared.ts";
 import meshUsageRoutes from "./api/usage-mesh.ts";
 import usageProviderRoutes from "./api/usage-provider.ts";
 import taskRoutes from "./api/tasks.ts";
+import terminalRoutes from "./api/terminal.ts";
 import workspaceRoutes from "./api/workspaces.ts";
 import { installLoopbackGate, installRemoteGate } from "./auth/gate.ts";
 import { installErrorHandler, sendNotFound } from "./http/error-handler.ts";
 import { installHostGuard } from "./http/host-guard.ts";
+import { installBoundedClose } from "./http/shutdown.ts";
 import { registerStaticWeb } from "./http/static.ts";
 import { registerWebSocketHub } from "./ws/hub.ts";
+import { registerTerminalSocket } from "./ws/terminal.ts";
+import { registerBrowserSocket } from "./ws/browser.ts";
 
 /** JSON bodies of the UI API (file writes, prompts with attachments). The wire listener's own limit is smaller and applies only to `/api/v1`. */
 const UI_BODY_LIMIT = 2 * 1024 * 1024;
@@ -36,6 +44,7 @@ const LOCAL_API_PLUGINS = [
 	nodeRoutes,
 	workspaceRoutes,
 	projectRoutes,
+	projectFileRoutes,
 	fsRoutes,
 	agentRoutes,
 	sessionRoutes,
@@ -47,6 +56,10 @@ const LOCAL_API_PLUGINS = [
 	networkRoutes,
 	taskRoutes,
 	sharedRoutes,
+	contextRoutes,
+	handoffRoutes,
+	terminalRoutes,
+	browserRoutes,
 ];
 
 /**
@@ -77,6 +90,8 @@ export async function registerUiSurface(app: FastifyInstance, ctx: ServerContext
 
 		await ui.register(compress, { global: true, threshold: 1024, encodings: ["br", "gzip"] });
 		await registerWebSocketHub(ui, ctx);
+		registerTerminalSocket(ui, ctx);
+		registerBrowserSocket(ui, ctx);
 		for (const plugin of LOCAL_API_PLUGINS) await ui.register(plugin, { prefix: LOCAL_API_PREFIX, ctx });
 		if (options.remote) {
 			// An unknown `/api/local/*` must be as invisible to a signed-out caller as a real one: the gate answers 401 before this 404.
@@ -102,10 +117,11 @@ export async function buildApp(ctx: ServerContext): Promise<FastifyInstance> {
 
 	installHostGuard(app);
 	installErrorHandler(app);
+	installBoundedClose(app);
 	app.addHook("onSend", async (_request, reply) => {
 		reply.header("X-Content-Type-Options", "nosniff");
 		reply.header("Referrer-Policy", "no-referrer");
-		reply.header("Content-Security-Policy", "frame-ancestors 'none'");
+		if (!reply.hasHeader("Content-Security-Policy")) reply.header("Content-Security-Policy", "frame-ancestors 'none'");
 		return undefined;
 	});
 	app.addHook("onResponse", async (request, reply) => {

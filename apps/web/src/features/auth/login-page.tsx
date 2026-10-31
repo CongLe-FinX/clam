@@ -26,7 +26,7 @@ function toLoginError(e: unknown): LoginError {
 			return { message: "Too many attempts. Sign-in is locked for a moment.", retryAfter };
 		}
 		if (e.code === "invalid_credentials") return { message: "Wrong password. Check it and try again." };
-		if (e.code === "forbidden_origin") return { message: "This address is not allowed to sign in. Open the node's own public URL." };
+		if (e.code === "forbidden_origin") return { message: "This address is not allowed to sign in. Open the machine's own public URL." };
 		if (e.code === "network") return { message: e.message };
 		return { message: e.message };
 	}
@@ -116,7 +116,7 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 								Sign in to <span className="font-medium text-foreground">{a.nodeName}</span>
 							</p>
 						) : access.isError ? (
-							<p className="mt-1 text-sm text-muted-foreground">Sign in to this node</p>
+							<p className="mt-1 text-sm text-muted-foreground">Sign in to this machine</p>
 						) : (
 							<Skeleton className="mx-auto mt-1 h-5 w-40" />
 						)}
@@ -128,7 +128,7 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 						<div role="alert" className="flex items-start gap-2.5 text-sm text-danger">
 							<AlertTriangle className="mt-0.5 size-4 shrink-0" />
 							<div className="space-y-2">
-								<p>{access.error instanceof Error ? access.error.message : "Cannot reach this node."}</p>
+								<p>{access.error instanceof Error ? access.error.message : "Cannot reach this machine."}</p>
 								<Button size="sm" variant="outline" onClick={() => access.refetch()}>
 									Retry
 								</Button>
@@ -139,13 +139,13 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 							<ShieldAlert className="mt-0.5 size-4 shrink-0 text-warning" />
 							<p className="text-muted-foreground">
 								{disabledReason === "no-password"
-									? "No owner password is set on this node yet. Set one in Settings → Security on the computer where this node runs, then sign in here."
-									: "Remote access to this node's web UI is turned off. Turn it on in Settings → Security on the computer where this node runs."}
+									? "No owner password is set on this machine yet. Set one in Settings → Security on the computer where this machine runs, then sign in here."
+									: "Remote access to this machine's web UI is turned off. Turn it on in Settings → Security on the computer where this machine runs."}
 							</p>
 						</div>
 					) : (
 						<form onSubmit={submit} className="space-y-4" noValidate>
-							{/* Lets password managers pair the credential with this node. */}
+							{/* Lets password managers pair the credential with this machine. */}
 							<input type="text" name="username" autoComplete="username" value={a?.nodeName ?? "owner"} readOnly hidden />
 							<div className="flex flex-col gap-1.5">
 								<label htmlFor="owner-password" className="text-xs font-medium text-muted-foreground">
@@ -209,7 +209,7 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 							{shortFingerprint(a.fingerprint)}
 						</span>
 					) : null}
-					<p>Owner access only. This node's agent-to-agent API is separate and never uses this password.</p>
+					<p>Owner access only. This machine's agent-to-agent API is separate and never uses this password.</p>
 				</div>
 			</main>
 		</div>

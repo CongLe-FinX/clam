@@ -1,4 +1,4 @@
-import { type ActivityItem, type Task, type TaskConstraints, type TaskDeliverAs, type TaskDetail, type TaskEvent, type TaskMessage, routes } from "@clam/contracts";
+import { type ActivityItem, type FilesApplyResult, type FilesPreview, type Task, type TaskConstraints, type TaskDeliverAs, type TaskDetail, type TaskEvent, type TaskMessage, routes } from "@clam/contracts";
 import { type InfiniteData, type QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
@@ -13,10 +13,16 @@ type DecideBody = { decision: "accept"; projectId?: string; agentId?: string } |
 export interface CreateTaskInput {
 	targetNodeId: string;
 	targetAgentId?: string;
-	projectId: string;
+	/** Needed when there is no project (a project implies its workspace). */
+	workspaceId?: string;
+	/** Optional: without a project the executor runs in a fresh folder (deliverAs summary/files). */
+	projectId?: string;
 	title: string;
 	description: string;
-	deliverAs: TaskDeliverAs;
+	/** Omit to let the server pick (`branch` for a project with a GitHub repository, else `files`). */
+	deliverAs?: TaskDeliverAs;
+	/** Project-relative files/folders sent along as input. */
+	inputPaths?: string[];
 	baseBranch?: string;
 	constraints: TaskConstraints;
 }
@@ -86,9 +92,38 @@ export function useCreateTask() {
 			qc.setQueryData<Task[]>(qk.tasks, (d) => (d ? [t, ...d.filter((x) => x.id !== t.id)] : d));
 			void qc.invalidateQueries({ queryKey: qk.tasks });
 			toast.success(`Delegated “${t.title}” to ${t.executor.agentName ? `${t.executor.agentName}@` : ""}${t.executor.nodeName}`, {
-				description: t.delivery.state === "pending" ? "It will be delivered as soon as the node is reachable." : undefined,
+				description: t.delivery.state === "pending" ? "It will be delivered as soon as the machine is reachable." : undefined,
 			});
 			void navigate({ to: "/tasks/$taskId", params: { taskId: t.id } });
+		},
+	});
+}
+
+/** deliverAs = files: the result bundle compared with a local project (new / update / conflict / unchanged + diffs). */
+export function useTaskFilesPreview(taskId: string, projectId: string) {
+	return useQuery({
+		queryKey: qk.taskFilesPreview(taskId, projectId),
+		queryFn: ({ signal }) => api.get<FilesPreview>(routes.taskFilesPreview(taskId), { projectId }, { signal }),
+		enabled: projectId !== "",
+		// A preview is a snapshot of local files: never reuse a stale one when the dialog reopens.
+		staleTime: 0,
+		gcTime: 0,
+		retry: false,
+	});
+}
+
+export function useApplyTaskFiles(taskId: string) {
+	const qc = useQueryClient();
+	return useMutation({
+		mutationFn: (body: { projectId: string; paths?: string[]; overwrite: string[] }) => api.post<FilesApplyResult>(routes.taskFilesApply(taskId), body),
+		onSuccess: (r, vars) => {
+			toast.success(`Applied ${r.written.length} ${r.written.length === 1 ? "file" : "files"}`, {
+				description: r.skipped.length > 0 ? `${r.skipped.length} skipped.` : undefined,
+			});
+			void qc.invalidateQueries({ queryKey: qk.task(taskId) });
+			void qc.invalidateQueries({ queryKey: qk.tasks });
+			void qc.invalidateQueries({ queryKey: qk.taskFilesPreview(taskId, vars.projectId) });
+			void qc.invalidateQueries({ queryKey: ["local", "project", vars.projectId, "files"] });
 		},
 	});
 }

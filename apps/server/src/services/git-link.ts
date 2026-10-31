@@ -2,6 +2,7 @@ import type { RepositoryRef } from "@clam/contracts";
 import { projects } from "@clam/database";
 import { eq } from "drizzle-orm";
 import type { ServerContext } from "../context.ts";
+import { projectVcs } from "./project-folders.ts";
 
 /** GitHub metadata is a courtesy at project creation: never hold the request longer than this. */
 const METADATA_TIMEOUT_MS = 5000;
@@ -16,6 +17,8 @@ export async function autoLinkRepository(ctx: ServerContext, projectId: string):
 	try {
 		const row = ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
 		if (!row || row.repository) return;
+		// Only a repository root links: a plain or managed folder nested in some other repository must not inherit its origin.
+		if (projectVcs(row.path) !== "git") return;
 		const remote = await ctx.git.githubRemote(row.path);
 		if (!remote) return;
 		const account = ctx.github.listAccounts().find((a) => a.isDefault) ?? null;

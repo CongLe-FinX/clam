@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Layers, ListChecks, Menu, Settings, TerminalSquare, Command } from "lucide-react";
+import { LayoutDashboard, Layers, ListChecks, Menu, MessageSquarePlus, MessagesSquare, Settings, Command } from "lucide-react";
 import { taskNeedsAttention, useTasks } from "@/lib/queries";
 import { useUi } from "@/lib/store";
 import { Button } from "@/ui/button";
@@ -9,24 +9,32 @@ const titles: Record<string, string> = {
 	"": "Overview",
 	workspaces: "Workspaces",
 	projects: "Project",
-	node: "My Node",
+	node: "My Machine",
 	network: "Agent Network",
 	settings: "Settings",
 	tasks: "Tasks",
 	shared: "Shared sessions",
+	handoffs: "Handoffs",
+	chats: "Chats",
+	terminal: "Terminal",
+	browser: "Browser",
 };
 
 export function MobileTopBar() {
 	const setDrawer = useUi((s) => s.setDrawerOpen);
 	const setPalette = useUi((s) => s.setPaletteOpen);
+	const openDialog = useUi((s) => s.openDialog);
 	const seg = useRouterState({ select: (s) => s.location.pathname.split("/")[1] ?? "" });
 	return (
-		<header className="flex h-12 shrink-0 items-center gap-1 border-b bg-surface-1 px-2 pt-safe">
+		<header className="flex h-[calc(3rem+env(safe-area-inset-top))] shrink-0 items-center gap-1 border-b bg-surface-1 px-2 pt-safe coarse:h-[calc(3.5rem+env(safe-area-inset-top))]">
 			<Button variant="ghost" size="icon" aria-label="Open navigation" onClick={() => setDrawer(true)}>
 				<Menu />
 			</Button>
 			<Logo className="size-6" />
 			<span className="flex-1 truncate pl-1 text-sm font-semibold tracking-tight">{titles[seg] ?? "CL Agent Mesh"}</span>
+			<Button variant="soft" size="icon" aria-label="New chat" onClick={() => openDialog({ kind: "new-chat" })}>
+				<MessageSquarePlus />
+			</Button>
 			<Button variant="ghost" size="icon" aria-label="Command palette" onClick={() => setPalette(true)}>
 				<Command />
 			</Button>
@@ -38,7 +46,7 @@ export function MobileTopBar() {
 const tabs = [
 	{ to: "/", label: "Overview", icon: LayoutDashboard, exact: true },
 	{ to: "/workspaces", label: "Workspaces", icon: Layers },
-	{ to: "/node/sessions", label: "Sessions", icon: TerminalSquare },
+	{ to: "/chats", label: "Chats", icon: MessagesSquare },
 	{ to: "/tasks", label: "Tasks", icon: ListChecks },
 	{ to: "/settings", label: "Settings", icon: Settings },
 ] as const;

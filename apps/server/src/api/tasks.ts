@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { CancelTaskBody, CreateTaskBody, DecideTaskBody, PostTaskMessageBody, TaskListQuery, routes, type ActivityItem, type Task, type TaskDetail, type TaskMessage } from "@clam/contracts";
+import { ApplyFilesBody, CancelTaskBody, CreateTaskBody, DecideTaskBody, PostTaskMessageBody, TaskListQuery, routes, type ActivityItem, type Task, type TaskDetail, type TaskMessage } from "@clam/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { RoutePluginOptions } from "../context.ts";
@@ -9,6 +9,7 @@ import { fetchExecutorArtifact, sendArtifact } from "../tasks/artifact-proxy.ts"
 
 const IdParams = z.object({ id: z.string().min(1).max(128) });
 const ArtifactParams = IdParams.extend({ artifactId: z.string().min(1).max(128) });
+const PreviewQuery = z.object({ projectId: z.string().min(1) });
 const ActivityQuery = z.object({
 	workspaceId: z.string().min(1).optional(),
 	limit: z.coerce.number().int().min(1).max(ACTIVITY_MAX_LIMIT).optional(),
@@ -31,6 +32,10 @@ export default async function taskRoutes(app: FastifyInstance, { ctx }: RoutePlu
 		return reply.status(201).send(message);
 	});
 
+	// Result files of a task without git (deliverAs files): what applying them to a local project would do, then do it. Never overwrites a locally changed file unless listed.
+	app.get(routes.taskFilesPreview(":id"), async (req) => tasks.filesPreview(IdParams.parse(req.params).id, PreviewQuery.parse(req.query).projectId));
+	app.post(routes.taskFilesApply(":id"), async (req) => tasks.filesApply(IdParams.parse(req.params).id, ApplyFilesBody.parse(req.body)));
+
 	app.post(routes.taskDecide(":id"), async (req): Promise<Task> => tasks.decide(IdParams.parse(req.params).id, DecideTaskBody.parse(req.body)));
 	app.post(routes.taskCancel(":id"), async (req): Promise<Task> => {
 		const { id } = IdParams.parse(req.params);
@@ -47,7 +52,7 @@ export default async function taskRoutes(app: FastifyInstance, { ctx }: RoutePlu
 	app.get(routes.taskArtifact(":id", ":artifactId"), { compress: false }, async (req, reply) => {
 		const params = ArtifactParams.parse(req.params);
 		const row = tasks.store.get(params.id);
-		const listed = row.result?.artifacts.find((a) => a.artifactId === params.artifactId);
+		const listed = row.result?.artifacts.find((a) => a.artifactId === params.artifactId) ?? (row.result?.files?.artifactId === params.artifactId ? { ...row.result.files, name: "result-files.tar.gz" } : undefined);
 		if (!listed) throw ApiError.notFound("Artifact");
 		if (row.direction === "outgoing") {
 			const bytes = await fetchExecutorArtifact(ctx, row, listed);

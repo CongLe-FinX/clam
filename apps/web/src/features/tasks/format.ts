@@ -43,14 +43,14 @@ export function columnOf(status: TaskStatus): BoardColumn {
 const TERMINAL: Record<string, true> = { rejected: true, succeeded: true, failed: true, cancelled: true, handed_off: true };
 export const isTerminal = (status: TaskStatus): boolean => TERMINAL[status] === true;
 
-/** The node on the other end of the task, from this node's point of view. */
+/** The machine on the other end of the task, from this machine's point of view. */
 export const otherParty = (t: Task): TaskParty => (t.direction === "incoming" ? t.sender : t.executor);
 /** The party that lives on THIS node (session links are only meaningful for it). */
 export const ownParty = (t: Task): TaskParty => (t.direction === "incoming" ? t.executor : t.sender);
 
 export const partyLabel = (p: TaskParty): string => (p.agentName ? `${p.agentName}@${p.nodeName}` : p.nodeName);
 
-/** Loop guard: agent-authored messages each node allows per task (docs/architecture.md, M4). */
+/** Loop guard: agent-authored messages each machine allows per task (docs/architecture.md, M4). */
 export const AGENT_MESSAGE_LIMIT = 12;
 
 /** `https://github.com/Owner/Repo(.git)` · `git@github.com:Owner/Repo.git` → `owner/repo` (lower-case), else null. */

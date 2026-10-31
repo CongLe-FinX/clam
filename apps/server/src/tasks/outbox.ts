@@ -112,6 +112,8 @@ export class OutboxService implements OutboxApi {
 				const item = store.outboxRow(due.id);
 				// Settled meanwhile: cascaded dead/cancelled, or reconciled by the mirror.
 				if (!item || item.state !== "pending") continue;
+				// Retargeted to another peer while this pass ran (`followExecutor`): that peer's pass delivers it.
+				if (item.peerId !== peerId) continue;
 				const peer = ctx.network.peers.row(peerId);
 				if (!peer || (peer.status !== "online" && peer.status !== "degraded")) return;
 				if (this.blockedByEarlier(item)) continue;
@@ -181,8 +183,9 @@ export class OutboxService implements OutboxApi {
 			this.handlers.get(item.kind)?.retrying?.(item);
 			return true;
 		}
-		store.updateOutbox(item.id, { state: "dead", lastError, lastStatus: error.status });
-		this.died(item, lastError);
+		// The handlers see the settled row (`lastStatus` of THIS failure): the handoff kinds branch on 409 (stale epoch) and the like.
+		const settled = store.updateOutbox(item.id, { state: "dead", lastError, lastStatus: error.status });
+		this.died(settled ?? { ...item, state: "dead", lastError, lastStatus: error.status }, lastError);
 		return true;
 	}
 

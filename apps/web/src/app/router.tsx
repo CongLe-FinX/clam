@@ -3,6 +3,7 @@ import { createRootRouteWithContext, createRoute, createRouter, lazyRouteCompone
 import { routes } from "@clam/contracts";
 import { api } from "@/lib/api";
 import { qk } from "@/lib/queries";
+import { hk } from "@/features/handoff/api.ts";
 import { RootGate } from "@/features/auth/root-gate.tsx";
 import { NotFound, RouteError } from "./route-states.tsx";
 
@@ -70,6 +71,41 @@ const workspaceActivityRoute = createRoute({
 	path: "$workspaceId/activity",
 	component: lazyRouteComponent(() => import("@/features/tasks/activity-page.tsx")),
 });
+const CONTEXT_TYPES = ["memory", "plan", "decision", "summary", "note"] as const;
+export interface ContextSearch {
+	/** Selected context (list → detail on mobile). */
+	id?: string;
+	type?: (typeof CONTEXT_TYPES)[number];
+	q?: string;
+	/** Filter: project id, or "workspace" for workspace-wide contexts. */
+	project?: string;
+	/** Open the editor for a new context. */
+	new?: "1";
+}
+const workspaceContextRoute = createRoute({
+	getParentRoute: () => workspacesRoute,
+	path: "$workspaceId/context",
+	validateSearch: (s: Record<string, unknown>): ContextSearch => ({
+		id: typeof s.id === "string" && s.id ? s.id : undefined,
+		type: CONTEXT_TYPES.find((t) => t === s.type),
+		q: typeof s.q === "string" && s.q ? s.q : undefined,
+		project: typeof s.project === "string" && s.project ? s.project : undefined,
+		new: s.new === "1" || s.new === 1 ? "1" : undefined,
+	}),
+	loader: ({ context: { queryClient: qc }, params }) => {
+		prefetch(qc, qk.contexts({ workspaceId: params.workspaceId }), routes.contexts, { workspaceId: params.workspaceId });
+	},
+	component: lazyRouteComponent(() => import("@/features/context/context-page.tsx")),
+});
+const workspaceMembersRoute = createRoute({
+	getParentRoute: () => workspacesRoute,
+	path: "$workspaceId/members",
+	validateSearch: (s: Record<string, unknown>): { add?: "1" } => ({ add: s.add === "1" || s.add === 1 ? "1" : undefined }),
+	loader: ({ context: { queryClient: qc }, params }) => {
+		prefetch(qc, qk.members(params.workspaceId), routes.workspaceMembers(params.workspaceId));
+	},
+	component: lazyRouteComponent(() => import("@/features/workspaces/members-page.tsx")),
+});
 const tasksRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/tasks",
@@ -96,9 +132,9 @@ const agentsRoute = createRoute({
 const projectRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/projects/$projectId",
-	validateSearch: (s: Record<string, unknown>): { file?: string; tab?: "git" } => ({
+	validateSearch: (s: Record<string, unknown>): { file?: string; tab?: "git" | "context" } => ({
 		file: typeof s.file === "string" && s.file ? s.file : undefined,
-		tab: s.tab === "git" ? "git" : undefined,
+		tab: s.tab === "git" ? "git" : s.tab === "context" ? "context" : undefined,
 	}),
 	loader: ({ context: { queryClient: qc }, params }) => {
 		prefetch(qc, qk.project(params.projectId), routes.project(params.projectId));
@@ -115,6 +151,12 @@ const sessionRoute = createRoute({
 		prefetch(qc, qk.session(params.sessionId), routes.session(params.sessionId));
 	},
 	component: lazyRouteComponent(() => import("@/features/session/session-page.tsx")),
+});
+
+const chatsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/chats",
+	component: lazyRouteComponent(() => import("@/features/chats/chats-page.tsx")),
 });
 
 const nodeRoute = createRoute({ getParentRoute: () => rootRoute, path: "/node", component: Outlet });
@@ -138,6 +180,28 @@ const nodeRuntimeRoute = createRoute({
 	getParentRoute: () => nodeRoute,
 	path: "runtime",
 	component: lazyRouteComponent(() => import("@/features/node/runtime-page.tsx")),
+});
+
+// `t`: the selected terminal (survives a reload); `project`: open (or reuse) a terminal in that project's folder on arrival.
+const terminalRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/terminal",
+	validateSearch: (s: Record<string, unknown>): { t?: string; project?: string } => ({
+		t: typeof s.t === "string" && s.t ? s.t : undefined,
+		project: typeof s.project === "string" && s.project ? s.project : undefined,
+	}),
+	component: lazyRouteComponent(() => import("@/features/terminal/terminal-page.tsx")),
+});
+
+// `url`: open this URL in a new Browser tab on arrival (then stripped); `tab`: the tab to show.
+const browserRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/browser",
+	validateSearch: (s: Record<string, unknown>): { url?: string; tab?: string } => ({
+		url: typeof s.url === "string" && s.url ? s.url : undefined,
+		tab: typeof s.tab === "string" && s.tab ? s.tab : undefined,
+	}),
+	component: lazyRouteComponent(() => import("@/features/browser/browser-page.tsx")),
 });
 
 const networkRoute = createRoute({ getParentRoute: () => rootRoute, path: "/network", component: Outlet });
@@ -180,6 +244,23 @@ const sharedRoute = createRoute({
 	component: lazyRouteComponent(() => import("@/features/shared/shared-page.tsx")),
 });
 
+const handoffsRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/handoffs",
+	loader: ({ context: { queryClient: qc } }) => {
+		prefetch(qc, hk.all, routes.handoffs);
+	},
+	component: lazyRouteComponent(() => import("@/features/handoff/center-page.tsx")),
+});
+const handoffRoute = createRoute({
+	getParentRoute: () => rootRoute,
+	path: "/handoffs/$handoffId",
+	loader: ({ context: { queryClient: qc }, params }) => {
+		prefetch(qc, hk.detail(params.handoffId), routes.handoff(params.handoffId));
+	},
+	component: lazyRouteComponent(() => import("@/features/handoff/detail-page.tsx")),
+});
+
 const settingsRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/settings",
@@ -203,15 +284,20 @@ const settingsChildren = [
 const routeTree = rootRoute.addChildren([
 	loginRoute,
 	overviewRoute,
-	workspacesRoute.addChildren([workspacesIndexRoute, workspaceRoute, workspaceAgentsRoute, workspaceTasksRoute, workspaceActivityRoute]),
+	workspacesRoute.addChildren([workspacesIndexRoute, workspaceRoute, workspaceAgentsRoute, workspaceTasksRoute, workspaceActivityRoute, workspaceContextRoute, workspaceMembersRoute]),
 	agentsRoute,
 	tasksRoute,
 	taskRoute,
 	projectRoute,
 	sessionRoute,
+	chatsRoute,
 	nodeRoute.addChildren([nodeIndexRoute, nodeSessionsRoute, nodeProjectsRoute, nodeGitRoute, nodeRuntimeRoute]),
+	terminalRoute,
+	browserRoute,
 	networkRoute.addChildren([networkIndexRoute, networkNodesRoute, networkPeerRoute, networkAgentsRoute]),
 	sharedRoute,
+	handoffsRoute,
+	handoffRoute,
 	settingsRoute.addChildren([settingsIndexRoute, ...settingsChildren]),
 ]);
 

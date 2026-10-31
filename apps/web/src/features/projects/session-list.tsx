@@ -190,7 +190,7 @@ export function SessionList({
 				title="Delete session?"
 				description={
 					<>
-						<span className="font-medium text-foreground">{pendingDelete?.title || "Untitled session"}</span> and its history will be permanently removed from this node.
+						<span className="font-medium text-foreground">{pendingDelete?.title || "Untitled session"}</span> and its history will be permanently removed from this machine.
 					</>
 				}
 				confirmLabel="Delete"

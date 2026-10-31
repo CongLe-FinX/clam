@@ -76,7 +76,7 @@ export function SettingsLayout() {
 							>
 								<ChevronLeft className="size-4" />
 								Settings
-								<span className="mx-1 text-border-strong">/</span>
+								<span aria-hidden className="mx-1 text-subtle">/</span>
 								<span className="font-medium text-foreground">{current.label}</span>
 							</Link>
 						)}

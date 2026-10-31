@@ -81,6 +81,28 @@ function backupBeforeMigrating(sqlite: Database.Database, file: string, keep: nu
 }
 
 /**
+ * Run the committed migrations with foreign key enforcement off. SQLite cannot relax a column constraint in place, so
+ * drizzle-kit rebuilds such tables (`CREATE __new_x`, copy, `DROP x`, rename) and emits `PRAGMA foreign_keys=OFF` for it,
+ * but the migrator runs inside a transaction, where that pragma does nothing: with enforcement on, `DROP TABLE tasks`
+ * would cascade-delete every task event, message and artifact. The pragma therefore has to be set here, outside the
+ * transaction, and the result is checked afterwards (the procedure of https://sqlite.org/lang_altertable.html#otheralter):
+ * a migration that leaves more dangling references than it found is an error (its transaction has committed, so the
+ * pre-migration snapshot is the way back).
+ */
+function migrateWithForeignKeysOff(db: ClamDb, sqlite: Database.Database, migrationsFolder: string): void {
+	const violations = () => (sqlite.pragma("foreign_key_check") as unknown[]).length;
+	sqlite.pragma("foreign_keys = OFF");
+	try {
+		const before = violations();
+		migrate(db, { migrationsFolder });
+		const after = violations();
+		if (after > before) throw new Error(`A database migration left ${after - before} foreign key violation(s); restore the pre-migration backup next to the database file`);
+	} finally {
+		sqlite.pragma("foreign_keys = ON");
+	}
+}
+
+/**
  * Open (creating if needed) the node database: WAL, foreign keys, busy timeout, committed migrations applied.
  * Before pending migrations touch an existing non-empty file it is snapshotted to
  * `<file>.pre-migrate-<timestamp>.bak` (last 3 kept); if the snapshot fails the migration is not attempted.
@@ -98,7 +120,7 @@ export function openDatabase(options: OpenDatabaseOptions): ClamDb {
 		if (options.file !== ":memory:" && hasPendingMigrationsOnExistingData(sqlite, migrationsFolder)) {
 			backupBeforeMigrating(sqlite, options.file, options.keepMigrationBackups ?? DEFAULT_KEPT_BACKUPS);
 		}
-		migrate(db, { migrationsFolder });
+		migrateWithForeignKeysOff(db, sqlite, migrationsFolder);
 		return db;
 	} catch (error) {
 		sqlite.close();

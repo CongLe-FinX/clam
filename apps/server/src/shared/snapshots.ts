@@ -10,6 +10,9 @@ import type { ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
 import { errorText } from "../network/util.ts";
 
+/** What a checkpoint stores per node: the OMP session snapshot, and (files mode) the folder bundle. */
+export type BlobKind = "snapshot" | "files";
+
 /** What a snapshot download needs to know about the snapshot it expects (from the checkpoint notice). */
 export interface ExpectedSnapshot {
 	sha256: string;
@@ -31,8 +34,18 @@ export class SnapshotFiles {
 		this.root = path.resolve(dataDir, "shared");
 	}
 
-	relative(sharedId: string, seq: number): string {
-		return path.posix.join(sharedId, "snapshots", `${seq}.tar`);
+	relative(sharedId: string, seq: number, kind: BlobKind = "snapshot"): string {
+		return kind === "snapshot" ? path.posix.join(sharedId, "snapshots", `${seq}.tar`) : path.posix.join(sharedId, "files", `${seq}.tar.gz`);
+	}
+
+	/** Files mode: the manifest of the folder as it was at the last checkpoint this node made or applied (the base of local-edit detection). */
+	syncedManifest(sharedId: string): string {
+		return path.posix.join(sharedId, "synced-manifest.json");
+	}
+
+	/** Files mode: a rescue bundle (work of this node that the shared folder does not have). */
+	rescue(sharedId: string, epoch: number, label: string): string {
+		return path.posix.join(sharedId, "rescue", `${epoch}-${label}.tar.gz`);
 	}
 
 	/** Absolute path of a stored relative path; refuses anything that would leave the snapshot root. */
@@ -44,8 +57,8 @@ export class SnapshotFiles {
 	}
 
 	/** A fresh temporary file next to where the snapshot will live (same filesystem: the final move is a rename). */
-	async temporary(sharedId: string, label: string): Promise<string> {
-		const dir = path.join(this.root, sharedId, "snapshots");
+	async temporary(sharedId: string, label: string, kind: BlobKind | "rescue" = "snapshot"): Promise<string> {
+		const dir = path.join(this.root, sharedId, kind === "snapshot" ? "snapshots" : kind === "files" ? "files" : "rescue");
 		await mkdir(dir, { recursive: true, mode: 0o700 });
 		await chmod(this.root, 0o700).catch(() => {});
 		await chmod(path.join(this.root, sharedId), 0o700).catch(() => {});
@@ -53,8 +66,8 @@ export class SnapshotFiles {
 	}
 
 	/** Move a finished temporary file into place as `<seq>.tar` (mode 0600) and return its relative path. */
-	async place(tmp: string, sharedId: string, seq: number): Promise<string> {
-		const relative = this.relative(sharedId, seq);
+	async place(tmp: string, sharedId: string, seq: number, kind: BlobKind = "snapshot"): Promise<string> {
+		const relative = this.relative(sharedId, seq, kind);
 		await chmod(tmp, 0o600);
 		await rename(tmp, this.absolute(relative));
 		return relative;
@@ -92,11 +105,20 @@ export function digestHeader(sha256: string): string {
 	return `sha-256=:${Buffer.from(sha256, "hex").toString("base64")}:`;
 }
 
+/** Place a finished temporary file at an explicit relative path (rescue bundles). */
+export async function placeAt(files: SnapshotFiles, tmp: string, relative: string): Promise<string> {
+	await chmod(tmp, 0o600);
+	await rename(tmp, files.absolute(relative));
+	return relative;
+}
+
 export interface DownloadOptions {
 	/** Largest snapshot accepted (also checked against the announced size and `Content-Length`). */
 	maxBytes: number;
 	/** Abort when no byte arrived for this long. */
 	idleMs: number;
+	/** Called with every verified-so-far chunk before it is written (a download served to a client while it is stored); the transfer waits for it. */
+	onChunk?: (chunk: Buffer) => Promise<void> | void;
 }
 
 /**
@@ -108,15 +130,15 @@ export interface DownloadOptions {
 export async function downloadSnapshot(
 	ctx: Pick<ServerContext, "identity" | "config">,
 	peer: { url: string },
-	request: { sharedId: string; seq: number; expected: ExpectedSnapshot },
+	request: { sharedId: string; seq: number; expected: ExpectedSnapshot; kind?: BlobKind; /** Another blob of the shared session (`attachments/<id>`): replaces the snapshot/bundle path. */ blobPath?: string },
 	tmp: string,
 	options: DownloadOptions,
 ): Promise<void> {
 	const { expected } = request;
-	if (expected.size > options.maxBytes) throw new SnapshotRejectedError(`The snapshot (${expected.size} bytes) is larger than this node accepts (${options.maxBytes})`);
+	if (expected.size > options.maxBytes) throw new SnapshotRejectedError(`The ${request.kind === "files" ? "folder bundle" : "snapshot"} (${expected.size} bytes) is larger than this node accepts (${options.maxBytes})`);
 	const origin = normalizePeerUrl(peer.url, { allowLoopbackHttp: ctx.config.allowLoopbackPeers });
 	if (origin === null) throw ApiError.upstream("The node that holds the snapshot has no usable address");
-	const url = `${origin}${API_PREFIX}/shared/${encodeURIComponent(request.sharedId)}/snapshots/${request.seq}`;
+	const url = `${origin}${API_PREFIX}/shared/${encodeURIComponent(request.sharedId)}/${request.blobPath ?? `${request.kind === "files" ? "files" : "snapshots"}/${request.seq}`}`;
 	const headers = signRequest(signerFromIdentity(ctx.identity), { method: "GET", url, bodyBytes: new Uint8Array(0) });
 	const controller = new AbortController();
 	let idle: NodeJS.Timeout | undefined;
@@ -145,7 +167,7 @@ export async function downloadSnapshot(
 				received += chunk.length;
 				if (received > expected.size || received > options.maxBytes) return callback(new SnapshotRejectedError("The snapshot is larger than announced"));
 				hash.update(chunk);
-				callback(null, chunk);
+				Promise.resolve(options.onChunk?.(chunk)).then(() => callback(null, chunk), (error: unknown) => callback(error as Error));
 			},
 		});
 		try {

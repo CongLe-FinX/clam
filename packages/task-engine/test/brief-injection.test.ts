@@ -52,6 +52,17 @@ describe("brief", () => {
 		expect(b).not.toContain("END YOUR TURN");
 		expect(b).toContain("mesh_complete");
 	});
+	it("files brief without a repository", () => {
+		const b = buildBrief({ ...base, repo: null, deliverAs: "files", workBranch: null, baseBranch: null, inputFiles: { paths: ["notes.txt", "data/a.csv"], notReplaced: ["old.txt"] }, constraints: {}, priorMessages: [], canAskDelegator: true });
+		expect(b).toContain("## Working folder");
+		expect(b).not.toContain("## Repository");
+		expect(b).toContain("notes.txt, data/a.csv");
+		expect(b).toContain("NOT placed");
+		expect(b).toContain("old.txt");
+		expect(b).toContain("Deliver as: files");
+		expect(b).toContain("returns the files you created or changed");
+		expect(b).not.toContain("do NOT run git commit");
+	});
 	it("anonymous delegator", () => {
 		expect(buildBrief({ ...base, delegator: { agentName: null, nodeName: "n" } })).toContain("agent@n");
 	});

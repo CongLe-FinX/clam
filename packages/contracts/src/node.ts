@@ -51,6 +51,10 @@ export const NodeSettings = z.object({
 	approvalMode: z.enum(["always-ask", "always-ask-cached", "write", "yolo"]),
 	/** Start CL Agent Mesh when you log in to this computer. GET reports whether the OS login entry actually exists. */
 	autoStart: z.boolean(),
+	/** Setup policy when work arrives by handoff / hand-over / takeover: `ask` = show the setup commands for approval first, `auto` = run them (install + reviewed setup commands), `skip` = never run any. */
+	dependencySetup: z.enum(["ask", "auto", "skip"]),
+	/** Accept incoming task handoffs without asking (the target still verifies everything; it only skips the human decision). */
+	autoAcceptHandoffs: z.boolean(),
 	/** Read-only explanation of the OS login entry: where it lives, when it takes effect, why it is off. Ignored in PATCH. */
 	autoStartDetail: z.string().optional(),
 });

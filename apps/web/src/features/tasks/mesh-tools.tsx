@@ -51,7 +51,7 @@ export function meshSummary(name: string, args: unknown, rec: Rec | undefined): 
 			const m = result ? /task (\S+)(?: to ([^\s,.]+@?[^\s,]*))?/.exec(result) : null;
 			const taskId = !failed && result?.startsWith("Delegated") ? m?.[1] : undefined;
 			const target = m?.[2] ?? [arg(args, "agent", "agentName", "agentId"), arg(args, "node", "nodeName", "nodeId", "target")].filter(Boolean).join("@");
-			const headline = running ? `Delegating ‘${clip(title, 60)}’${target ? ` to ${target}` : ""}…` : failed || !taskId ? `Could not delegate ‘${clip(title, 60)}’` : `Delegated ‘${clip(title, 60)}’ to ${target || "another node"}`;
+			const headline = running ? `Delegating ‘${clip(title, 60)}’${target ? ` to ${target}` : ""}…` : failed || !taskId ? `Could not delegate ‘${clip(title, 60)}’` : `Delegated ‘${clip(title, 60)}’ to ${target || "another machine"}`;
 			return {
 				headline,
 				extra: taskId ? (

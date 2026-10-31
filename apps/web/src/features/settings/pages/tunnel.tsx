@@ -1,5 +1,5 @@
 import type { TunnelMode, TunnelState } from "@clam/contracts";
-import { AlertTriangle, CheckCircle2, CircleSlash, ExternalLink, KeyRound, Play, Square, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleSlash, Cloud, ExternalLink, KeyRound, Play, Square, Trash2, Zap } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { CopyIconButton } from "@/features/network/components";
@@ -33,9 +33,9 @@ const normalizeHostname = (raw: string): string => raw.trim().replace(/^[a-z][a-
 const HOSTNAME_RE = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/;
 
 const MODES: { id: TunnelMode; title: string; summary: string }[] = [
-	{ id: "off", title: "Off", summary: "Nothing is exposed. This node is reachable from this machine only; you can still join nodes that are reachable." },
-	{ id: "quick", title: "Quick tunnel", summary: "No Cloudflare account. You get a random https://….trycloudflare.com address that changes every time the tunnel starts; paired nodes are told the new address automatically. Meant for trying things out." },
-	{ id: "named", title: "Named tunnel", summary: "A stable hostname such as agentA.conglt.io.vn on your own Cloudflare account. Needs a tunnel token from the Cloudflare dashboard and a public hostname routed to this node." },
+	{ id: "off", title: "Off", summary: "Nothing is exposed. This machine is reachable from this machine only; you can still join machines that are reachable." },
+	{ id: "quick", title: "Quick tunnel", summary: "No Cloudflare account. You get a random https://….trycloudflare.com address that changes every time the tunnel starts; paired machines are told the new address automatically. Meant for trying things out." },
+	{ id: "named", title: "Named tunnel", summary: "A stable hostname such as agentA.conglt.io.vn on your own Cloudflare account. Needs a tunnel token from the Cloudflare dashboard and a public hostname routed to this machine." },
 ];
 
 const INSTALL_HINTS: { os: string; cmd: string; note?: string }[] = [
@@ -110,21 +110,39 @@ export default function TunnelPage() {
 
 	return (
 		<>
-			<PageIntro title="Cloudflare Tunnel" description="Lets other nodes reach this one over HTTPS without opening any port. The tunnel exposes the signed node-to-node API only — never this web interface." />
+			<PageIntro title="Cloudflare Tunnel" description="Lets other machines reach this one over HTTPS without opening any port. The tunnel exposes the signed machine-to-machine API only — never this web interface." />
 			<PageBody>
+				{t.config.mode === "off" && !busy && t.cloudflared.installed ? (
+					<div className="flex flex-wrap items-center gap-3 rounded-2xl bg-accent-soft p-4 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--accent)_40%,transparent)]">
+						<span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-accent-foreground">
+							<Zap className="size-5" />
+						</span>
+						<span className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
+							<strong className="text-[14px] font-semibold">Get an address in one click</strong>
+							<span className="text-[13px] text-muted-foreground">A quick tunnel needs no account and gives this machine a temporary https address, so another machine can pair with it. For a permanent address use a named tunnel below.</span>
+						</span>
+						<Button
+							variant="primary"
+							loading={actions.save.isPending || actions.start.isPending}
+							onClick={() => actions.save.mutate({ mode: "quick", autoStart: false }, { onSuccess: () => actions.start.mutate() })}
+						>
+							<Cloud /> Start a quick tunnel
+						</Button>
+					</div>
+				) : null}
 				<SettingsSection
 					title="Status"
 					actions={
-						<Badge variant={STATE_LABEL[t.state].variant} className="gap-1.5">
+						<Badge variant={actions.stop.isPending ? "warning" : STATE_LABEL[t.state].variant} className="gap-1.5">
 							<StatusDot status={t.state === "running" ? "online" : t.state === "error" ? "crashed" : t.state === "stopped" ? "offline" : "starting"} label={t.state} className="size-1.5 [&>span]:size-1.5" />
-							{STATE_LABEL[t.state].label}
+							{actions.stop.isPending ? "Stopping…" : STATE_LABEL[t.state].label}
 						</Badge>
 					}
 				>
 					<div className="flex flex-col gap-4">
 						{t.publicUrl ? (
 							<div className="flex flex-col gap-1.5 rounded-xl bg-surface-2 p-3.5 shadow-[inset_0_0_0_1px_var(--border-strong)]">
-								<span className="text-2xs font-semibold uppercase tracking-wider text-subtle">Public address of this node</span>
+								<span className="text-2xs font-semibold uppercase tracking-wider text-subtle">Public address of this machine</span>
 								<div className="flex flex-wrap items-center gap-2">
 									<span className="min-w-0 flex-1 select-all break-all font-mono text-[15px]">{t.publicUrl}</span>
 									<CopyButton value={t.publicUrl} />
@@ -134,7 +152,7 @@ export default function TunnelPage() {
 										</a>
 									</Button>
 								</div>
-								{t.config.mode === "quick" ? <p className="text-xs text-muted-foreground">Quick tunnel addresses change on every start. Connected nodes are informed automatically; for invitations always copy the current address.</p> : null}
+								{t.config.mode === "quick" ? <p className="text-xs text-muted-foreground">Quick tunnel addresses change on every start. Connected machines are informed automatically; for invitations always copy the current address.</p> : null}
 							</div>
 						) : null}
 						{t.lastError ? (
@@ -216,7 +234,7 @@ export default function TunnelPage() {
 					)}
 				</SettingsSection>
 
-				<SettingsSection title="Configuration" description="How this node is published. If the tunnel is running, saved changes restart it.">
+				<SettingsSection title="Configuration" description="How this machine is published. If the tunnel is running, saved changes restart it.">
 					<div className="flex flex-col gap-5">
 						<div role="radiogroup" aria-label="Tunnel mode" className="grid gap-2.5 md:grid-cols-3">
 							{MODES.map((m) => {
@@ -305,7 +323,7 @@ export default function TunnelPage() {
 						<label className="flex min-h-11 items-center justify-between gap-4">
 							<span className="flex flex-col">
 								<span className="text-[13px] font-medium">Start automatically</span>
-								<span className="text-xs text-muted-foreground">Start the tunnel whenever this node's server starts.</span>
+								<span className="text-xs text-muted-foreground">Start the tunnel whenever this machine's server starts.</span>
 							</span>
 							<Switch checked={d.autoStart} onCheckedChange={(v) => patch({ autoStart: v })} disabled={d.mode === "off"} aria-label="Start automatically" />
 						</label>

@@ -28,7 +28,7 @@ export function DirectionChip({ direction }: { direction: Task["direction"] }) {
 	);
 }
 
-/** Connection status of a node as this node sees it (`self` for the local node). */
+/** Connection status of a machine as this machine sees it (`self` for the local node). */
 export function useNodeStatus(nodeId: string): PeerStatus | "self" | "unknown" {
 	const self = useNode().data?.id;
 	const peers = usePeers().data;
@@ -39,11 +39,11 @@ export function useNodeStatus(nodeId: string): PeerStatus | "self" | "unknown" {
 export function NodeDot({ nodeId, className }: { nodeId: string; className?: string }) {
 	const status = useNodeStatus(nodeId);
 	const dot = status === "self" ? "online" : status === "unknown" ? "offline" : PEER_DOT[status];
-	const label = status === "self" ? "This node" : status === "unknown" ? "Status unknown" : PEER_STATUS_LABEL[status];
+	const label = status === "self" ? "This machine" : status === "unknown" ? "Status unknown" : PEER_STATUS_LABEL[status];
 	return <StatusDot status={dot} label={label} className={className} />;
 }
 
-/** `Agent@Node` with the node's status dot. */
+/** `Agent@Node` with the machine's status dot. */
 export function PartyChip({ party, mine, role = "executor", className }: { party: TaskParty; mine?: boolean; /** A sender without an agent is a person who delegated from the UI; an executor without one is "any agent". */ role?: "sender" | "executor"; className?: string }) {
 	return (
 		<span className={cn("inline-flex min-w-0 items-center gap-1.5", className)}>
@@ -53,12 +53,12 @@ export function PartyChip({ party, mine, role = "executor", className }: { party
 				{party.agentName ? <span className="font-medium text-foreground">{party.agentName}</span> : <span className="italic text-subtle">{role === "sender" ? "a person" : "any agent"}</span>}
 				<span className="text-muted-foreground">@{party.nodeName}</span>
 			</span>
-			{mine ? <span className="rounded bg-surface-3 px-1 text-2xs text-subtle">this node</span> : null}
+			{mine ? <span className="rounded bg-surface-3 px-1 text-2xs text-subtle">this machine</span> : null}
 		</span>
 	);
 }
 
-/** Delivery of the task / of a message to the other node (outbox state). */
+/** Delivery of the task / of a message to the other machine (outbox state). */
 export function DeliveryMark({ state, className }: { state: "local" | "pending" | "delivered" | "failed"; className?: string }) {
 	if (state === "local") return null;
 	const map = {

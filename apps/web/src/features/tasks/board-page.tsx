@@ -74,7 +74,7 @@ export default function TaskBoardPage() {
 				<PageHeader
 					eyebrow={workspaceId ? <Link to="/workspaces/$workspaceId" params={{ workspaceId }} className="hover:text-foreground">{workspace?.name ?? "Workspace"}</Link> : "Agent Network"}
 					title="Tasks"
-					description={bp === "mobile" ? undefined : "Work you delegated to agents on other nodes, and work other nodes asked this one to do."}
+					description={bp === "mobile" ? undefined : "Work you delegated to agents on other machines, and work other machines asked this one to do."}
 					actions={
 						<Button variant="primary" onClick={() => openDialog({ kind: "delegate-task", workspaceId })}>
 							<Plus /> Delegate a task
@@ -99,11 +99,11 @@ export default function TaskBoardPage() {
 						))}
 					</div>
 					<Select value={peer} onValueChange={setPeer}>
-						<SelectTrigger aria-label="Filter by node" className="sm:w-48">
+						<SelectTrigger aria-label="Filter by machine" className="sm:w-48">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="all">All nodes</SelectItem>
+							<SelectItem value="all">All machines</SelectItem>
 							{peerOptions.map(([id, name]) => (
 								<SelectItem key={id} value={id}>
 									{name}
@@ -148,7 +148,7 @@ export default function TaskBoardPage() {
 				<EmptyState
 					icon={ListChecks}
 					title="No tasks yet"
-					description="Delegate a task to an agent on a paired node, or wait for another node to send you one. Agents can also delegate on their own."
+					description="Delegate a task to an agent on a paired machine, or wait for another machine to send you one. Agents can also delegate on their own."
 					action={
 						<Button variant="primary" onClick={() => openDialog({ kind: "delegate-task", workspaceId })}>
 							<Plus /> Delegate a task

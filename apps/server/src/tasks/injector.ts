@@ -39,7 +39,7 @@ export class TaskInjector implements InjectorApi {
 	}
 
 	async injectStatusNote(task: TaskRow): Promise<boolean> {
-		if (task.direction !== "outgoing" || !task.senderSessionId) return false;
+		if (!this.delegatedFromHere(task) || !task.senderSessionId) return false;
 		const sessionId = task.senderSessionId;
 		return this.chains.run(sessionId, () => this.deliverNote(task.id, sessionId)).catch(() => false);
 	}
@@ -51,7 +51,8 @@ export class TaskInjector implements InjectorApi {
 				const task = this.hub.store.find(message.taskId);
 				if (task && this.sessionOf(task) && !isTerminalStatus(task.status as TaskStatus)) await this.injectMessage(task, message);
 			}
-			for (const task of this.hub.store.list({ direction: "outgoing", statuses: [...NOTIFIED_STATUSES] })) {
+			const delegated = [...this.hub.store.list({ direction: "outgoing", statuses: [...NOTIFIED_STATUSES] }), ...this.hub.store.list({ direction: "incoming", peerId: this.hub.store.nodeId, statuses: [...NOTIFIED_STATUSES] })];
+			for (const task of delegated) {
 				if (task.senderSessionId && task.notifiedStatus !== task.status) await this.injectStatusNote(task);
 			}
 		} catch (error) {
@@ -63,11 +64,18 @@ export class TaskInjector implements InjectorApi {
 		return task.direction === "outgoing" ? task.senderSessionId : task.executorSessionId;
 	}
 
+	/** This node delegated the task: an outgoing row, or a self-peer row (the work came home and runs here). */
+	private delegatedFromHere(task: TaskRow): boolean {
+		return task.direction === "outgoing" || this.hub.store.isSelfPeer(task);
+	}
+
 	/** Runs inside the session's chain, so it re-reads the rows: an earlier link may already have done the work. */
 	private async deliverMessage(taskId: string, messageId: string, sessionId: string): Promise<boolean> {
 		const task = this.hub.store.find(taskId);
 		const message = this.hub.store.message(messageId);
 		if (!task || !message || this.sessionOf(task) !== sessionId) return false;
+		// A task a handoff holds, or that moved away, takes no more input here (`ExecutorApi.thaw` re-injects once it is released).
+		if (task.direction === "incoming" && (task.fenced || this.hub.ctx.handoffs.fence.isFrozen(taskId))) return false;
 		if (message.injectedSessionId) return true;
 		if (isTerminalStatus(task.status as TaskStatus)) return false;
 		if (message.authorNodeId === this.hub.store.nodeId && message.authorKind === "agent") return false;
@@ -108,7 +116,7 @@ export class TaskInjector implements InjectorApi {
 
 	private async deliverNote(taskId: string, sessionId: string): Promise<boolean> {
 		const task = this.hub.store.find(taskId);
-		if (!task || task.direction !== "outgoing" || task.senderSessionId !== sessionId) return false;
+		if (!task || !this.delegatedFromHere(task) || task.senderSessionId !== sessionId) return false;
 		const status = task.status as TaskStatus;
 		if (!NOTIFIED_STATUSES.includes(status) || task.notifiedStatus === status) return false;
 		try {

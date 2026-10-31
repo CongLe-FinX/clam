@@ -1,16 +1,16 @@
 import type { wire } from "@clam/agent-network";
 import { NetworkError } from "@clam/agent-network";
-import { SessionLiveState as SessionLiveStateSchema, UiMessage as UiMessageSchema, type AgentSession, type MessagesPage, type SessionEvent, type SessionLiveState, type UiMessage } from "@clam/contracts";
+import { SessionLiveState as SessionLiveStateSchema, UiMessage as UiMessageSchema, type AgentSession, type MessagesPage, type PendingUiRequest, type SessionEvent, type SessionLiveState, type UiMessage } from "@clam/contracts";
 import { agentSessions } from "@clam/database";
 import { eq } from "drizzle-orm";
 import { ApiError } from "../http/errors.ts";
 import { KeyedLock, errorText } from "../network/util.ts";
-import type { SessionViews } from "../services/session-service.ts";
+import type { SessionViews, UiResponseInput } from "../services/session-service.ts";
 import type { MirrorApi, SharedHub } from "./hub.ts";
 import { newStreamId, pageOf, type SharedRow } from "./store.ts";
 import { TranscriptReducer } from "./transcript.ts";
 
-/** Events the mirror forwards: the live view of a conversation. Approvals and questions need the driver's human and stay there. */
+/** Events the mirror forwards: the live view of a conversation. A question or approval travels inside the forwarded `state` (`requests`, see `RequestService`), which is how an old node that does not know it still accepts every batch. */
 const FORWARDED: ReadonlySet<string> = new Set(["state", "agent_start", "agent_end", "message_start", "message_delta", "message_end", "message_removed", "tool_start", "tool_update", "tool_end", "prompt_result", "settled", "notice"]);
 /** A sync chunk stays well under the listener's 1 MiB body limit. */
 const CHUNK_BYTES = 512 * 1024;
@@ -200,15 +200,34 @@ export class MirrorService implements MirrorApi, SessionViews {
 			if (this.store.activePeers(publisher.sharedId).length > 0) void this.ensureLoaded(publisher);
 			return;
 		}
-		publisher.reducer.apply(event as Event);
-		if (event.type === "state") publisher.state = event.state;
-		publisher.buffer.push(event as Event);
+		const forwarded = (event.type === "state" ? { ...event, state: this.withRequests(publisher, event.state) } : event) as Event;
+		publisher.reducer.apply(forwarded);
+		if (event.type === "state") publisher.state = forwarded.state as SessionLiveState;
+		this.buffer(publisher, forwarded);
+		// The last state the runtime published may still say "streaming" (it is refreshed on a timer, not on the settle): ask again, so participants never keep seeing a busy driver.
+		if (event.type === "settled") void this.ctx.runtime.get(sessionId)?.getState().catch(() => undefined);
+	}
+
+	private buffer(publisher: Publisher, event: Event): void {
+		publisher.buffer.push(event);
 		if (!publisher.timer) {
 			publisher.timer = setTimeout(() => this.flush(publisher), this.hub.options.mirrorFlushMs);
 			publisher.timer.unref();
 		}
-		// The last state the runtime published may still say "streaming" (it is refreshed on a timer, not on the settle): ask again, so participants never keep seeing a busy driver.
-		if (event.type === "settled") void this.ctx.runtime.get(sessionId)?.getState().catch(() => undefined);
+	}
+
+	/** The driver's state as participants get it: with the questions/approvals its agent waits for and how the latest ones ended. */
+	private withRequests(publisher: Publisher, state: SessionLiveState): SessionLiveState {
+		return { ...state, requests: this.hub.requests.snapshot(publisher.sessionId) };
+	}
+
+	requestsChanged(sessionId: string): void {
+		const publisher = this.bySession.get(sessionId);
+		// Before the first participant needs it nothing is buffered: the snapshot taken when a link syncs has the current requests.
+		if (!publisher?.loaded) return;
+		const state = this.withRequests(publisher, publisher.state ?? emptyState(sessionId));
+		publisher.state = state;
+		this.buffer(publisher, { type: "state", state });
 	}
 
 	/** Read the driving session's transcript once; a read that overlapped runtime events is repeated (a few times). */
@@ -224,7 +243,7 @@ export class MirrorService implements MirrorApi, SessionViews {
 				}
 				const state = await this.ctx.sessions.state(publisher.sessionId).catch(() => null);
 				publisher.reducer.replace(transcript);
-				publisher.state = state;
+				publisher.state = state ? this.withRequests(publisher, state) : null;
 				publisher.loaded = true;
 			} catch (error) {
 				this.hub.log.warn({ err: errorText(error), sharedId: publisher.sharedId }, "could not read the driving session's transcript for the mirror");
@@ -291,7 +310,7 @@ export class MirrorService implements MirrorApi, SessionViews {
 					// Everything buffered so far is in the snapshot: number it first, then forget what this link had queued.
 					this.flush(publisher);
 					link.pending = [];
-					const snapshot = { seq: publisher.seq, messages: publisher.reducer.messages(), state: publisher.state };
+					const snapshot = { seq: publisher.seq, messages: publisher.reducer.messages(), state: publisher.state ? this.withRequests(publisher, publisher.state) : null };
 					const outcome = await this.sendSync(publisher, peer.url, snapshot);
 					if (outcome !== "ok") {
 						if (outcome === "failed") this.scheduleRetry(publisher, link);
@@ -415,6 +434,7 @@ export class MirrorService implements MirrorApi, SessionViews {
 			const parsedState = request.state === undefined ? null : SessionLiveStateSchema.safeParse(request.state);
 			const state = parsedState?.success ? this.rewriteState(parsedState.data, mirrorId) : (stored?.state ?? null);
 			this.store.upsertMirrorState({ mirrorSessionId: mirrorId, sharedSessionId: shared.id, epoch: request.epoch, streamId: request.streamId, lastSeq: request.seq, syncing: false, state });
+			for (const event of this.requestEvents(stored?.state ?? null, state)) this.ctx.bus.publish(`session:${mirrorId}`, event);
 			if (state) this.ctx.bus.publish(`session:${mirrorId}`, { type: "state", state } satisfies SessionEvent);
 			this.touch(mirrorId);
 			return { applied: true, lastSeq: request.seq };
@@ -451,6 +471,7 @@ export class MirrorService implements MirrorApi, SessionViews {
 			toPublish.push(event as unknown as SessionEvent);
 		}
 		this.store.upsertMirrorState({ mirrorSessionId: mirrorId, sharedSessionId: shared.id, epoch: request.epoch, streamId: request.streamId, lastSeq: request.seq, syncing: false, state });
+		for (const event of this.requestEvents(stored.state, state)) this.ctx.bus.publish(`session:${mirrorId}`, event);
 		for (const event of toPublish) this.ctx.bus.publish(`session:${mirrorId}`, event);
 		if (settled || toPublish.some((e) => e.type === "state")) this.touch(mirrorId);
 		return { applied: true, lastSeq: request.seq };
@@ -460,6 +481,38 @@ export class MirrorService implements MirrorApi, SessionViews {
 	private rewriteState(state: SessionLiveState, mirrorId: string): SessionLiveState {
 		const busy = state.isStreaming || !state.isSettled;
 		return { ...state, sessionId: mirrorId, runtime: { sessionId: mirrorId, state: busy ? "busy" : "ready", pid: null, startedAt: null, restarts: 0, lastError: null, lastActivityAt: new Date().toISOString() } };
+	}
+
+	/** A request of the driver as the viewers of this mirror see it: `raisedAt` rebased from the driver's clock onto this node's (the countdown must not inherit the skew between the machines). */
+	private rebase(request: PendingUiRequest, publishedAt: number): PendingUiRequest {
+		return request.raisedAt === undefined ? request : { ...request, raisedAt: Date.now() - Math.max(0, publishedAt - request.raisedAt) };
+	}
+
+	/** `ui_request` / `ui_request_resolved` events of the viewers of a mirror: what its stored pending requests gained and lost between two states. */
+	private requestEvents(before: SessionLiveState | null, after: SessionLiveState | null): SessionEvent[] {
+		const was = before?.requests?.pending ?? [];
+		const pending = after?.requests?.pending ?? [];
+		const events: SessionEvent[] = [];
+		for (const request of pending) {
+			if (!was.some((r) => r.requestId === request.requestId)) events.push({ type: "ui_request", ...this.rebase(request, after?.requests?.at ?? Date.now()) });
+		}
+		for (const request of was) {
+			if (pending.some((r) => r.requestId === request.requestId)) continue;
+			const done = after?.requests?.resolved.find((r) => r.requestId === request.requestId);
+			events.push({ type: "ui_request_resolved", requestId: request.requestId, outcome: done?.outcome ?? "abandoned", ...(done?.answers ? { answers: done.answers } : {}), ...(done?.answeredBy ? { answeredBy: done.answeredBy } : {}) });
+		}
+		return events;
+	}
+
+	withdrawRequests(mirrorSessionId: string): void {
+		const stored = this.store.mirrorState(mirrorSessionId);
+		const before = stored?.state;
+		if (!stored || !before?.requests?.pending.length) return;
+		const after: SessionLiveState = { ...before, awaiting: null, requests: { pending: [], resolved: before.requests.resolved, at: Date.now() } };
+		this.store.upsertMirrorState({ mirrorSessionId, sharedSessionId: stored.sharedSessionId, epoch: stored.epoch, state: after });
+		for (const event of this.requestEvents(before, after)) this.ctx.bus.publish(`session:${mirrorSessionId}`, event);
+		this.ctx.bus.publish(`session:${mirrorSessionId}`, { type: "state", state: after } satisfies SessionEvent);
+		this.touch(mirrorSessionId);
 	}
 
 	private touch(sessionId: string): void {
@@ -510,8 +563,18 @@ export class MirrorService implements MirrorApi, SessionViews {
 	state(sessionId: string): SessionLiveState {
 		const moved = this.isMoved(sessionId);
 		const stored = this.store.mirrorState(sessionId)?.state ?? emptyState(sessionId);
-		if (moved) return { ...stored, sessionId, isStreaming: false, isSettled: true, queued: { steering: [], followUp: [] }, runtime: { ...emptyState(sessionId).runtime } };
+		if (moved) return { ...stored, sessionId, isStreaming: false, isSettled: true, queued: { steering: [], followUp: [] }, awaiting: null, runtime: { ...emptyState(sessionId).runtime } };
 		return this.rewriteState(stored, sessionId);
+	}
+
+	pendingRequests(sessionId: string): PendingUiRequest[] {
+		if (this.isMoved(sessionId)) return [];
+		const requests = this.store.mirrorState(sessionId)?.state?.requests;
+		return requests ? requests.pending.map((r) => this.rebase(r, requests.at)) : [];
+	}
+
+	respond(sessionId: string, input: UiResponseInput): Promise<void> {
+		return this.hub.requests.answer(sessionId, input);
 	}
 }
 

@@ -19,6 +19,10 @@ export interface ExecState {
 	/** The last prompt was aborted by someone on this node. */
 	aborted?: boolean;
 	sessionStarted?: boolean;
+	/** FROZEN: a handoff that moves the task holds it (`FenceService.freeze`); the executor ignores the task until it is unfrozen or fenced. */
+	handoffId?: string;
+	/** The fenced task's finished run was stored as a `late_result` event (once). */
+	lateResultAt?: string;
 }
 
 export const execState = (task: Pick<TaskRow, "execState">): ExecState => task.execState as ExecState;

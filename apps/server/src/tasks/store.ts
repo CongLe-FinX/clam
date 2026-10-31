@@ -1,5 +1,5 @@
 import { ulid, type wire } from "@clam/agent-network";
-import type { Task, TaskEvent, TaskMessage, TaskStatus } from "@clam/contracts";
+import type { Task, TaskEvent, TaskMessage, TaskResult, TaskStatus } from "@clam/contracts";
 import { TERMINAL_TASK_STATUSES } from "@clam/contracts";
 import { artifacts, outbox, taskEvents, taskMessages, tasks, type ClamDb } from "@clam/database";
 import { AGENT_MESSAGE_LIMIT, agentMessageBudget, applyMirroredEvents, assertTransition, describeStatusChange, orderMessages, TaskTransitionError } from "@clam/task-engine";
@@ -13,13 +13,16 @@ export type TaskMessageRow = typeof taskMessages.$inferSelect;
 export type TaskMessageInsert = typeof taskMessages.$inferInsert;
 export type OutboxRow = typeof outbox.$inferSelect;
 export type ArtifactRow = typeof artifacts.$inferSelect;
-export type EventKind = "status" | "progress" | "tool" | "message" | "result" | "note";
+export type EventKind = "status" | "progress" | "tool" | "message" | "result" | "note" | "late_result";
 export type MessageDelivery = TaskMessage["delivery"];
 
 export const newTaskId = (): string => `tsk_${ulid()}`;
 export const newMessageId = (): string => `msg_${ulid()}`;
 export const newArtifactId = (): string => `art_${ulid()}`;
 const newOutboxId = (): string => `obx_${ulid()}`;
+
+/** Results stored before result files existed have no `files` key. */
+const withFiles = (result: TaskRow["result"]): TaskResult | null => (result ? { ...result, files: result.files ?? null } : null);
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -93,6 +96,14 @@ export class TaskStore {
 
 	get nodeId(): string {
 		return this.self.nodeId;
+	}
+
+	/**
+	 * A task that came home: this node delegated it, handed-over work returned to it (M7), so it executes its own task. Such a row is an
+	 * `incoming` row whose peer is this node; nothing about it ever goes over the wire.
+	 */
+	isSelfPeer(row: Pick<TaskRow, "direction" | "peerId">): boolean {
+		return row.direction === "incoming" && row.peerId === this.self.nodeId;
 	}
 
 	// ------------------------------------------------------------------ tasks
@@ -442,14 +453,15 @@ export class TaskStore {
 			description: row.description,
 			status: row.status as TaskStatus,
 			epoch: row.epoch,
-			repo: { url: row.repoUrl, branch: row.repoBranch, commit: row.repoCommit },
+			repo: row.repoUrl === null ? null : { url: row.repoUrl, branch: row.repoBranch, commit: row.repoCommit },
+			inputFiles: row.inputFiles ?? null,
 			projectId: row.projectId,
 			sender: { nodeId: row.senderNodeId, nodeName: row.senderNodeName, agentId: row.senderAgentId, agentName: row.senderAgentName, sessionId: row.senderSessionId },
 			executor: { nodeId: row.executorNodeId, nodeName: row.executorNodeName, agentId: row.executorAgentId, agentName: row.executorAgentName, sessionId: row.executorSessionId },
-			deliverAs: row.deliverAs === "summary" ? "summary" : "branch",
+			deliverAs: row.deliverAs === "summary" ? "summary" : row.deliverAs === "files" ? "files" : "branch",
 			constraints: row.constraints,
 			reason: row.reason,
-			result: row.result ?? null,
+			result: withFiles(row.result),
 			cost: row.cost,
 			delivery: outgoing ? this.createDelivery(row.id) : { state: "delivered", attempts: 0, lastError: null },
 			agentMessageBudget: this.budget(row.id).remaining,
@@ -493,7 +505,7 @@ export class TaskStore {
 			updatedAt: row.updatedAt,
 			startedAt: row.startedAt,
 			finishedAt: row.finishedAt,
-			result: row.result ?? null,
+			result: withFiles(row.result),
 			cost: row.cost,
 			lastEventSeq: row.lastEventSeq,
 		};

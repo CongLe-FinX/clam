@@ -19,6 +19,11 @@ export interface RequestOpts {
 	signal?: AbortSignal;
 }
 
+/** URL of a local API path for direct use in `src`/`href`/XHR (bytes endpoints), same-origin like every other call. */
+export function localUrl(path: string, query?: Query): string {
+	return buildUrl(path, query);
+}
+
 function buildUrl(path: string, query?: Query): string {
 	let url = `${LOCAL_API_PREFIX}${path}`;
 	if (query) {

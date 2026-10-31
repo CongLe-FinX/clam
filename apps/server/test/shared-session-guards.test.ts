@@ -104,7 +104,7 @@ describe("mesh_team and mesh_say inside a shared session", () => {
 		const lines = result.text.split("\n");
 		const checkpoint = (await sharedOn(pair.a, shared.id)).lastCheckpoint;
 		expect(lines[0]).toContain(`Shared session ${shared.id} · "Add notes" (a group chat`);
-		expect(result.text).toContain(`Epoch 1; shared branch ${shared.repo.branch} (${shared.repo.url})`);
+		expect(result.text).toContain(`Epoch 1; shared branch ${shared.repo?.branch} (${shared.repo?.url})`);
 		expect(result.text).toContain("This node: node-a — you are the LEAD (driving session)");
 		expect(result.text).toMatch(/Driver: .*node-a.* \(self\)/);
 		expect(lines).toContain("Participants:");

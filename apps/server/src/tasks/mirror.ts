@@ -24,14 +24,22 @@ export interface AppliedRecord {
  * Shared by the mirror poll and by the outbox (`task.create` / `task.cancel` answers carry the same record), and
  * idempotent: applying the same record twice changes and publishes nothing.
  */
-export function applyRecord(hub: TaskHub, taskId: string, record: wire.TaskRecord, events: readonly wire.TaskEventWire[] = []): AppliedRecord {
+export function applyRecord(hub: TaskHub, taskId: string, record: wire.TaskRecord, allEvents: readonly wire.TaskEventWire[] = []): AppliedRecord {
 	const { store } = hub;
 	const row = store.find(taskId);
 	if (!row || row.direction !== "outgoing" || record.taskId !== taskId) return { changed: false, gap: false, settled: true };
 	// A finished task is never reopened by a late answer, and a lower epoch is a node that lost ownership.
 	if (isTerminalStatus(row.status as TaskStatus) || record.epoch < row.epoch) return { changed: false, gap: false, settled: true };
 
+	// A `late_result` is a fenced executor's private note for its own human (docs/handoff-protocol.md §8.6); it is never part of our timeline.
+	const events = allEvents.filter((e) => e.type !== "late_result");
 	const { inserted, gap } = events.length > 0 ? store.mirrorEvents(taskId, events) : { inserted: [], gap: false };
+	// `handed_off`: that executor released the task and the next one will announce itself (`TaskSender.followExecutor`). Its timeline up to the
+	// seal is ours, but its status, epoch, result and end time are not adopted, and the row never ends because of it.
+	if (record.status === "handed_off") {
+		if (inserted.length > 0) hub.changed(taskId, { events: inserted, notifyPeer: false });
+		return { changed: inserted.length > 0, gap, settled: true };
+	}
 	const current = store.get(taskId);
 	// Every status change is an event on the executor: a record behind what we mirrored is an old answer, one ahead
 	// would make the row run ahead of its timeline (and a terminal row is never polled again to fill it in).

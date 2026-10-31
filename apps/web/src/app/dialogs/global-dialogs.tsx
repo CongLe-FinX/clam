@@ -1,11 +1,12 @@
 import { type AgentSession, type ModelInfo, type Project, type Workspace, routes } from "@clam/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { CloudDownload } from "lucide-react";
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { CloudDownload, FolderPlus, FolderOpen, Info } from "lucide-react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { DirPicker } from "@/components/dir-picker";
 import { api, errorMessage } from "@/lib/api";
+import { lazyPreload } from "@/lib/lazy-preload";
 import { rememberInitialPrompt } from "@/lib/initial-prompt";
 import { qk, useProjects, useWorkspaces } from "@/lib/queries";
 import { useUi } from "@/lib/store";
@@ -18,12 +19,17 @@ import { Input } from "@/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
 import { Textarea } from "@/ui/textarea";
 
-const CloneForm = lazy(() => import("@/features/git/clone-form.tsx"));
-const InviteDialog = lazy(() => import("@/features/network/invite-dialog.tsx"));
-const JoinDialog = lazy(() => import("@/features/network/join-dialog.tsx"));
-const PairingRequestsDialog = lazy(() => import("@/features/network/pairing-requests.tsx").then((m) => ({ default: m.PairingRequestsDialog })));
-const DelegateDialog = lazy(() => import("@/features/tasks/delegate-dialog.tsx"));
-const HandoverDialog = lazy(() => import("@/features/shared/handover-dialog.tsx"));
+const { Component: CloneForm, preload: loadCloneForm } = lazyPreload(() => import("@/features/git/clone-form.tsx"));
+const { Component: InviteDialog, preload: loadInviteDialog } = lazyPreload(() => import("@/features/network/invite-dialog.tsx"));
+const { Component: JoinDialog, preload: loadJoinDialog } = lazyPreload(() => import("@/features/network/join-dialog.tsx"));
+const { Component: PairingRequestsDialog, preload: loadPairingRequestsDialog } = lazyPreload<{ onClose: () => void }>(() => import("@/features/network/pairing-requests.tsx").then((m) => ({ default: m.PairingRequestsDialog })));
+const { Component: DelegateDialog, preload: loadDelegateDialog } = lazyPreload(() => import("@/features/tasks/delegate-dialog.tsx"));
+const { Component: ContextEditorDialog, preload: loadContextEditorDialog } = lazyPreload(() => import("@/features/context/editor-dialog.tsx"));
+const { Component: NewChatDialog, preload: loadNewChatDialog } = lazyPreload(() => import("@/features/chats/new-chat-dialog.tsx"));
+const { Component: HandoverDialog, preload: loadHandoverDialog } = lazyPreload(() => import("@/features/shared/handover-dialog.tsx"));
+
+/** Warms every dialog body so the first open of any of them paints without a Suspense round trip. */
+export const preloadDialogBodies = (): Promise<unknown> => Promise.all([loadCloneForm(), loadInviteDialog(), loadJoinDialog(), loadPairingRequestsDialog(), loadDelegateDialog(), loadContextEditorDialog(), loadNewChatDialog(), loadHandoverDialog()]);
 
 export default function GlobalDialogs() {
 	const dialog = useUi((s) => s.dialog);
@@ -38,6 +44,12 @@ export default function GlobalDialogs() {
 			return <ProjectDialog workspaceId={dialog.workspaceId} initialMode={dialog.mode} onClose={close} />;
 		case "create-session":
 			return <SessionDialog projectId={dialog.projectId} onClose={close} />;
+		case "new-chat":
+			return (
+				<Suspense fallback={null}>
+					<NewChatDialog onClose={close} />
+				</Suspense>
+			);
 		case "invite-node":
 			return (
 				<Suspense fallback={null}>
@@ -60,6 +72,12 @@ export default function GlobalDialogs() {
 			return (
 				<Suspense fallback={null}>
 					<DelegateDialog preset={dialog} onClose={close} />
+				</Suspense>
+			);
+		case "create-context":
+			return (
+				<Suspense fallback={null}>
+					<ContextEditorDialog workspaceId={dialog.workspaceId} projectId={dialog.projectId} onClose={close} />
 				</Suspense>
 			);
 		case "handover":
@@ -137,12 +155,12 @@ function WorkspaceDialog({ workspaceId, onClose }: { workspaceId?: string; onClo
 
 // ───────────────────────── project ─────────────────────────
 
-function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { workspaceId?: string; initialMode?: "existing" | "clone"; onClose: () => void }) {
+function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { workspaceId?: string; initialMode?: "existing" | "clone" | "empty"; onClose: () => void }) {
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const workspaces = useWorkspaces();
 	const [workspaceId, setWorkspaceId] = useState(initialWs ?? "");
-	const [mode, setMode] = useState<"existing" | "clone">(initialMode ?? "existing");
+	const [mode, setMode] = useState<"existing" | "clone" | "empty">(initialMode ?? "existing");
 	const [path, setPath] = useState("");
 	const [name, setName] = useState("");
 	const [nameTouched, setNameTouched] = useState(false);
@@ -150,11 +168,12 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 		if (!workspaceId && workspaces.data?.[0]) setWorkspaceId(workspaces.data[0].id);
 	}, [workspaceId, workspaces.data]);
 	useEffect(() => {
-		if (!nameTouched) setName(path ? basename(path) : "");
-	}, [path, nameTouched]);
+		if (!nameTouched) setName(mode === "empty" ? "" : path ? basename(path) : "");
+	}, [path, nameTouched, mode]);
 
 	const create = useMutation({
-		mutationFn: () => api.post<Project>(routes.projects, { workspaceId, name: name.trim(), path: path.trim() }),
+		// "empty": no path → CL Agent Mesh creates a managed folder under its data dir (no repository involved).
+		mutationFn: () => api.post<Project>(routes.projects, mode === "empty" ? { workspaceId, name: name.trim() } : { workspaceId, name: name.trim(), path: path.trim() }),
 		onSuccess: (p) => {
 			void qc.invalidateQueries({ queryKey: qk.projectsAll });
 			void qc.invalidateQueries({ queryKey: qk.workspaces });
@@ -164,7 +183,7 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 		},
 	});
 
-	const ready = workspaceId && name.trim() && path.trim();
+	const ready = workspaceId && name.trim() && (mode === "empty" || path.trim());
 	const workspaceField = initialWs ? null : (
 		<Field label="Workspace">
 			{() => (
@@ -187,17 +206,20 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 		<Dialog open onOpenChange={(o) => !o && onClose()}>
 			<DialogContent className={cn(mode === "clone" && "max-w-xl")}>
 				<DialogHeader>
-					<DialogTitle>{mode === "clone" ? "Clone from GitHub" : "Add project"}</DialogTitle>
+					<DialogTitle>{mode === "clone" ? "Clone from GitHub" : mode === "empty" ? "New empty folder" : "Add project"}</DialogTitle>
 					<DialogDescription>
 						{mode === "clone"
 							? "Clone a repository with one of your connected GitHub accounts into a new project."
-							: "Point to an existing directory on this node. Agents run with it as their working directory."}
+							: mode === "empty"
+								? "Start from nothing: CL Agent Mesh creates an empty folder for the project. No Git repository is needed."
+								: "Point to an existing directory on this machine, with or without Git. Agents run with it as their working directory."}
 					</DialogDescription>
 				</DialogHeader>
 				<div role="group" aria-label="How to add the project" className="flex rounded-lg bg-surface-2 p-0.5 text-xs font-medium">
 					{(
 						[
 							["existing", "Existing directory"],
+							["empty", "New empty folder"],
 							["clone", "Clone from GitHub"],
 						] as const
 					).map(([id, label]) => (
@@ -207,12 +229,12 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 							aria-pressed={mode === id}
 							onClick={() => setMode(id)}
 							className={cn(
-								"inline-flex h-7 flex-1 items-center justify-center gap-1.5 rounded-md px-3 outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-10",
+								"inline-flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-10",
 								mode === id ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:text-foreground",
 							)}
 						>
-							{id === "clone" ? <CloudDownload className="size-3.5" aria-hidden /> : null}
-							{label}
+							{id === "clone" ? <CloudDownload className="size-3.5" aria-hidden /> : id === "empty" ? <FolderPlus className="size-3.5" aria-hidden /> : <FolderOpen className="size-3.5" aria-hidden />}
+							<span className="truncate">{label}</span>
 						</button>
 					))}
 				</div>
@@ -237,22 +259,33 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 						}}
 					>
 						{workspaceField}
-						<Field label="Directory" hint="Absolute path. Start typing to see local directories." error={create.error ? errorMessage(create.error) : null}>
-							{() => (
-								<DirPicker
-									value={path}
-									onChange={(v) => {
-										setPath(v);
-										create.reset();
-									}}
-									invalid={Boolean(create.error)}
-								/>
-							)}
-						</Field>
-						<Field label="Name">
+						{mode === "empty" ? (
+							<p className="flex gap-2 rounded-lg bg-surface-2 p-3 text-xs text-muted-foreground">
+								<Info aria-hidden className="mt-0.5 size-3.5 shrink-0 text-accent" />
+								<span>
+									The folder lives in this machine&apos;s CL Agent Mesh data directory. Agents can create and edit files there, and you can delegate tasks or share sessions from it to other machines without any repository — files travel as bundles you preview before applying.
+								</span>
+							</p>
+						) : (
+							<Field label="Directory" hint="Absolute path. Start typing to see local directories." error={create.error ? errorMessage(create.error) : null}>
+								{() => (
+									<DirPicker
+										value={path}
+										onChange={(v) => {
+											setPath(v);
+											create.reset();
+										}}
+										invalid={Boolean(create.error)}
+									/>
+								)}
+							</Field>
+						)}
+						<Field label="Name" error={mode === "empty" && create.error ? errorMessage(create.error) : null}>
 							{(id) => (
 								<Input
 									id={id}
+									autoFocus={mode === "empty"}
+									placeholder={mode === "empty" ? "e.g. Research notes" : undefined}
 									value={name}
 									onChange={(e) => {
 										setNameTouched(true);
@@ -267,7 +300,7 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 								Cancel
 							</Button>
 							<Button type="submit" variant="primary" loading={create.isPending} disabled={!ready}>
-								Add project
+								{mode === "empty" ? "Create project" : "Add project"}
 							</Button>
 						</DialogFooter>
 					</form>

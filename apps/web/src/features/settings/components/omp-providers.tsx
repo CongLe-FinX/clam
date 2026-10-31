@@ -91,7 +91,7 @@ function ProviderRow({ p, onLogin }: { p: LoginProvider; onLogin: () => void }) 
 						<ChevronDown className={cn("size-3.5 transition-transform", open && "rotate-180")} />
 					</Button>
 				)}
-				<Button size="sm" variant={p.authenticated ? "outline" : "primary"} disabled={!p.available} onClick={onLogin} title={p.available ? undefined : "This provider cannot be signed in to from here"}>
+				<Button size="sm" variant="outline" disabled={!p.available} onClick={onLogin} title={p.available ? undefined : "This provider cannot be signed in to from here"}>
 					<LogIn className="size-3.5" />
 					<span className="hidden sm:inline">{p.authenticated ? "Add account" : "Connect"}</span>
 				</Button>

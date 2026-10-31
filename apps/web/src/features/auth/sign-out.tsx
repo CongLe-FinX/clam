@@ -59,7 +59,7 @@ export function SignOutItem({ compact, className }: { compact?: boolean; classNa
 			className={cn("flex h-7 w-full items-center gap-1.5 rounded-md px-1 text-2xs text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground focus-visible:text-foreground disabled:opacity-50", className)}
 		>
 			<LogOut className="size-3" />
-			Sign out of this node
+			Sign out of this machine
 		</button>
 	);
 }

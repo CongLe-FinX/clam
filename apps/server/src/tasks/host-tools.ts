@@ -119,13 +119,14 @@ export class MeshHostTools implements HostToolSet {
 			title: args.title,
 			description: args.instructions,
 			deliverAs: args.deliverAs,
+			inputPaths: args.inputPaths,
 			baseBranch: args.baseBranch ?? null,
 			constraints: args.maxCostUsd ? { maxCostUsd: args.maxCostUsd } : {},
 			senderSessionId: session.sessionId,
 		});
 		const reachable = this.hub.ctx.network.peers.row(peer.id)?.status !== "offline";
 		return [
-			`Delegated: task ${row.id} to ${agent?.name ?? "any agent"}@${peer.name} (${args.deliverAs === "branch" ? "result as a pushed branch" : "result as a summary"}).`,
+			`Delegated: task ${row.id} to ${agent?.name ?? "any agent"}@${peer.name} (${row.deliverAs === "branch" ? "result as a pushed branch" : row.deliverAs === "files" ? "result as returned files" : "result as a summary"}).`,
 			reachable ? "It is being delivered now." : `${peer.name} is offline; the task is queued and is delivered as soon as it is back.`,
 			`Replies, questions and the completion note arrive as messages that start with "[CL Agent Mesh] task ${row.id}".`,
 			"Use mesh_message (taskId) to talk to it and mesh_task to check status; end your turn to wait for it instead of polling.",

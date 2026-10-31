@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
-import type { AccessStatus, UpdateAccessBody } from "@clam/contracts";
+import { ELEVATION_MINUTES, type AccessStatus, type UpdateAccessBody } from "@clam/contracts";
 import { settings } from "@clam/database";
 import { eq } from "drizzle-orm";
 import type { z } from "zod";
 import type { ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
+import { recordAudit } from "../services/audit.ts";
 import { readNodeSettings } from "../services/settings.ts";
 import { LoginLimiter, type LimiterOptions } from "./limiter.ts";
 import { dummyHash, hashPassword, verifyPassword } from "./password.ts";
@@ -34,9 +35,14 @@ export interface RequestAccess {
 	session: SessionClaims | null;
 }
 
+/** The machine tools reachable through the domain once switched on (loopback: always). */
+export type MachineTool = "terminal" | "browser";
+
 export interface AccessConfig {
 	remoteUiEnabled: boolean;
 	sessionTtlHours: number;
+	remoteTerminalEnabled: boolean;
+	remoteBrowserEnabled: boolean;
 }
 
 export interface IssuedSession {
@@ -48,6 +54,8 @@ export interface IssuedSession {
 interface TrackedSocket {
 	claims: SessionClaims;
 	close: () => void;
+	/** Set for machine-tool sockets: switching that tool off ends them too. */
+	tool: MachineTool | undefined;
 }
 
 const rateLimited = (retryAfterSeconds: number): ApiError => new ApiError(429, "rate_limited", "Too many sign-in attempts. Try again later.", { retryAfterSeconds });
@@ -65,12 +73,14 @@ export class AccessService {
 	/** sid → the latest expiry this process has seen for it (renewals happen in the browser's cookie, not here). */
 	private readonly liveExp = new Map<string, number>();
 	private readonly sockets = new Set<TrackedSocket>();
+	/** sid → until when a recent password re-entry (step-up) unlocks the remote Terminal. In memory on purpose: a restart asks again. */
+	private readonly elevated = new Map<string, number>();
 	private sweeper: NodeJS.Timeout | null = null;
 	private pending = 0;
 	private queue: Promise<unknown> = Promise.resolve();
 
 	constructor(
-		private readonly ctx: Pick<ServerContext, "db" | "secrets" | "network" | "config" | "identity">,
+		private readonly ctx: Pick<ServerContext, "db" | "secrets" | "network" | "config" | "identity" | "log">,
 		options: { limiter?: LimiterOptions } = {},
 	) {
 		this.limiter = new LoginLimiter(options.limiter);
@@ -108,6 +118,8 @@ export class AccessService {
 		return {
 			remoteUiEnabled: stored.remoteUiEnabled === true,
 			sessionTtlHours: typeof ttl === "number" && Number.isInteger(ttl) && ttl >= 1 && ttl <= 24 * 7 ? ttl : DEFAULT_TTL_HOURS,
+			remoteTerminalEnabled: stored.remoteTerminalEnabled === true,
+			remoteBrowserEnabled: stored.remoteBrowserEnabled === true,
 		};
 	}
 
@@ -119,6 +131,7 @@ export class AccessService {
 	private bumpEpoch(): void {
 		this.writeRow(KEY_EPOCH, String(this.epoch() + 1));
 		this.liveExp.clear();
+		this.elevated.clear();
 	}
 
 	private signingKey(): Promise<Buffer> {
@@ -196,17 +209,63 @@ export class AccessService {
 		this.closeSockets(() => true);
 	}
 
-	updateConfig(body: z.infer<typeof UpdateAccessBody>): void {
+	updateConfig(body: z.infer<typeof UpdateAccessBody>, via: "loopback" | "remote"): void {
 		const current = this.config();
-		const next: AccessConfig = { remoteUiEnabled: body.remoteUiEnabled ?? current.remoteUiEnabled, sessionTtlHours: body.sessionTtlHours ?? current.sessionTtlHours };
-		if (next.remoteUiEnabled && !this.passwordSet()) {
-			throw new ApiError(409, "password_required", "Set an owner password before enabling remote access to the UI");
+		const next: AccessConfig = {
+			remoteUiEnabled: body.remoteUiEnabled ?? current.remoteUiEnabled,
+			sessionTtlHours: body.sessionTtlHours ?? current.sessionTtlHours,
+			remoteTerminalEnabled: body.remoteTerminalEnabled ?? current.remoteTerminalEnabled,
+			remoteBrowserEnabled: body.remoteBrowserEnabled ?? current.remoteBrowserEnabled,
+		};
+		if ((next.remoteUiEnabled || next.remoteTerminalEnabled || next.remoteBrowserEnabled) && !this.passwordSet()) {
+			throw new ApiError(409, "password_required", "Set an owner password before enabling remote access to this machine");
 		}
 		this.writeRow(KEY_CONFIG, JSON.stringify(next));
+		for (const [field, label] of [["remoteUiEnabled", "ui"], ["remoteTerminalEnabled", "terminal"], ["remoteBrowserEnabled", "browser"]] as const) {
+			if (current[field] !== next[field]) recordAudit(this.ctx, "access.remote_toggle", { tool: label, enabled: next[field], via }, next[field] ? "warning" : "info");
+		}
+		// Switching a tool off ends its live sockets at once (not at the next sweep).
+		if (current.remoteTerminalEnabled && !next.remoteTerminalEnabled) this.closeSockets((tracked) => tracked.tool === "terminal");
+		if (current.remoteBrowserEnabled && !next.remoteBrowserEnabled) this.closeSockets((tracked) => tracked.tool === "browser");
 		if (current.remoteUiEnabled && !next.remoteUiEnabled) {
 			// Turning the door off also ends every session behind it: re-enabling later starts from a clean slate.
 			this.bumpEpoch();
 			this.closeSockets(() => true);
+		}
+	}
+
+	// ---------------------------------------------------------------------------------------------- machine tools
+
+	/** Until when this remote session is elevated (a password re-entry within `ELEVATION_MINUTES`), or null. */
+	elevatedUntil(claims: SessionClaims | null): number | null {
+		if (!claims) return null;
+		const until = this.elevated.get(claims.sid);
+		return until !== undefined && until > Date.now() ? until : null;
+	}
+
+	/** The owner re-entered the password on this remote session (verify it with `verifyOwnerPassword` first). */
+	elevate(claims: SessionClaims): number {
+		const now = Date.now();
+		for (const [sid, until] of this.elevated) if (until <= now) this.elevated.delete(sid);
+		const until = now + ELEVATION_MINUTES * 60_000;
+		this.elevated.set(claims.sid, until);
+		return until;
+	}
+
+	/**
+	 * May this request use a machine tool? The loopback UI always may. Through the domain the tool's toggle must be on
+	 * (403 `tool_disabled`) and, with `stepUp`, the session must have re-entered the password recently (403 `step_up_required`).
+	 */
+	assertTool(access: RequestAccess, tool: MachineTool, options: { stepUp?: boolean } = {}): void {
+		if (access.via === "loopback") return;
+		const config = this.config();
+		const enabled = tool === "terminal" ? config.remoteTerminalEnabled : config.remoteBrowserEnabled;
+		if (!config.remoteUiEnabled || !enabled) {
+			throw new ApiError(403, "tool_disabled", `The ${tool === "terminal" ? "Terminal" : "Browser"} is switched off for remote sign-ins on this machine. Turn it on from the machine's local UI (Settings → Security).`);
+		}
+		if (!access.session) throw new ApiError(401, "auth_required", "Sign in to continue");
+		if (options.stepUp && this.elevatedUntil(access.session) === null) {
+			throw new ApiError(403, "step_up_required", "Re-enter the owner password to use the Terminal through the domain", { elevationMinutes: ELEVATION_MINUTES });
 		}
 	}
 
@@ -266,6 +325,7 @@ export class AccessService {
 		this.revoked.set(claims.sid, claims.iat + MAX_SESSION_MS);
 		this.writeRow(KEY_REVOKED, JSON.stringify(Object.fromEntries(this.revoked)));
 		this.liveExp.delete(claims.sid);
+		this.elevated.delete(claims.sid);
 		this.closeSockets((tracked) => tracked.claims.sid === claims.sid);
 	}
 
@@ -278,8 +338,8 @@ export class AccessService {
 	// ---------------------------------------------------------------------------------------------- live sockets
 
 	/** Register a remote WebSocket so it ends with its session. Returns the unregister function. */
-	trackSocket(claims: SessionClaims, close: () => void): () => void {
-		const tracked: TrackedSocket = { claims, close };
+	trackSocket(claims: SessionClaims, close: () => void, tool?: MachineTool): () => void {
+		const tracked: TrackedSocket = { claims, close, tool };
 		this.sockets.add(tracked);
 		this.sweeper ??= setInterval(() => this.sweepSockets(), SOCKET_SWEEP_MS).unref();
 		return () => {
@@ -299,8 +359,11 @@ export class AccessService {
 
 	private sweepSockets(): void {
 		const now = Date.now();
-		const enabled = this.config().remoteUiEnabled;
-		this.closeSockets((tracked) => !enabled || !this.valid({ ...tracked.claims, exp: Math.max(tracked.claims.exp, this.liveExp.get(tracked.claims.sid) ?? 0) }, now));
+		const config = this.config();
+		const enabled = config.remoteUiEnabled;
+		const toolOn = (tool: MachineTool | undefined): boolean => tool === undefined || (tool === "terminal" ? config.remoteTerminalEnabled : config.remoteBrowserEnabled);
+		for (const [sid, until] of this.elevated) if (until <= now) this.elevated.delete(sid);
+		this.closeSockets((tracked) => !enabled || !toolOn(tracked.tool) || !this.valid({ ...tracked.claims, exp: Math.max(tracked.claims.exp, this.liveExp.get(tracked.claims.sid) ?? 0) }, now));
 		for (const [sid, exp] of this.liveExp) if (exp <= now) this.liveExp.delete(sid);
 	}
 
@@ -325,6 +388,9 @@ export class AccessService {
 			signedIn: remote ? access.session !== null : true,
 			sessionExpiresAt: remote && access.session ? new Date(access.session.exp).toISOString() : null,
 			sessionTtlHours: config.sessionTtlHours,
+			remoteTerminalEnabled: config.remoteTerminalEnabled,
+			remoteBrowserEnabled: config.remoteBrowserEnabled,
+			elevatedUntil: remote ? ((until) => (until === null ? null : new Date(until).toISOString()))(this.elevatedUntil(access.session)) : null,
 		};
 	}
 }

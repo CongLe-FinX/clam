@@ -269,12 +269,12 @@ describe("hand-built streams", () => {
 		expect(r1.events).toEqual([{ type: "ui_request", requestId: "u1", method: "select", title: "Allow bash?", options: ["Allow", "Deny"] }]);
 		expect(m.pendingUiRequests()).toHaveLength(1);
 		const r2 = m.handleFrame({ type: "extension_ui_request", id: "c1", method: "cancel", targetId: "u1" });
-		expect(r2.events).toEqual([{ type: "ui_request_resolved", requestId: "u1" }]);
+		expect(r2.events).toEqual([{ type: "ui_request_resolved", requestId: "u1", outcome: "cancelled" }]);
 		expect(m.pendingUiRequests()).toHaveLength(0);
 		expect(m.handleFrame({ type: "extension_ui_request", id: "c2", method: "cancel", targetId: "u1" }).events).toEqual([]);
 
 		m.handleFrame({ type: "extension_ui_request", id: "u2", method: "confirm", title: "Sure?", message: "really" });
-		expect(m.markUiResolved("u2")).toEqual({ type: "ui_request_resolved", requestId: "u2" });
+		expect(m.markUiResolved("u2")).toEqual({ type: "ui_request_resolved", requestId: "u2", outcome: "answered" });
 		expect(m.markUiResolved("u2")).toBeNull();
 	});
 
@@ -292,7 +292,19 @@ describe("hand-built streams", () => {
 				{ id: "q2", question: "Why?", options: [] },
 			],
 		});
-		expect(ask.events).toEqual([{ type: "ui_request", requestId: "a", method: "ask", title: "Pick", message: "Which?\nWhy?", options: ["A", "B"] }]);
+		expect(ask.events).toEqual([
+			{
+				type: "ui_request",
+				requestId: "a",
+				method: "ask",
+				title: "Pick",
+				message: "Which?\nWhy?",
+				questions: [
+					{ id: "q1", question: "Which?", header: "Pick", options: [{ label: "A" }, { label: "B" }] },
+					{ id: "q2", question: "Why?", options: [] },
+				],
+			},
+		]);
 		expect(m.handleFrame({ type: "extension_ui_request", id: "n", method: "notify", message: "hi", notifyType: "warning" }).events).toEqual([
 			{ type: "notice", level: "warning", message: "hi" },
 		]);

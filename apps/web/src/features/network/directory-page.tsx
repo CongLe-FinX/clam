@@ -1,7 +1,7 @@
 import type { DirectoryAgent, PeerStatus } from "@clam/contracts";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Link } from "@tanstack/react-router";
-import { Bot, ChevronRight, Clock, RefreshCw, Search, Send, UserPlus } from "lucide-react";
+import { Bot, ChevronRight, Clock, RefreshCw, Plug, Search, Send } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { errorMessage } from "@/lib/api";
 import { isActiveTask, useDirectory, usePeers, useTasks } from "@/lib/queries";
@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/ui/skeleton";
 import { StatusDot } from "@/ui/status-dot";
 import { PeerStatusBadge } from "./components";
+import { ConnectDialog } from "./connect";
 import { isStale } from "./format";
 
 type NodeStatus = PeerStatus | "self";
@@ -36,7 +37,7 @@ export default function AgentDirectoryPage() {
 	const peers = usePeers();
 	const openDialog = useUi((s) => s.openDialog);
 	const tasks = useTasks();
-	// Unfinished tasks per agent: tasks this node delegated to a remote agent, and tasks running on its own agents.
+	// Unfinished tasks per agent: tasks this machine delegated to a remote agent, and tasks running on its own agents.
 	const taskCounts = useMemo(() => {
 		const m = new Map<string, number>();
 		for (const t of tasks.data ?? []) {
@@ -46,6 +47,7 @@ export default function AgentDirectoryPage() {
 		}
 		return m;
 	}, [tasks.data]);
+	const [chooser, setChooser] = useState(false);
 	const [node, setNode] = useState("all");
 	const [status, setStatus] = useState("all");
 	const [q, setQ] = useState("");
@@ -82,7 +84,7 @@ export default function AgentDirectoryPage() {
 				.sort((a, b) => a.name.localeCompare(b.name));
 			if (filtering && agents.length === 0) continue;
 			out.push({ kind: "header", key: `h:${g.nodeId}`, group: g });
-			if (agents.length === 0) out.push({ kind: "empty", key: `e:${g.nodeId}`, text: "No agents reported by this node yet." });
+			if (agents.length === 0) out.push({ kind: "empty", key: `e:${g.nodeId}`, text: "No agents reported by this machine yet." });
 			for (const a of agents) out.push({ kind: "agent", key: `a:${g.nodeId}:${a.agentId}`, group: g, agent: a });
 		}
 		return out;
@@ -104,10 +106,10 @@ export default function AgentDirectoryPage() {
 				<PageHeader
 					eyebrow="Agent Network"
 					title="Agent Directory"
-					description="Every agent on this node and on the nodes you paired with. Remote entries are cached and refreshed when a node reports a change."
+					description="Every agent on this machine and on the machines you paired with. Remote entries are cached and refreshed when a machine reports a change."
 					actions={
-						<Button variant="outline" onClick={() => openDialog({ kind: "invite-node" })}>
-							<UserPlus /> Invite a node
+						<Button variant="outline" onClick={() => setChooser(true)}>
+							<Plug /> Connect a machine
 						</Button>
 					}
 				/>
@@ -117,14 +119,14 @@ export default function AgentDirectoryPage() {
 						<Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, role, runtime, capability…" aria-label="Search agents" className="pl-8" />
 					</div>
 					<Select value={node} onValueChange={setNode}>
-						<SelectTrigger aria-label="Filter by node">
+						<SelectTrigger aria-label="Filter by machine">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="all">All nodes</SelectItem>
+							<SelectItem value="all">All machines</SelectItem>
 							{groups.map((g) => (
 								<SelectItem key={g.nodeId} value={g.nodeId}>
-									{g.status === "self" ? `${g.nodeName} (this node)` : g.nodeName}
+									{g.status === "self" ? `${g.nodeName} (this machine)` : g.nodeName}
 								</SelectItem>
 							))}
 						</SelectContent>
@@ -169,7 +171,7 @@ export default function AgentDirectoryPage() {
 						<EmptyState
 							icon={Bot}
 							title={total === 0 && !filtering ? "No agents yet" : "No agents match"}
-							description={total === 0 && !filtering ? "Agents of this node and of connected nodes appear here." : "Try another search or clear the filters."}
+							description={total === 0 && !filtering ? "Agents of this machine and of connected machines appear here." : "Try another search or clear the filters."}
 							action={
 								filtering || node !== "all" ? (
 									<Button
@@ -212,6 +214,19 @@ export default function AgentDirectoryPage() {
 					)}
 				</div>
 			</div>
+			{chooser ? (
+				<ConnectDialog
+					onClose={() => setChooser(false)}
+					onInvite={() => {
+						setChooser(false);
+						openDialog({ kind: "invite-node" });
+					}}
+					onJoin={() => {
+						setChooser(false);
+						openDialog({ kind: "join-node" });
+					}}
+				/>
+			) : null}
 		</div>
 	);
 }
@@ -221,7 +236,7 @@ function GroupHeader({ group, now }: { group: Group; now: number }) {
 	const inner = (
 		<>
 			<span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{group.nodeName}</span>
-			{group.status === "self" ? <Badge variant="accent">This node</Badge> : <PeerStatusBadge status={group.status} />}
+			{group.status === "self" ? <Badge variant="accent">This machine</Badge> : <PeerStatusBadge status={group.status} />}
 			<span className="font-mono text-2xs text-subtle">{group.agents.length} {group.agents.length === 1 ? "agent" : "agents"}</span>
 			{group.fetchedAt && group.status !== "self" ? (
 				<span className={cn("hidden items-center gap-1 text-2xs sm:inline-flex", stale ? "text-warning" : "text-subtle")} title={new Date(group.fetchedAt).toLocaleString()}>

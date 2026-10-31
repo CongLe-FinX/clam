@@ -64,7 +64,7 @@ export default function ActivityPage() {
 							}
 						/>
 					) : items.length === 0 ? (
-						<EmptyState icon={Activity} title="Nothing yet" description="Delegated tasks, messages from other nodes and connection changes show up here." />
+						<EmptyState icon={Activity} title="Nothing yet" description="Delegated tasks, messages from other machines and connection changes show up here." />
 					) : (
 						<>
 							<ul className="relative w-full" style={{ height: v.getTotalSize() }}>

@@ -3,6 +3,7 @@ import { NetworkError, wire as wireSchemas } from "@clam/agent-network";
 import type { SharedSession } from "@clam/contracts";
 import { agentSessions, agents, projects } from "@clam/database";
 import { buildContinuationNote, buildMeshMessage, slugify } from "@clam/task-engine";
+import type { SetupReport } from "@clam/handoff-engine";
 import { eq } from "drizzle-orm";
 import { AgentRuntimeError } from "@clam/agent-runtime";
 import { ApiError } from "../http/errors.ts";
@@ -11,6 +12,8 @@ import { injectIntoSession } from "../tasks/session-injection.ts";
 import type { EpochApi, SharedHub } from "./hub.ts";
 import type { CheckpointRow, SharedRow } from "./store.ts";
 import { postCheckpointTail } from "./tail.ts";
+import { FaultInjected } from "../handoff/fault.ts";
+import { withSetupSection } from "../handoff/session-kind.ts";
 
 interface DriverChange {
 	epoch: number;
@@ -132,7 +135,11 @@ export class EpochService implements EpochApi {
 		const held = options.checkpointSeq !== undefined ? this.store.checkpoint(sharedId, options.checkpointSeq) : this.store.latestHeldCheckpoint(sharedId);
 		if (!held || !held.snapshotPath || !held.snapshotSha256) throw new ApiError(409, "no_snapshot", "No session snapshot has been received yet; a takeover needs one. Wait for the driver's next checkpoint.");
 
-		const aligned = await this.alignWorkingTree(shared, held);
+		const filesMode = shared.vcs === "files";
+		if (filesMode && !held.filesPath) throw new ApiError(409, "no_files", "No folder bundle has been received for that checkpoint yet; wait for the driver's next checkpoint.");
+		// Git mode: align the clone with the shared branch. Files mode: restore the folder from the checkpoint's bundle (refuses on local edits unless forced; nothing is deleted).
+		const aligned = filesMode ? { headCommit: null, treeNote: null } : await this.alignWorkingTree(shared, held);
+		const restored = filesMode ? await this.hub.files.restore(shared, held, { force: options.force, reason: options.reason }) : null;
 		let sessionFile: string;
 		try {
 			sessionFile = (await this.ctx.ompCli.sessionUnpack(this.hub.checkpoints.snapshotFile(sharedId, held.seq).path, project.path)).sessionFile;
@@ -180,6 +187,8 @@ export class EpochService implements EpochApi {
 			at: new Date().toISOString(),
 		};
 		for (const target of announce) this.hub.enqueue({ peerId: target.nodeId, sharedSessionId: sharedId, kind: "shared.driver", refId: `${sharedId}:${epoch}`, path: `/shared/${sharedId}/driver`, body: notice });
+		// The old driver's questions belonged to its runtime: nobody can answer them now.
+		if (shared.mirrorSessionId) this.hub.mirror.withdrawRequests(shared.mirrorSessionId);
 		for (const id of retire) {
 			try {
 				this.ctx.sessions.update(id, { archived: true });
@@ -200,12 +209,82 @@ export class EpochService implements EpochApi {
 			interrupted: options.interrupted === true,
 			checkpoint: { seq: held.seq, at: held.createdAt, commit: held.commit, pushed: held.pushed },
 			branch: shared.branch,
+			...(restored && { files: restored }),
 			headCommit: aligned.headCommit,
 			treeNote: aligned.treeNote,
 			afterCheckpoint: postCheckpointTail(this.store, this.hub.log, shared.mirrorSessionId, held),
 		});
-		// The continuation note opens the continued conversation; failing to send it must not undo the takeover.
-		this.ctx.sessions.prompt(session.id, { message: text, clientId: `shared_continue_${sharedId}_${epoch}` }).catch((error: unknown) => this.hub.log.warn({ err: errorText(error), sharedId }, "could not send the continuation note"));
+		// The continuation note opens the continued conversation. This node's dependency setup runs first (it may wait for the user's approval), so
+		// the note goes out in the background: the takeover itself does not wait, and failing to send it must not undo it.
+		this.continueSession({ shared, sessionId: session.id, projectId: project.id, dir: project.path, agentName: agent?.name ?? null, fromAgentName: oldDriverAgent, epoch, reason: options.reason, headCommit: aligned.headCommit, text });
+	}
+
+	/**
+	 * Record the takeover as a `kind: session` handoff, run dependency setup + validation on this node (`beforeContinuation`), then send the
+	 * continuation note with the setup report appended. A failing record or setup never blocks the note; the send is idempotent by `clientId`.
+	 */
+	private continueSession(c: { shared: SharedRow; sessionId: string; projectId: string; dir: string; agentName: string | null; fromAgentName: string | null; epoch: number; reason: "takeover" | "transfer"; headCommit: string | null; text: string }): void {
+		const sharedId = c.shared.id;
+		const clientId = `shared_continue_${sharedId}_${c.epoch}`;
+		const { sessionKind } = this.ctx.handoffs;
+		void (async () => {
+			let report: SetupReport = { ran: [], skipped: [] };
+			try {
+				report = await sessionKind.beforeContinuation({
+					sharedSessionId: sharedId,
+					title: c.shared.title,
+					workspaceId: c.shared.workspaceId,
+					fromNodeId: c.shared.driverNodeId,
+					fromNodeName: c.shared.driverNodeName,
+					fromAgentName: c.fromAgentName,
+					toEpoch: c.epoch,
+					dir: c.dir,
+					projectId: c.projectId,
+					sessionId: c.sessionId,
+					agentName: c.agentName,
+					reason: c.reason,
+					vcs: c.shared.vcs === "files" ? "files" : "git",
+					headCommit: c.headCommit,
+					continuation: { text: c.text, clientId },
+				});
+			} catch (error) {
+				if (error instanceof FaultInjected) throw error;
+				this.hub.log.warn({ err: errorText(error), sharedId }, "dependency setup before the continuation note failed; sending the note without it");
+			}
+			try {
+				await this.ctx.sessions.prompt(c.sessionId, { message: withSetupSection(c.text, report), clientId });
+				sessionKind.continued({ sharedSessionId: sharedId, toEpoch: c.epoch });
+			} catch (error) {
+				if (error instanceof FaultInjected) throw error;
+				this.hub.log.warn({ err: errorText(error), sharedId }, "could not send the continuation note");
+				sessionKind.continued({ sharedSessionId: sharedId, toEpoch: c.epoch, error: errorText(error, 200) });
+			}
+		})().catch((error: unknown) => this.hub.log.warn({ err: errorText(error), sharedId }, "the continuation of the shared session stopped"));
+	}
+
+	/** This node lost the driver role: record it as the source side of a `kind: session` handoff. Bookkeeping only, never breaks the shared flow. */
+	private recordFormerDriver(shared: SharedRow, change: DriverChange): void {
+		try {
+			const transfer = shared.meta.transfer;
+			const handedOver = transfer?.toNodeId === change.driverNodeId && (transfer.phase === "handing_over" || (transfer.phase === "failed" && transfer.error?.code === "interrupted"));
+			this.ctx.handoffs.sessionKind.recordSource({
+				sharedSessionId: shared.id,
+				title: shared.title,
+				workspaceId: shared.workspaceId,
+				toNodeId: change.driverNodeId,
+				toNodeName: change.driverNodeName,
+				toAgentName: change.agentName,
+				fromEpoch: shared.epoch,
+				toEpoch: change.epoch,
+				sessionId: shared.localSessionId,
+				agentName: this.store.participant(shared.id, this.self)?.agentName ?? null,
+				reason: handedOver ? "transfer" : change.reason,
+				vcs: shared.vcs === "files" ? "files" : "git",
+			});
+		} catch (error) {
+			if (error instanceof FaultInjected) throw error;
+			this.hub.log.warn({ err: errorText(error), sharedId: shared.id }, "could not record the lost driver role as a handoff");
+		}
 	}
 
 	/** Fetch, check out the shared branch and fast-forward it. Refuses (409) when local changes overlap; never discards anything. */
@@ -223,7 +302,7 @@ export class EpochService implements EpochApi {
 		}
 		if (status.branch !== shared.branch) {
 			try {
-				status = await gitService.checkout(projectId, shared.branch);
+				status = await gitService.checkout(projectId, shared.branch as string);
 			} catch (error) {
 				throw new ApiError(409, "git_checkout_failed", `Could not check out ${shared.branch}: ${errorText(error, 300)} Local changes were left untouched.`);
 			}
@@ -253,7 +332,7 @@ export class EpochService implements EpochApi {
 		if (peerId !== shared.driverNodeId || shared.localRole === "driver") throw new ApiError(403, "forbidden", "Only the driver of the shared session may hand it over");
 		if (request.epoch !== shared.epoch) throw new ApiError(409, "stale_epoch", `The transfer carries epoch ${request.epoch}; the shared session is at epoch ${shared.epoch}`, { currentEpoch: shared.epoch });
 		const held = this.store.checkpoint(sharedId, request.checkpointSeq);
-		if (!held?.snapshotPath || held.snapshotSha256 !== request.sha256) throw new ApiError(409, "no_snapshot", "This node does not hold the snapshot of that checkpoint");
+		if (!held?.snapshotPath || held.snapshotSha256 !== request.sha256 || (held.files !== null && !held.filesPath)) throw new ApiError(409, "no_snapshot", "This node does not hold the snapshot (and folder bundle) of that checkpoint");
 		this.track(
 			this.lock
 				.run(sharedId, () => this.performTakeover(sharedId, { reason: "transfer", force: true, checkpointSeq: request.checkpointSeq, interrupted: request.interrupted === true }))
@@ -332,6 +411,8 @@ export class EpochService implements EpochApi {
 			if (!wasDriver && shared.localRole === "participant") this.store.update(shared.id, { localSessionId: null });
 		});
 		if (wasDriver) this.hub.mirror.unpublish(shared.id);
+		if (wasDriver) this.recordFormerDriver(shared, change);
+		if (previousMirror) this.hub.mirror.withdrawRequests(previousMirror);
 		if (previousMirror && previousMirror !== shared.localSessionId) {
 			try {
 				this.ctx.sessions.update(previousMirror, { archived: true });
@@ -398,7 +479,8 @@ export class EpochService implements EpochApi {
 					}
 				}
 			}
-			const rescue = await this.rescue(shared, pending.driverNodeName);
+			// Git mode: unpushed work goes to a rescue branch. Files mode: what is new or changed since the last synced checkpoint is bundled (noted by the files unit itself).
+			const rescue = shared.vcs === "files" ? (await this.hub.files.rescueSinceSync(shared), null) : await this.rescue(shared, pending.driverNodeName);
 			this.hub.sharing.ensureMirror(this.store.get(sharedId));
 			this.hub.sharing.ensureParticipantAgent(sharedId);
 			void this.hub.sharing.briefPending();
@@ -466,6 +548,7 @@ export class EpochService implements EpochApi {
 			epoch: shared.epoch,
 			driverNodeId: shared.driverNodeId,
 			branch: shared.branch,
+			vcs: shared.vcs === "files" ? "files" : "git",
 			driverSessionId: shared.localRole === "driver" ? shared.localSessionId : (driver?.agentSessionId ?? null),
 			driverUiUrl: shared.localRole === "driver" ? this.hub.uiUrl() : (driver?.uiUrl ?? null),
 			participants: this.store.participants(sharedId).map((p) => ({
@@ -477,7 +560,7 @@ export class EpochService implements EpochApi {
 				agentName: p.agentName,
 				uiUrl: p.nodeId === this.self ? this.hub.uiUrl() : p.uiUrl,
 			})),
-			lastCheckpoint: last ? { seq: last.seq, epoch: last.epoch, commit: last.commit, pushed: last.pushed, snapshotSha256: last.snapshotSha256 } : null,
+			lastCheckpoint: last ? { seq: last.seq, epoch: last.epoch, commit: last.commit, pushed: last.pushed, snapshotSha256: last.snapshotSha256, filesSha256: last.files?.sha256 ?? null } : null,
 		};
 	}
 

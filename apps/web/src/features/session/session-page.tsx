@@ -1,30 +1,38 @@
 import type { AgentSession } from "@clam/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { Bot, ChevronDown, FileText, GitBranch, MessagesSquare, RotateCw, ScrollText, SearchX, TriangleAlert, Users, X } from "lucide-react";
+import { BookMarked, Bot, ChevronDown, FileText, GitBranch, MessagesSquare, RotateCw, ScrollText, SearchX, TriangleAlert, Users, X } from "lucide-react";
 import { lazy, type ReactNode, type RefObject, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ImperativePanelHandle, Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { toast } from "sonner";
 import { useGitStatus } from "@/features/git/hooks";
 import { useSharedDetail, useSharedLive } from "@/features/shared/hooks";
 import { GroupBar, GroupChat } from "@/features/shared/group-chat";
+import { driverOf, participantLabel } from "@/features/shared/format";
 import { SharedBanner } from "@/features/shared/shared-banner";
 import { TaskBanner } from "@/features/tasks/task-banner";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
 import { ApiError, errorMessage } from "@/lib/api";
-import { useProject, useSession, useWorkspaces } from "@/lib/queries";
-import { useUi } from "@/lib/store";
+import { projectAssets } from "@/components/rich/assets";
+import { useAgents, useProject, useSession, useWorkspaces } from "@/lib/queries";
+import { type SessionKind, useUi } from "@/lib/store";
 import { basename, cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/ui/sheet";
 import { Skeleton } from "@/ui/skeleton";
-import { ApprovalDock } from "./approval-dialog.tsx";
+import { AskDock } from "./omp/ask-dock.tsx";
+import { AwaitingStrip } from "./omp/awaiting-strip.tsx";
+import { OmpContext, OmpStore, useOmpState } from "./omp/omp-store.ts";
+import { PlanChip } from "./omp/plan-ui.tsx";
+import { SubagentViewer } from "./omp/subagent-viewer.tsx";
+import { SubagentsPanel } from "./omp/subagents-panel.tsx";
 import { Composer } from "./composer.tsx";
 import { ContextPanel } from "./context-panel.tsx";
 import { Conversation } from "./conversation.tsx";
 import { RuntimeLog } from "./runtime-log.tsx";
 import { SessionHeader } from "./session-header.tsx";
+import { type SessionEnv, SessionEnvContext } from "./session-env.ts";
 import { SessionStream, StreamContext, useStreamMeta } from "./stream-store.ts";
 import { ThreadsPanel } from "./threads-panel.tsx";
 import { useKeyboardInset } from "./use-keyboard-inset.ts";
@@ -32,6 +40,7 @@ import { useKeyboardInset } from "./use-keyboard-inset.ts";
 const GitWorkbench = lazy(() => import("@/features/git/git-panel.tsx"));
 const FileViewer = lazy(() => import("@/features/projects/file-viewer.tsx").then((m) => ({ default: m.FileViewer })));
 const TeamPanel = lazy(() => import("@/features/shared/team-panel.tsx").then((m) => ({ default: m.TeamPanel })));
+const MemoryPanel = lazy(() => import("@/features/context/memory-panel.tsx"));
 const AddAgentDialog = lazy(() => import("@/features/shared/add-agent-dialog.tsx"));
 
 // ───────────────────────────── page gate ─────────────────────────────
@@ -112,7 +121,7 @@ interface PanelToggleState {
 }
 
 /** Imperative collapse/expand with React state mirrored from the (persisted) panel layout. */
-function usePanelToggle(openSize: number): PanelToggleState {
+function usePanelToggle(openSize: number, notify?: () => void): PanelToggleState {
 	const ref = useRef<ImperativePanelHandle>(null);
 	const [collapsed, setCollapsed] = useState(false);
 	useEffect(() => {
@@ -133,9 +142,79 @@ function usePanelToggle(openSize: number): PanelToggleState {
 		if (p.isCollapsed()) open();
 		else p.collapse();
 	}, [open]);
-	const onCollapse = useCallback(() => setCollapsed(true), []);
-	const onExpand = useCallback(() => setCollapsed(false), []);
+	const onCollapse = useCallback(() => {
+		setCollapsed(true);
+		notify?.();
+	}, [notify]);
+	const onExpand = useCallback(() => {
+		setCollapsed(false);
+		notify?.();
+	}, [notify]);
 	return { ref, collapsed, toggle, open, onCollapse, onExpand };
+}
+
+/** Width from which both side panels may be open by default; narrower windows open one so the chat keeps its room. */
+const WIDE_PX = 1600;
+
+/**
+ * Opens the side panels a session starts with: the user's last choice for this kind of session, else (≥1600px) both, else one
+ * (chats → Files, project sessions → Context). Returns false until applied so the layout never flashes the wrong panels. After
+ * that, every open/close (toggle or drag) is saved for the kind. Sizes are persisted by the PanelGroup's `autoSaveId`.
+ */
+function usePanelLayout({
+	desktop,
+	kind,
+	left,
+	right,
+	notify,
+}: {
+	desktop: boolean;
+	kind: SessionKind | null;
+	left: RefObject<ImperativePanelHandle | null>;
+	right: RefObject<ImperativePanelHandle | null>;
+	notify: RefObject<() => void>;
+}): boolean {
+	const stored = useUi((s) => (kind ? s.sessionPanels[kind] : undefined));
+	const save = useUi((s) => s.setSessionPanels);
+	const storedRef = useRef(stored);
+	storedRef.current = stored;
+	const [applied, setApplied] = useState<SessionKind | null>(null);
+	const live = useRef(false);
+
+	useEffect(() => {
+		if (!desktop || !kind || applied === kind) return;
+		live.current = false;
+		let second = 0;
+		const first = requestAnimationFrame(() => {
+			const wide = window.innerWidth >= WIDE_PX;
+			const want = storedRef.current ?? (wide ? { left: true, right: true } : kind === "chat" ? { left: true, right: false } : { left: false, right: true });
+			for (const [ref, open] of [
+				[left, want.left],
+				[right, want.right],
+			] as const) {
+				const p = ref.current;
+				if (!p) continue;
+				if (open && p.isCollapsed()) p.expand();
+				else if (!open && !p.isCollapsed()) p.collapse();
+			}
+			setApplied(kind);
+			second = requestAnimationFrame(() => {
+				live.current = true;
+			});
+		});
+		return () => {
+			cancelAnimationFrame(first);
+			cancelAnimationFrame(second);
+		};
+	}, [desktop, kind, applied, left, right]);
+
+	notify.current = () => {
+		if (!live.current || !kind) return;
+		const l = left.current;
+		const r = right.current;
+		if (l && r) save(kind, { left: !l.isCollapsed(), right: !r.isCollapsed() });
+	};
+	return !desktop || applied === kind;
 }
 
 function isTyping(t: EventTarget | null): boolean {
@@ -199,17 +278,22 @@ function Workspace({ session }: { session: AgentSession }) {
 	const qc = useQueryClient();
 	const stream = useMemo(() => new SessionStream(session.id, qc), [session.id, qc]);
 	useEffect(() => stream.attach(), [stream]);
+	const omp = useMemo(() => new OmpStore(session.id), [session.id]);
+	useEffect(() => omp.attach(), [omp]);
 
 	const bp = useBreakpoint();
 	const desktop = bp === "desktop";
 	const mobile = bp === "mobile";
-	const project = useProject(session.projectId).data;
+	const projectQuery = useProject(session.projectId);
+	const project = projectQuery.data;
+	/** Plain chats and project sessions remember their own side-panel layout; a failed project lookup counts as a project session. */
+	const projectKind: SessionKind | null = project ? (project.origin === "chat" ? "chat" : "project") : projectQuery.isError ? "project" : null;
 	const workspaces = useWorkspaces().data;
 	const workspace = useMemo(() => workspaces?.find((w) => w.id === project?.workspaceId), [workspaces, project?.workspaceId]);
 	const kbInset = useKeyboardInset(!desktop);
 	const detail = useSharedDetail(session.sharedSessionId).data;
 	useSharedLive(session.sharedSessionId);
-	/** Mirrors show another node's conversation; moved copies belong to the node that took over. Neither accepts prompts. */
+	/** Mirrors show another machine's conversation; moved copies belong to the machine that took over. Neither accepts prompts. */
 	const readOnly = session.kind === "mirror" || session.movedTo !== null;
 	// A shared session is a group chat: its timeline is the main view, the agent's own session is its workspace.
 	const sharedMode = session.sharedSessionId !== null;
@@ -229,19 +313,32 @@ function Workspace({ session }: { session: AgentSession }) {
 	const [tab, setTab] = useState<"chat" | string>("chat");
 	const [sheets, setSheets] = useState({ left: false, right: false, log: false });
 	const [fill, setFill] = useState<{ text: string; nonce: number } | null>(null);
-	const [rightTab, setRightTab] = useState<"context" | "changes" | "team">("context");
+	const [rightTab, setRightTab] = useState<"context" | "memory" | "changes" | "team" | "agents">("context");
 	const [addAgent, setAddAgent] = useState(false);
 	const [bottomTab, setBottomTab] = useState<"log" | "git">("log");
 
-	const left = usePanelToggle(18);
-	const right = usePanelToggle(24);
+	const panelNotify = useRef<() => void>(() => undefined);
+	const notifyPanels = useCallback(() => panelNotify.current(), []);
+	const left = usePanelToggle(18, notifyPanels);
+	const right = usePanelToggle(24, notifyPanels);
 	const log = usePanelToggle(26);
+	const panelsReady = usePanelLayout({ desktop, kind: projectKind, left: left.ref, right: right.ref, notify: panelNotify });
 
 	const setSheet = (k: "left" | "right" | "log", v: boolean) => setSheets((s) => ({ ...s, [k]: v }));
 	const openDialog = useUi((s) => s.openDialog);
 	const handover = useCallback(() => openDialog({ kind: "handover", sessionId: session.id }), [openDialog, session.id]);
 	const rightOpen = right.open;
 	const rightRef = right.ref;
+	/** Reveal the Subagents tab of the right panel (desktop panel or mobile bottom sheet). */
+	const openAgents = useCallback(() => {
+		setRightTab("agents");
+		if (desktop) rightOpen();
+		else setSheets((s) => (s.right ? s : { ...s, right: true }));
+	}, [desktop, rightOpen]);
+	useEffect(() => {
+		omp.setPanelOpener(openAgents);
+		return () => omp.setPanelOpener(null);
+	}, [omp, openAgents]);
 	/** Reveal the Team tab of the right panel (desktop panel or mobile bottom sheet). The team thread needs more room than the context stats. */
 	const openTeam = useCallback(() => {
 		setRightTab("team");
@@ -267,6 +364,12 @@ function Workspace({ session }: { session: AgentSession }) {
 		},
 		[],
 	);
+
+	const agents = useAgents().data;
+	const agentName = agents?.find((a) => a.id === session.agentId)?.name ?? "The agent";
+	const projectId = session.projectId;
+	// Stable per session/project/agent, so memoized conversation rows (markdown assets, file strips) never re-render for it.
+	const env = useMemo<SessionEnv>(() => ({ projectId, assets: projectAssets(projectId), openFile, agentName }), [projectId, openFile, agentName]);
 
 	// "Inspect" on a tool card reveals the context panel.
 	const selectedTool = useStreamMeta(stream, (m) => m.selectedToolId);
@@ -304,8 +407,11 @@ function Workspace({ session }: { session: AgentSession }) {
 			tab={rightTab}
 			onTab={(t) => (t === "team" ? openTeam() : setRightTab(t))}
 			context={<ContextPanel stream={stream} session={session} project={project} />}
+			memory={<MemoryPanel session={session} />}
 			team={<TeamPanel session={session} onAddAgent={() => setAddAgent(true)} />}
 			teamUnread={detail?.shared.unreadMessages ?? 0}
+			agents={<SubagentsPanel store={omp} />}
+			omp={omp}
 		/>
 	);
 	// The Git panel needs far more room than the log: grow the bottom panel when it is selected.
@@ -336,7 +442,15 @@ function Workspace({ session }: { session: AgentSession }) {
 			{readOnly || showChat ? null : <StateBanner stream={stream} />}
 			{showChat ? (
 				detail ? (
-					<GroupChat session={session} detail={detail} active={view === "group"} keyboardOpen={kbInset > 0} onOpenWorkspace={() => setView("workspace")} onOpenTeam={openTeam} />
+					<GroupChat
+						session={session}
+						detail={detail}
+						active={view === "group"}
+						keyboardOpen={kbInset > 0}
+						onOpenWorkspace={() => setView("workspace")}
+						onOpenTeam={openTeam}
+						dock={<AskDock store={omp} group={participantLabel(driverOf(detail.shared) ?? { agentName: null, nodeName: "the driving machine" })} />}
+					/>
 				) : (
 					<div className="flex flex-col gap-3 p-4" aria-busy="true" aria-label="Loading the group chat">
 						<Skeleton className="h-9 w-2/5 self-end rounded-2xl" />
@@ -344,6 +458,13 @@ function Workspace({ session }: { session: AgentSession }) {
 						<Skeleton className="h-9 w-1/3 rounded-2xl" />
 					</div>
 				)
+			) : null}
+			{detail && detail.shared.localRole !== "driver" ? (
+				<AwaitingStrip
+					mirrorSessionId={detail.shared.mirrorSessionId ?? (session.kind === "mirror" ? session.id : null)}
+					driverName={detail.shared.participants.find((p) => p.nodeId === detail.shared.driverNodeId)?.nodeName ?? "the driving machine"}
+					driverUrl={detail.shared.participants.find((p) => p.nodeId === detail.shared.driverNodeId)?.uiUrl ?? null}
+				/>
 			) : null}
 			<div className={cn("flex min-h-0 flex-1 flex-col", showChat && "hidden")}>
 				<div className="relative flex min-h-0 flex-1 flex-col">
@@ -364,7 +485,8 @@ function Workspace({ session }: { session: AgentSession }) {
 						</Suspense>
 					) : null}
 				</div>
-				<ApprovalDock stream={stream} />
+				<AskDock store={omp} />
+				{readOnly ? null : <PlanChip stream={stream} className="mx-auto w-full max-w-[60rem] shrink-0 px-3 pb-1.5 sm:px-4" />}
 				{session.kind === "mirror" || session.movedTo ? <GroupBar detail={detail} onOpenChat={() => setView("group")} /> : <Composer stream={stream} fill={fill} keyboardOpen={kbInset > 0} />}
 			</div>
 		</div>
@@ -394,15 +516,17 @@ function Workspace({ session }: { session: AgentSession }) {
 	);
 
 	return (
+		<SessionEnvContext.Provider value={env}>
 		<StreamContext.Provider value={stream}>
+		<OmpContext.Provider value={omp}>
 			<div className="flex h-full min-h-0 flex-col bg-background" style={kbInset > 0 ? { paddingBottom: kbInset } : undefined}>
 				{header}
 				{desktop ? (
-					<PanelGroup direction="horizontal" autoSaveId="clam.session.h" className="min-h-0 flex-1">
-						<Panel id="left" order={1} defaultSize={18} minSize={14} maxSize={32} collapsible collapsedSize={0} ref={left.ref} onCollapse={left.onCollapse} onExpand={left.onExpand}>
+					<PanelGroup direction="horizontal" autoSaveId="clam.session.h" className={cn("min-h-0 flex-1", !panelsReady && "invisible")}>
+						<Panel id="left" order={1} defaultSize={18} minSize={16} maxSize={32} collapsible collapsedSize={0} ref={left.ref} onCollapse={left.onCollapse} onExpand={left.onExpand}>
 							{threadsEl()}
 						</Panel>
-						<PanelResizeHandle />
+						<PanelResizeHandle aria-label="Resize threads panel" />
 						<Panel id="center" order={2} minSize={30}>
 							<PanelGroup direction="vertical" autoSaveId="clam.session.v">
 								<Panel id="chat" order={1} minSize={30}>
@@ -414,7 +538,7 @@ function Workspace({ session }: { session: AgentSession }) {
 								</Panel>
 							</PanelGroup>
 						</Panel>
-						<PanelResizeHandle />
+						<PanelResizeHandle aria-label="Resize context panel" />
 						<Panel id="right" order={3} defaultSize={24} minSize={18} maxSize={40} collapsible collapsedSize={0} ref={right.ref} onCollapse={right.onCollapse} onExpand={right.onExpand}>
 							{contextEl}
 						</Panel>
@@ -441,8 +565,8 @@ function Workspace({ session }: { session: AgentSession }) {
 								style={mobile && kbInset > 0 ? { bottom: kbInset, height: `min(82dvh, calc(100dvh - ${kbInset}px - 1rem))` } : undefined}
 								aria-describedby={undefined}
 							>
-								<SheetTitle className="sr-only">{rightTab === "team" ? "Team" : "Context"}</SheetTitle>
-								<SheetDescription className="sr-only">{rightTab === "team" ? "Participants, discussion and checkpoints of the shared session." : "Context usage, plan, stats and session info."}</SheetDescription>
+								<SheetTitle className="sr-only">{rightTab === "team" ? "Team" : rightTab === "memory" ? "Memory" : rightTab === "agents" ? "Subagents" : "Context"}</SheetTitle>
+								<SheetDescription className="sr-only">{rightTab === "team" ? "Participants, discussion and checkpoints of the shared session." : rightTab === "agents" ? "Subagents the agent started, with live progress." : "Context usage, plan, stats and session info."}</SheetDescription>
 								{sheets.right ? <div className="min-h-0 flex-1 overflow-hidden">{contextEl}</div> : null}
 							</SheetContent>
 						</Sheet>
@@ -457,6 +581,7 @@ function Workspace({ session }: { session: AgentSession }) {
 						) : null}
 					</>
 				)}
+				<SubagentViewer store={omp} />
 				{addAgent ? (
 					<Suspense fallback={null}>
 						<AddAgentDialog
@@ -469,7 +594,9 @@ function Workspace({ session }: { session: AgentSession }) {
 					</Suspense>
 				) : null}
 			</div>
+			</OmpContext.Provider>
 		</StreamContext.Provider>
+		</SessionEnvContext.Provider>
 	);
 }
 
@@ -481,7 +608,7 @@ function PanelTab({ active, onClick, children }: { active: boolean; onClick: () 
 			aria-selected={active}
 			onClick={onClick}
 			className={cn(
-				"inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-9 [&_svg]:size-3.5",
+				"inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2.5 text-xs font-medium outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-11 [&_svg]:size-3.5",
 				active ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
 			)}
 		>
@@ -490,7 +617,7 @@ function PanelTab({ active, onClick, children }: { active: boolean; onClick: () 
 	);
 }
 
-type RightTabId = "context" | "changes" | "team";
+type RightTabId = "context" | "memory" | "changes" | "team" | "agents";
 
 /** Right panel: the session context, the project's Git changes, and (shared sessions) the team. */
 function RightPanel({
@@ -498,40 +625,69 @@ function RightPanel({
 	tab,
 	onTab,
 	context,
+	memory,
 	team,
 	teamUnread,
+	agents,
+	omp,
 }: {
 	session: AgentSession;
 	tab: RightTabId;
 	onTab: (t: RightTabId) => void;
 	context: ReactNode;
+	/** Project memory (Shared Context) of this session's project. */
+	memory: ReactNode;
 	/** Rendered under the Team tab; null hides the tab (moved copies of unshared sessions have nothing to show). */
 	team: ReactNode | null;
 	teamUnread: number;
+	/** Subagents tab content and the store its badge reads. */
+	agents: ReactNode;
+	omp: OmpStore;
 }) {
+	const { subagents } = useOmpState(omp);
+	const subagentCount = subagents.length;
+	const subagentRunning = subagents.filter((s) => s.status === "running" || s.status === "pending").length;
 	const status = useGitStatus(session.projectId).data;
 	const dirty = status?.isRepo ? status.files.length : 0;
+	// A plain-folder project (no .git) has no changes view; the tab is hidden rather than showing an empty state.
+	const hasGit = !status || status.isRepo;
+	const shown: RightTabId = tab === "changes" && !hasGit ? "context" : tab;
 	return (
-		<div className="flex h-full min-h-0 flex-col bg-surface-1">
-			<div role="tablist" aria-label="Side panel" className="flex h-10 shrink-0 items-center gap-0.5 border-b px-1.5 coarse:h-12">
-				<PanelTab active={tab === "context"} onClick={() => onTab("context")}>
+		<div className="@container flex h-full min-h-0 flex-col bg-surface-1">
+			<div role="tablist" aria-label="Side panel" className="scrollbar-none flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b px-1.5 coarse:h-12">
+				<PanelTab active={shown === "context"} onClick={() => onTab("context")}>
 					Context
 				</PanelTab>
-				<PanelTab active={tab === "changes"} onClick={() => onTab("changes")}>
-					Changes
-					{dirty > 0 ? <span className="tabular rounded bg-accent-soft px-1 font-mono text-2xs text-accent">{dirty}</span> : null}
+				<PanelTab active={shown === "memory"} onClick={() => onTab("memory")}>
+					<BookMarked /> <span className="@max-[22rem]:sr-only">Memory</span>
 				</PanelTab>
+				{hasGit ? (
+					<PanelTab active={shown === "changes"} onClick={() => onTab("changes")}>
+						Changes
+						{dirty > 0 ? <span className="tabular rounded bg-accent-soft px-1 font-mono text-2xs text-accent">{dirty}</span> : null}
+					</PanelTab>
+				) : null}
+				{subagentCount > 0 || tab === "agents" ? (
+					<PanelTab active={shown === "agents"} onClick={() => onTab("agents")}>
+						<Bot /> <span className="@max-[22rem]:sr-only">Subagents</span>
+						{subagentRunning > 0 ? <span className="tabular rounded bg-accent px-1 font-mono text-2xs text-accent-foreground">{subagentRunning}</span> : <span className="tabular rounded bg-surface-3 px-1 font-mono text-2xs text-muted-foreground">{subagentCount}</span>}
+					</PanelTab>
+				) : null}
 				{team ? (
 					<PanelTab active={tab === "team"} onClick={() => onTab("team")}>
-						<Users /> Team
+						<Users /> <span className="@max-[22rem]:sr-only">Team</span>
 						{teamUnread > 0 ? <span className="tabular rounded bg-accent px-1 font-mono text-2xs text-accent-foreground">{teamUnread}</span> : null}
 					</PanelTab>
 				) : null}
 			</div>
 			<div className="min-h-0 flex-1">
-				{tab === "context" ? (
+				{shown === "context" ? (
 					context
-				) : tab === "team" && team ? (
+				) : shown === "agents" ? (
+					agents
+				) : shown === "memory" ? (
+					<Suspense fallback={<Skeleton className="m-3 h-24" />}>{memory}</Suspense>
+				) : shown === "team" && team ? (
 					<Suspense fallback={<Skeleton className="m-3 h-24" />}>{team}</Suspense>
 				) : (
 					<Suspense fallback={<Skeleton className="m-3 h-24" />}>

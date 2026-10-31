@@ -211,7 +211,7 @@ export class TransferService implements TransferApi {
 	private async finalCheckpoint(sharedId: string, id: string, name: string, signal: AbortSignal): Promise<{ seq: number; sha256: string }> {
 		for (let attempt = 0; ; attempt += 1) {
 			const shared = this.store.get(sharedId);
-			this.advance(sharedId, id, "checkpointing", `Saving everything: committing the working tree, pushing ${shared.branch} and snapshotting the session…`);
+			this.advance(sharedId, id, "checkpointing", shared.vcs === "files" ? "Saving everything: bundling the working folder and snapshotting the session…" : `Saving everything: committing the working tree, pushing ${shared.branch} and snapshotting the session…`);
 			const checkpoint = await this.hub.checkpoints.checkpoint(sharedId, { manual: true, note: `Hand-over to ${name}` });
 			this.ensureLive(signal);
 			// A turn that was already on its way when the session was frozen settled while the checkpoint ran and changed the tree after the commit.
@@ -221,6 +221,10 @@ export class TransferService implements TransferApi {
 				continue;
 			}
 			if (!checkpoint.snapshot) throw new ApiError(409, "snapshot_failed", `The session could not be snapshotted (${checkpoint.note ?? "no details"}), so nothing was handed over.`);
+			if (shared.vcs === "files") {
+				if (!checkpoint.files) throw new ApiError(409, "files_failed", `The working folder could not be bundled (${checkpoint.note ?? "no details"}), so ${name} would not get the latest files. Nothing was handed over.`);
+				return { seq: checkpoint.seq, sha256: checkpoint.snapshot.sha256 };
+			}
 			if (!checkpoint.pushed) throw new ApiError(409, "push_failed", `The shared branch could not be pushed (${checkpoint.note ?? "no details"}), so ${name} would not get the latest changes. Nothing was handed over.`);
 			return { seq: checkpoint.seq, sha256: checkpoint.snapshot.sha256 };
 		}

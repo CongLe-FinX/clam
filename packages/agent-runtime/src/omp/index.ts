@@ -11,3 +11,4 @@ export * from "./events.ts";
 export * from "./session-runtime.ts";
 export * from "./supervisor.ts";
 export * from "./session-transfer.ts";
+export * from "./subagents.ts";

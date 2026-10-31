@@ -1,5 +1,5 @@
 import type { Capability, SharedSession } from "@clam/contracts";
-import { Info, ShieldAlert, UserPlus } from "lucide-react";
+import { GitBranch, Info, ShieldAlert, UserPlus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { PeerStatusBadge } from "@/features/network/components";
@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { StatusDot } from "@/ui/status-dot";
 import { useAddParticipant } from "./hooks.ts";
 import { teamOf } from "./format.ts";
+import { FILES_INFO, ModeNote, projectShareMode, type ShareMode } from "./mode.tsx";
 
 const ANY = "__any__";
 const SHARE: Capability = "sessions.share";
@@ -46,8 +47,8 @@ export default function AddAgentDialog({ sessionId, projectId, shared, onClose, 
 
 	const theyAllow = peer ? peer.receivedCapabilities.includes(SHARE) : true;
 	const weAllow = peer ? peer.grantedCapabilities.includes(SHARE) : true;
-	const noRepo = project !== undefined && project.repository === null;
-	const ready = Boolean(peer && !noRepo);
+	const mode: ShareMode | null = shared ? shared.vcs : project ? projectShareMode(project) : null;
+	const ready = Boolean(peer);
 	const noNodes = peers.isSuccess && usable.length === 0;
 
 	const submit = () => {
@@ -57,7 +58,7 @@ export default function AddAgentDialog({ sessionId, projectId, shared, onClose, 
 			{
 				onSuccess: (s) => {
 					const a = agents.find((x) => x.agentId === agentKey);
-					toast.success(`Invited ${a ? `${a.name}@` : ""}${peer.name}`, { description: "It joins as soon as that node accepts. You can follow it in the Team tab." });
+					toast.success(`Invited ${a ? `${a.name}@` : ""}${peer.name}`, { description: "It joins as soon as that machine accepts. You can follow it in the Team tab." });
 					onAdded?.(s);
 					onClose();
 				},
@@ -71,7 +72,7 @@ export default function AddAgentDialog({ sessionId, projectId, shared, onClose, 
 				<DialogHeader>
 					<DialogTitle>Add an agent to this session</DialogTitle>
 					<DialogDescription>
-						An agent on another node joins your work: it follows this conversation live, works in its own clone, and discusses with you and your agent in a shared thread. This session keeps being driven here; the other node can continue it if this one goes offline.
+						An agent on another machine joins your work: it follows this conversation live, works in its own clone or folder, and discusses with you and your agent in a shared thread. This session keeps being driven here; the other machine can continue it if this one goes offline.
 					</DialogDescription>
 				</DialogHeader>
 				<form
@@ -85,9 +86,9 @@ export default function AddAgentDialog({ sessionId, projectId, shared, onClose, 
 						<div role="status" className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-[13px] text-muted-foreground">
 							<Info className="mt-0.5 size-4 shrink-0" aria-hidden />
 							<span>
-								No node is paired with this one yet.{" "}
+								No machine is paired with this one yet.{" "}
 								<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "invite-node" })}>
-									Invite a node
+									Invite a machine
 								</button>{" "}
 								or{" "}
 								<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "join-node" })}>
@@ -98,11 +99,11 @@ export default function AddAgentDialog({ sessionId, projectId, shared, onClose, 
 						</div>
 					) : null}
 					<div className="grid gap-3 sm:grid-cols-2">
-						<Field label="Node">
+						<Field label="Machine">
 							{() => (
 								<Select value={peerId} onValueChange={setPeerId} disabled={noNodes}>
 									<SelectTrigger>
-										<SelectValue placeholder="Choose a node" />
+										<SelectValue placeholder="Choose a machine" />
 									</SelectTrigger>
 									<SelectContent>
 										{usable.map((p) => (
@@ -118,7 +119,7 @@ export default function AddAgentDialog({ sessionId, projectId, shared, onClose, 
 								</Select>
 							)}
 						</Field>
-						<Field label="Agent" hint="Leave on “any” to let that node choose.">
+						<Field label="Agent" hint="Leave on “any” to let that machine choose.">
 							{() => (
 								<Select value={agentKey} onValueChange={setAgentKey} disabled={!peer}>
 									<SelectTrigger>
@@ -151,7 +152,7 @@ export default function AddAgentDialog({ sessionId, projectId, shared, onClose, 
 						<div role="alert" className="flex items-start gap-2 rounded-lg bg-danger/10 px-3 py-2.5 text-xs text-danger">
 							<ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
 							<span>
-								{peer.name} has not allowed this node to share sessions with it (<code className="font-mono">sessions.share</code>). Ask its owner to grant it under Connected Nodes → {peer.name}'s permissions for this node; the invitation will be refused until then.
+								{peer.name} has not allowed this machine to share sessions with it (<code className="font-mono">sessions.share</code>). Ask its owner to grant it under Machines → {peer.name}'s permissions for this machine; the invitation will be refused until then.
 							</span>
 						</div>
 					) : null}
@@ -160,7 +161,7 @@ export default function AddAgentDialog({ sessionId, projectId, shared, onClose, 
 							<span className="flex items-start gap-2">
 								<ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
 								<span>
-									{peer.name} is not allowed to share sessions with this node yet (<code className="font-mono">sessions.share</code>, not granted by default). It needs that to send its mirror updates, discussion messages and to take over.
+									{peer.name} is not allowed to share sessions with this machine yet (<code className="font-mono">sessions.share</code>, not granted by default). It needs that to send its mirror updates, discussion messages and to take over.
 								</span>
 							</span>
 							<Button
@@ -169,19 +170,23 @@ export default function AddAgentDialog({ sessionId, projectId, shared, onClose, 
 								variant="outline"
 								className="self-start"
 								loading={updatePeer.isPending}
-								onClick={() => updatePeer.mutate({ id: peer.id, grantedCapabilities: [...peer.grantedCapabilities, SHARE] }, { onSuccess: () => toast.success(`${peer.name} may now share sessions with this node`) })}
+								onClick={() => updatePeer.mutate({ id: peer.id, grantedCapabilities: [...peer.grantedCapabilities, SHARE] }, { onSuccess: () => toast.success(`${peer.name} may now share sessions with this machine`) })}
 							>
 								Grant sessions.share to {peer.name}
 							</Button>
 						</div>
 					) : null}
-					{noRepo ? (
-						<p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
-							This project has no linked GitHub repository. Sharing works through a shared branch on GitHub, so link the project's repository first.
-						</p>
-					) : project?.repository ? (
-						<p className="text-xs text-subtle">
-							The team works on <code className="font-mono">{project.repository.owner}/{project.repository.name}</code>. A shared branch is created from the project's current HEAD and pushed with this node's GitHub account.
+					{mode === "files" ? (
+						<ModeNote
+							mode="files"
+							copy={{ git: "", files: `${FILES_INFO} Every checkpoint bundles the working folder; the other machine applies it into a local folder (a managed folder is created for you, or it picks an existing local folder when it accepts) — files that differ locally are reported, never silently overwritten.` }}
+						/>
+					) : mode === "git" && project?.repository ? (
+						<p className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-xs text-muted-foreground">
+							<GitBranch className="mt-0.5 size-4 shrink-0 text-subtle" aria-hidden />
+							<span>
+								<strong className="font-medium text-foreground">Git branch.</strong> The team works on <code className="font-mono">{project.repository.owner}/{project.repository.name}</code>. A shared branch is created from the project's current HEAD and pushed with this machine's GitHub account.
+							</span>
 						</p>
 					) : null}
 

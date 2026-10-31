@@ -41,10 +41,12 @@ export interface TaskGitDeps {
 	artifacts: Pick<ArtifactStore, "add">;
 	nodeName(): string;
 	log: { warn(o: object, m?: string): void };
+	/** Local fence (`FenceApi.assertOwner`): throws when this node no longer owns the task. Called right before the commit and before the push. */
+	assertOwner?(taskId: string): void;
 }
 
 /** The fields of a task the git steps read; any work item with these (and its own `execState.prepared`) can use them. */
-export type GitSubject = Pick<TaskRow, "id" | "title" | "repoUrl" | "repoBranch" | "executorAgentName" | "execState">;
+export type GitSubject = Pick<TaskRow, "id" | "title" | "repoBranch" | "executorAgentName" | "execState"> & { repoUrl: string | null };
 
 const MAX_LISTED_PATHS = 5;
 
@@ -129,6 +131,7 @@ export class TaskGit {
 
 	async deliver(task: GitSubject, project: ProjectRef, prepared: PreparedBranch, o: { sessionId: string | null }): Promise<DeliveryResult> {
 		const { workBranch, baseRef } = prepared;
+		this.deps.assertOwner?.(task.id);
 		let status = await this.gitService.status(project.id);
 		if (status.branch !== workBranch) {
 			try {
@@ -146,6 +149,7 @@ export class TaskGit {
 		if (renamed.length > 0) status = await this.gitService.unstage(project.id, renamed);
 		const changed = status.files.length > 0;
 		if (changed) {
+			this.deps.assertOwner?.(task.id);
 			const paths = status.files.map((f) => f.path);
 			const agent = `${task.executorAgentName ?? "agent"}@${this.deps.nodeName()}`;
 			try {
@@ -172,6 +176,7 @@ export class TaskGit {
 		}
 
 		let pushed: GitPushResult | null = null;
+		this.deps.assertOwner?.(task.id);
 		let pushError = "";
 		try {
 			pushed = await this.gitService.push(project.id, { setUpstream: true });
@@ -183,7 +188,7 @@ export class TaskGit {
 
 		let result: DeliveryResult;
 		if (pushed) {
-			const repo = normalizeRepoUrl(task.repoUrl);
+			const repo = task.repoUrl === null ? null : normalizeRepoUrl(task.repoUrl);
 			result = {
 				branch: workBranch,
 				commit: status.headSha,

@@ -7,6 +7,8 @@ import type {
 	SessionEvent,
 	SessionLiveState,
 	SessionStats,
+	Subagent,
+	SubagentMessagesPage,
 	TokenTotals,
 	UiResponseBody as UiResponseBodySchema,
 } from "@clam/contracts";
@@ -43,6 +45,8 @@ export interface RuntimeSessionSpec {
 	approvalMode?: ApprovalMode;
 	/** Spend cap in USD for this session's process (`--max-cost`; OMP stops sending model requests once reached). Finite and > 0. */
 	maxCostUsd?: number;
+	/** Text appended to the agent's system prompt at every spawn of the session's process (`--append-system-prompt`). */
+	appendSystemPrompt?: string;
 }
 
 /** A tool CLAM exposes to the agent that is executed by the host (CLAM) rather than by the agent process. */
@@ -180,6 +184,14 @@ export interface RuntimeSession {
 	/** Cumulative statistics of this conversation as reported by the runtime. */
 	getStats(): Promise<SessionStats & { sessionId: string | null }>;
 	/**
+	 * OMP `handoff {customInstructions?}`: the runtime writes a handoff document of the conversation and commits it as a compaction
+	 * entry of the session. Resolves with the document text (read from the file the runtime saved it to, else from the newest
+	 * `compactionSummary` message of the transcript; `text` is null when the runtime produced none) and the path it was saved to.
+	 * Rejects with `invalid_state` while a turn is in progress (settle or abort the session first) and with `rejected` when the
+	 * runtime refuses (for example "Nothing to hand off"). Changes the runtime's own context: use it only when the conversation is about to move.
+	 */
+	handoffSummary(customInstructions?: string): Promise<{ text: string | null; savedPath: string | null }>;
+	/**
 	 * Transcript page, newest page first. `messages` inside a page are chronological; `nextCursor`
 	 * points at the older page. Served from an in-memory transcript that includes the in-flight message.
 	 */
@@ -188,6 +200,14 @@ export interface RuntimeSession {
 	respondToUiRequest(body: UiResponseBody): Promise<void>;
 	/** Currently unanswered `ui_request`s, so a reconnecting client can render them. */
 	pendingUiRequests(): Array<Extract<SessionEvent, { type: "ui_request" }>>;
+	/** Every subagent the agent spawned in this conversation (finished ones included), oldest first. Survives process restarts. */
+	subagents(): Subagent[];
+	/** A subagent's own transcript from `fromByte` on (reuse `nextByte`). Rejects `invalid_argument` for an unknown subagent. */
+	subagentMessages(subagentId: string, fromByte?: number): Promise<SubagentMessagesPage>;
+	/** Hard-stop one running subagent without aborting the parent turn. `cancelled` is false when it was not running. */
+	cancelSubagent(subagentId: string): Promise<{ cancelled: boolean }>;
+	/** Message a running subagent as its user; resolves once it accepted the message. */
+	steerSubagent(subagentId: string, message: string): Promise<void>;
 	/** Per-model usage of messages finished since the previous call (attribution for usage accounting); clears the buffer. */
 	takeUsage(): UsageDelta[];
 }

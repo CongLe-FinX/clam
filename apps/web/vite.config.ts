@@ -12,10 +12,21 @@ const proxy = {
 	"/ws": { target: apiTarget.replace(/^http/, "ws"), ws: true, changeOrigin: false },
 };
 
+/** KaTeX's stylesheet lists woff2, woff and ttf for every face; browsers that run this app all take woff2, so ship only that. */
+const katexWoff2Only = (): PluginOption => ({
+	name: "clam:katex-woff2-only",
+	enforce: "pre",
+	transform(code, id) {
+		if (!/katex[\\/]dist[\\/]katex\.min\.css/.test(id)) return null;
+		return code.replace(/,url\([^)]*?\.(?:woff|ttf)\) format\("(?:woff|truetype)"\)/g, "");
+	},
+});
+
 export default defineConfig(({ mode }) => ({
 	plugins: [
 		react(),
 		tailwindcss(),
+		katexWoff2Only(),
 		process.env.ANALYZE
 			? (visualizer({
 					filename: process.env.ANALYZE === "json" ? "dist/stats.json" : "dist/stats.html",
@@ -39,7 +50,8 @@ export default defineConfig(({ mode }) => ({
 				manualChunks(id: string) {
 					if (!id.includes("node_modules")) return undefined;
 					if (/\/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
-					if (id.includes("@tanstack")) return "tanstack";
+					// Router + query are the shell; virtual/table-style packages ride with the lazy pages that use them.
+					if (/\/node_modules\/@tanstack\/(react-router|router-core|history|react-query|query-core|react-store|store)\//.test(id)) return "tanstack";
 					return undefined;
 				},
 			},

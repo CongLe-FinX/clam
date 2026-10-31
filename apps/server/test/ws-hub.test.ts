@@ -90,4 +90,18 @@ describe("WebSocket hub", () => {
 		await ws.waitFor((f) => f.type === "event" && f.topic === "git:prj_1", "git event");
 		ws.close();
 	});
+
+	it("accepts the handoffs and handoff:<id> topics (the Handoff Center is live over them, not just by polling) and delivers what is published", async () => {
+		full = await createFullHarness();
+		const ws = await connectWs(full);
+		ws.send({ type: "subscribe", topics: ["handoffs", "handoff:hnd_1", "handoff:../x"] });
+		const ack = await ws.waitFor((f) => f.type === "subscribed", "subscribed");
+		expect(ack.topics).toEqual(["handoffs", "handoff:hnd_1"]);
+		expect(ws.frames.filter((f) => f.type === "error")).toHaveLength(1);
+
+		full.ctx.bus.publish("handoff:hnd_1", { type: "event", handoffId: "hnd_1", event: { seq: 1, at: new Date().toISOString(), nodeId: "node_x", state: "accepted", summary: "Accepted" } });
+		const frame = await ws.waitFor((f) => f.type === "event" && f.topic === "handoff:hnd_1", "handoff event");
+		expect(frame).toMatchObject({ seq: 1, event: { type: "event", handoffId: "hnd_1" } });
+		ws.close();
+	});
 });

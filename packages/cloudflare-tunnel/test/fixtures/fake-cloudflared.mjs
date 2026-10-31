@@ -39,6 +39,8 @@ writeFileSync(
 
 process.on("SIGTERM", () => {
 	writeFileSync(join(dir, `term-${n}`), "1");
+	// Real cloudflared drains its edge connections on SIGTERM, so /ready reports 0 while it winds down.
+	if (process.env.FAKE_CF_TERM_DRAINS === "1") writeFileSync(join(dir, "conns"), "0");
 	if (process.env.FAKE_CF_IGNORE_TERM === "1") return;
 	process.exit(0);
 });

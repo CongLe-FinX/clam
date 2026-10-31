@@ -7,12 +7,12 @@ import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { Skeleton } from "@/ui/skeleton";
 import { MessageRow } from "./message-row.tsx";
+import { Starters } from "./starters.tsx";
 import { isBusy, type SessionStream, useOrder, useStreamMeta } from "./stream-store.ts";
+import { TypingIndicator } from "./typing-indicator.tsx";
 
 const STICK_THRESHOLD = 72;
 const LOAD_OLDER_THRESHOLD = 280;
-
-const STARTERS = ["Give me a quick tour of this codebase", "Find the cause of the failing tests and fix it", "Review my uncommitted changes", "Write a plan before changing anything: what should we improve first?"];
 
 function ConversationSkeleton() {
 	return (
@@ -37,6 +37,24 @@ function ConversationSkeleton() {
 	);
 }
 
+/** First-guess row height before a row is measured (code and media rows are measured as they mount). Keeps the scrollbar honest on long logs. */
+function estimateRow(stream: SessionStream, key: string | undefined): number {
+	const rec = key === undefined ? undefined : stream.getRec(key);
+	if (!rec) return 80;
+	const user = rec.msg.role === "user";
+	let h = user ? 52 : 44;
+	for (const b of rec.msg.content) {
+		if (b.type === "text") {
+			let lines = 0;
+			for (const line of b.text.split("\n", 60)) lines += Math.max(1, Math.ceil(line.length / (user ? 70 : 88)));
+			h += Math.min(lines, 60) * (user ? 21 : 23) + (user ? 0 : 12);
+		} else if (b.type === "toolCall") h += 46;
+		else if (b.type === "thinking") h += 30;
+		else h += 220;
+	}
+	return Math.min(h, 900);
+}
+
 export function Conversation({ stream, onPickPrompt, readOnly, className }: { stream: SessionStream; onPickPrompt: (text: string) => void; /** Mirror / moved copy: no starter prompts. */ readOnly?: boolean; className?: string }) {
 	const rows = useOrder(stream);
 	const historyStatus = useStreamMeta(stream, (m) => m.historyStatus);
@@ -47,6 +65,7 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 	const busy = useStreamMeta(stream, isBusy);
 
 	const parentRef = useRef<HTMLDivElement>(null);
+	const contentRef = useRef<HTMLDivElement>(null);
 	const stick = useRef(true);
 	const [atBottom, setAtBottom] = useState(true);
 	const [unread, setUnread] = useState(0);
@@ -54,15 +73,18 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 	const firstKey = useRef<string | undefined>(undefined);
 	const lastKey = useRef<string | undefined>(undefined);
 	const lastLen = useRef(0);
+	const hasRows = rows.length > 0;
 
+	// Stable between renders so the virtualizer's measurement cache is only rebuilt when the row list changes.
+	const getItemKey = useCallback((i: number) => rows[i] ?? i, [rows]);
+	const estimateSize = useCallback((i: number) => estimateRow(stream, rows[i]), [stream, rows]);
 	const v = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => parentRef.current,
-		estimateSize: () => 132,
-		overscan: 8,
-		paddingStart: 20,
+		estimateSize,
+		overscan: 5,
 		paddingEnd: 20,
-		getItemKey: (i) => rows[i] ?? i,
+		getItemKey,
 	});
 
 	const loadOlder = useCallback(() => {
@@ -106,13 +128,28 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 			const off = idx >= 0 ? v.getOffsetForIndex(idx, "start") : undefined;
 			if (off) el.scrollTop = off[0] - anchor.current.offset;
 			anchor.current = null;
-		} else if (stick.current && (busy || grew || lastLen.current === 0)) {
+		} else if (stick.current && (grew || lastLen.current === 0)) {
 			el.scrollTop = el.scrollHeight;
 		}
 		firstKey.current = first;
 		lastKey.current = last;
 		lastLen.current = rows.length;
 	});
+
+	// Anything that changes the scrollable height or the viewport while the user is at the bottom keeps the tail in view: streamed
+	// text, an image/video that finished loading, a measured row replacing its estimate, the typing indicator, the mobile keyboard
+	// resizing the viewport. ResizeObserver callbacks run after layout and before paint, so there is no visible jump.
+	useEffect(() => {
+		const scroller = parentRef.current;
+		const content = contentRef.current;
+		if (!hasRows || !scroller || !content) return;
+		const ro = new ResizeObserver(() => {
+			if (stick.current) scroller.scrollTop = scroller.scrollHeight;
+		});
+		ro.observe(scroller);
+		ro.observe(content);
+		return () => ro.disconnect();
+	}, [hasRows]);
 
 	// Unread indicator: rows appended at the tail while the user is scrolled away.
 	const prevLast = useRef<string | undefined>(undefined);
@@ -166,29 +203,17 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 	}
 
 	if (rows.length === 0 && readOnly) {
-		return <EmptyState icon={MessagesSquare} title="Nothing to show yet" description="This is a read-only copy. Messages appear here as soon as the node that runs the work sends them." className={cn("flex-1", className)} />;
+		return <EmptyState icon={MessagesSquare} title="Nothing to show yet" description="This is a read-only copy. Messages appear here as soon as the machine that runs the work sends them." className={cn("flex-1", className)} />;
 	}
 
 	if (rows.length === 0) {
 		return (
-			<div className={cn("flex min-h-0 flex-1 flex-col items-center justify-center gap-6 overflow-y-auto px-4 py-8", className)}>
-				<EmptyState icon={MessagesSquare} title="Start the conversation" description="Describe a task, ask a question about the code, or pick a starting point." className="py-0" />
-				<div className="flex w-full max-w-md flex-col gap-2">
-					{STARTERS.map((s) => (
-						<button
-							key={s}
-							type="button"
-							onClick={() => onPickPrompt(s)}
-							className="rounded-xl bg-surface-1 px-3.5 py-2.5 text-left text-[13px] text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] outline-none transition-[background-color,color,transform] hover:bg-surface-2 hover:text-foreground focus-visible:bg-surface-2 active:scale-[0.99] coarse:py-3.5"
-						>
-							{s}
-						</button>
-					))}
-				</div>
+			<div className={cn("flex min-h-0 flex-1 flex-col items-center gap-6 overflow-y-auto px-4 py-8 [&>:first-child]:mt-auto [&>:last-child]:mb-auto", className)}>
+				<EmptyState icon={MessagesSquare} title="Start the conversation" description="Describe a task or pick an example. Anything the agent creates shows up here and in the Files panel." className="py-0" />
+				<Starters onPick={onPickPrompt} />
 			</div>
 		);
 	}
-
 	return (
 		<div className={cn("relative min-h-0 flex-1", className)}>
 			<div
@@ -199,18 +224,21 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 				aria-relevant="additions"
 				className="scrollbar-thin absolute inset-0 overflow-y-auto overscroll-contain [overflow-anchor:none]"
 			>
-				<div className="relative w-full" style={{ height: v.getTotalSize() }}>
-					{v.getVirtualItems().map((item) => {
-						const key = rows[item.index];
-						if (key === undefined) return null;
-						return (
-							<div key={item.key} data-index={item.index} ref={v.measureElement} className="absolute left-0 top-0 w-full" style={{ transform: `translateY(${item.start}px)` }}>
-								<div className="mx-auto w-full max-w-3xl px-4 pb-5">
-									<MessageRow stream={stream} rowKey={key} />
+				<div ref={contentRef}>
+					<div className="relative w-full" style={{ height: v.getTotalSize() }}>
+						{v.getVirtualItems().map((item) => {
+							const key = rows[item.index];
+							if (key === undefined) return null;
+							return (
+								<div key={item.key} data-index={item.index} ref={v.measureElement} className="absolute left-0 top-0 w-full" style={{ transform: `translateY(${item.start}px)` }}>
+									<div className="mx-auto w-full max-w-[60rem] px-4">
+										<MessageRow stream={stream} rowKey={key} prevKey={rows[item.index - 1]} />
+									</div>
 								</div>
-							</div>
-						);
-					})}
+							);
+						})}
+					</div>
+					<TypingIndicator stream={stream} />
 				</div>
 			</div>
 			{loadingOlder ? (
@@ -225,7 +253,7 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 					<button
 						type="button"
 						onClick={toBottom}
-						className="animate-pop-in pointer-events-auto flex h-8 items-center gap-1.5 rounded-full bg-overlay pl-2.5 pr-3 text-xs font-medium shadow-pop shadow-[inset_0_0_0_1px_var(--border-strong)] outline-none transition-transform hover:bg-surface-2 active:scale-95 coarse:h-11"
+						className="animate-pop-in pointer-events-auto flex h-8 items-center gap-1.5 rounded-full bg-overlay pl-2.5 pr-3 text-xs font-medium shadow-pop shadow-[inset_0_0_0_1px_var(--border-strong)] outline-none transition-transform hover:bg-surface-2 focus-visible:shadow-[inset_0_0_0_2px_var(--accent)] active:scale-95 coarse:h-11"
 					>
 						<ArrowDown className="size-3.5" aria-hidden />
 						{unread > 0 ? (

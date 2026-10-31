@@ -236,6 +236,26 @@ describe("addressing", () => {
 		expect(unknown.to).toEqual({ mode: "lead", agents: [] });
 	});
 
+	it("a qualified @agent@machine mention wakes exactly one of two agents with the same name (the picker's token)", async () => {
+		const { shared } = await joined();
+		// "OMP Agent" runs on both nodes: the bare name is ambiguous, the qualified token is not
+		const aBefore = promptsOf(pair.a).length;
+		const toB = await say(pair.a, shared.id, `@OMP Agent@node-b only-b${QUIET}`);
+		expect(toB.to).toEqual({ mode: "agents", agents: [{ nodeId: pair.bId, agentId: expect.any(String) }] });
+		await eventually(() => promptsWith(pair.b, "only-b").length === 1, "B's agent woken by the qualified mention");
+		expect(promptsWith(pair.a, "only-b")).toHaveLength(0);
+		expect(promptsOf(pair.a).length).toBe(aBefore);
+
+		const toA = await say(pair.b, shared.id, `@omp-agent@NODE-A only-a${QUIET}`);
+		expect(toA.to).toEqual({ mode: "agents", agents: [{ nodeId: pair.aId, agentId: expect.any(String) }] });
+		await eventually(() => promptsWith(pair.a, "only-a").length === 1, "A's agent woken by the qualified mention");
+		expect(promptsWith(pair.b, "only-a")).toHaveLength(0);
+
+		// a qualifier that matches nobody must not fan out to every "OMP Agent"
+		const typo = await say(pair.a, shared.id, "@OMP Agent@node-z is nobody");
+		expect(typo.to).toEqual({ mode: "lead", agents: [] });
+	});
+
 	it("an explicit `to` wins over the mentions; unknown agents, human replies and system messages are refused", async () => {
 		const { shared } = await joined();
 		const explicit = await say(pair.a, shared.id, "@node-b but really for nobody", NOBODY);
@@ -342,6 +362,25 @@ describe("replies: the final text of every agent turn", () => {
 		expect((await sharedOn(pair.b, shared.id)).agentMessageBudget).toBe(12);
 		await eventually(() => pair.a.ctx.shared.store.messages(shared.id).some((m) => m.kind === "reply" && m.authorNodeId === pair.bId), "B's reply in A's log");
 		expect(pair.a.ctx.shared.store.messages(shared.id).filter((m) => m.kind === "reply" && m.authorNodeId === pair.bId).every((m) => m.to.agents.length === 0)).toBe(true);
+	});
+
+	it("does not post the final text again when the agent already said exactly that through mesh_say during the turn; a different final text is still posted", async () => {
+		const { shared, sessionId } = await joined();
+		const fromA = (node: FullHarness) => node.ctx.shared.store.messages(shared.id).filter((m) => m.authorNodeId === pair.aId && m.authorKind === "agent");
+
+		// the lead answers through the tool, then ends its turn with the same words (other whitespace): one line in the group, not two
+		await promptAndWait(pair.a, sessionId, 'what is the answer?\n@@fake-tool mesh_say {"kind":"answer","text":"The answer\\nis  42"}\n@@fake-final The answer is 42');
+		await whenSettled(pair.a, sessionId);
+
+		// a turn with the tool post AND a different closing text posts both; its reply is the marker that the first turn's reply (if any) was already decided
+		await promptAndWait(pair.a, sessionId, 'one more\n@@fake-tool mesh_say {"kind":"note","text":"Checked the logs"}\n@@fake-final All done here');
+		const marker = await eventually(() => fromA(pair.a).find((m) => m.kind === "reply" && m.text === "All done here"), "the reply of the second turn");
+
+		const lines = fromA(pair.a).map((m) => `${m.kind}: ${m.text.replace(/\s+/g, " ")}`);
+		expect(lines).toEqual(["answer: The answer is 42", "note: Checked the logs", "reply: All done here"]);
+		// …on the other node too
+		await eventually(() => pair.b.ctx.shared.store.message(marker.id), "the closing reply on B");
+		expect(fromA(pair.b).map((m) => m.kind)).toEqual(["answer", "note", "reply"]);
 	});
 
 	it("over the loop budget a reply is still posted, but wakes nobody, and the group is told; a human message gives the budget back", async () => {
@@ -457,9 +496,13 @@ describe("catching up by pull (POST /shared/:id/messages/sync)", () => {
 
 	it("pulling the same page twice into a node that has it changes nothing (no duplicates, no new wake-ups)", async () => {
 		const { shared, bSession } = await joined();
+		const replies = () => pair.b.ctx.shared.store.messages(shared.id).filter((m) => m.kind === "reply" && m.authorNodeId === pair.bId).length;
+		const repliesBefore = replies();
 		await say(pair.a, shared.id, `@node-b once only${QUIET}`);
 		await eventually(() => promptsWith(pair.b, "once only").length === 1, "B woken");
 		await whenSettled(pair.b, bSession);
+		// B's agent posts its end-of-turn reply after the turn settles: let it land before taking the snapshot.
+		await eventually(() => replies() === repliesBefore + 1, "B's reply to 'once only' in its log");
 		const before = idsOf(pair.b, shared.id);
 		const prompts = promptsOf(pair.b).length;
 		await pair.b.ctx.shared.discussion.syncPeer(pair.aId);

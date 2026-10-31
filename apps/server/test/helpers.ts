@@ -17,6 +17,8 @@ import { createAutostartManager } from "../src/services/autostart.ts";
 import { GitService } from "../src/services/git-service.ts";
 import { HostToolRegistry } from "../src/services/host-tool-registry.ts";
 import { SessionService } from "../src/services/session-service.ts";
+import { TurnOutputService } from "../src/services/turn-outputs.ts";
+import { ContextService } from "../src/context/service.ts";
 import { TaskService } from "../src/tasks/service.ts";
 
 export interface TestHarness {
@@ -138,11 +140,14 @@ export async function createTestHarness(options: {
 		...options.ctx,
 	} as ServerContext;
 	ctx.network ??= createNetwork(ctx);
+	ctx.turnOutputs ??= new TurnOutputService(ctx);
 	ctx.sessions ??= new SessionService(ctx);
 	ctx.gitService ??= new GitService(ctx);
 	ctx.hostTools ??= new HostToolRegistry();
 	ctx.tasks ??= new TaskService(ctx);
 	ctx.network.attachTasks(ctx.tasks);
+	ctx.contexts ??= new ContextService(ctx);
+	ctx.network.attachContexts(ctx.contexts);
 
 	for (const plugin of options.plugins) await app.register(plugin, { prefix: LOCAL_API_PREFIX, ctx });
 	await app.ready();

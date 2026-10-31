@@ -1,0 +1,2 @@
+{"type":"extension_ui_request","id":"15bc1cbff9daf19d","method":"ask","questions":[{"id":"color","question":"Pick a color","header":"Color","options":[{"label":"Red"},{"label":"Blue"}],"recommended":1}]}
+{"type":"tool_execution_end","toolCallId":"toolu_01TysLD583P9HgwjPwVmyAfJ","toolName":"ask","result":{"content":[{"type":"text","text":"User selected: Blue"}],"details":{"question":"Pick a color","options":["Red","Blue"],"multi":false,"selectedOptions":["Blue"]}},"isError":false}

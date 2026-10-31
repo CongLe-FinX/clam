@@ -5,11 +5,14 @@ import { buildBrief, buildCompletionReminder, buildResumePrompt, formatAuthor, h
 import { and, asc, eq, isNull } from "drizzle-orm";
 import type { wire } from "@clam/agent-network";
 import { ApiError } from "../http/errors.ts";
+import { createManagedProject } from "../services/project-folders.ts";
+import { MAX_ARTIFACT_BYTES } from "./artifacts.ts";
 import { errorText, KeyedLock } from "../network/util.ts";
 import { readNodeSettings } from "../services/settings.ts";
 import { execState, type BlockedFor, type ExecState } from "./exec-state.ts";
 import type { DecideInput, ExecutorApi, TaskHub } from "./hub.ts";
 import type { TaskMessageRow, TaskRow } from "./store.ts";
+import type { PreparedFolder } from "./files.ts";
 import { TaskBlockedError, TaskFailedError, TaskGit, type PreparedBranch, type ProjectRef } from "./task-git.ts";
 
 type Completion = NonNullable<ExecState["completion"]>;
@@ -32,6 +35,8 @@ export class TaskExecutor implements ExecutorApi {
 	private readonly runs = new Set<Promise<void>>();
 	private readonly sessionTasks = new Map<string, string>();
 	private readonly finalising = new Set<string>();
+	/** Fenced tasks whose agent ended a turn successfully after the fence: the next `settled` is its late result. */
+	private readonly finishedWhileFenced = new Set<string>();
 	/** Distinguishes the resume prompt of this boot from earlier ones (prompt idempotency is per client id). */
 	private readonly bootId = ulid();
 	private unsubscribe: (() => void) | null = null;
@@ -48,8 +53,12 @@ export class TaskExecutor implements ExecutorApi {
 		return this.hub.ctx;
 	}
 
+	private get fence() {
+		return this.ctx.handoffs.fence;
+	}
+
 	private git(): TaskGit {
-		this.taskGit ??= new TaskGit({ gitService: this.ctx.gitService, git: this.ctx.git, artifacts: this.hub.artifacts, nodeName: () => this.hub.nodeName(), log: this.hub.log });
+		this.taskGit ??= new TaskGit({ gitService: this.ctx.gitService, git: this.ctx.git, artifacts: this.hub.artifacts, nodeName: () => this.hub.nodeName(), log: this.hub.log, assertOwner: (taskId) => this.fence.assertOwner(taskId) });
 		return this.taskGit;
 	}
 
@@ -59,6 +68,13 @@ export class TaskExecutor implements ExecutorApi {
 		this.stopped = false;
 		this.unsubscribe = this.ctx.runtime.onEvent((sessionId, event) => this.onRuntimeEvent(sessionId, event));
 		for (const task of this.store.list({ direction: "incoming", statuses: ["running", "blocked"] })) {
+			// A fenced task is never started, resumed or retried.
+			if (task.fenced) continue;
+			if (this.fence.isFrozen(task.id) || (task.executorSessionId && this.fence.blockedResume(task.id))) {
+				// A handoff holds the task, or one is in doubt (§8.3): only the spawn settings survive; nothing is prompted until it is settled.
+				if (task.executorSessionId) this.registerOverrides(task, task.executorSessionId);
+				continue;
+			}
 			const state = execState(task);
 			if (task.status === "running" || state.blockedFor === "approval") {
 				this.track(this.recover(task));
@@ -101,8 +117,11 @@ export class TaskExecutor implements ExecutorApi {
 			.where(and(eq(workspaceMembers.workspaceId, request.workspaceId), eq(workspaceMembers.memberId, peerId), isNull(workspaceMembers.revokedAt)))
 			.get();
 		if (!member) throw new ApiError(403, "forbidden", "The sender is not a member of that workspace on this node");
-		const repo = normalizeRepoUrl(request.projectRef.repoUrl);
-		if (!repo) throw ApiError.badRequest("projectRef.repoUrl is not a GitHub repository URL");
+		const ref = request.projectRef ?? null;
+		const repo = ref ? normalizeRepoUrl(ref.repoUrl) : null;
+		if (ref && !repo) throw ApiError.badRequest("projectRef.repoUrl is not a GitHub repository URL");
+		if (!ref && request.deliverAs === "branch") throw ApiError.badRequest("A task delivered as a branch needs projectRef (the GitHub repository)");
+		if (request.inputFiles && request.inputFiles.size > MAX_ARTIFACT_BYTES) throw new ApiError(413, "input_too_large", "The input files are larger than this node accepts");
 		const agent = request.targetAgentId ? this.ompAgent(request.targetAgentId) : null;
 		if (request.targetAgentId && !agent) throw new ApiError(400, "unknown_agent", "The requested agent does not exist on this node");
 
@@ -115,10 +134,11 @@ export class TaskExecutor implements ExecutorApi {
 			description: request.description,
 			status: "offered",
 			epoch: request.epoch,
-			repoUrl: repo.url,
-			repoBranch: request.projectRef.branch ?? null,
-			repoCommit: request.projectRef.commit ?? null,
+			repoUrl: repo?.url ?? null,
+			repoBranch: ref?.branch ?? null,
+			repoCommit: ref?.commit ?? null,
 			deliverAs: request.deliverAs,
+			inputFiles: request.inputFiles ?? null,
 			constraints: request.constraints,
 			senderNodeId: peerId,
 			senderNodeName: peer.name,
@@ -131,11 +151,12 @@ export class TaskExecutor implements ExecutorApi {
 			correlationId: request.correlationId,
 		});
 		const event = this.store.appendEvent(row.id, { type: "status", summary: `Offered by ${peer.name}`, payload: { from: null, to: "offered", reason: null } });
-		const candidates = this.candidateProjects(repo.key);
+		const candidates = repo ? this.candidateProjects(repo.key) : [];
 		const onlyCandidate = candidates.length === 1 ? candidates[0] : undefined;
-		if (peer.autoAcceptTasks && onlyCandidate) {
+		// A task without a repository needs no matching project: auto-accepting gives it a folder of its own.
+		if (peer.autoAcceptTasks && (!repo || onlyCandidate)) {
 			try {
-				this.accept(row, { projectId: onlyCandidate.id });
+				this.accept(row, onlyCandidate ? { projectId: onlyCandidate.id } : {});
 			} catch (error) {
 				this.hub.log.warn({ err: errorText(error), taskId: row.id }, "auto-accepting a delegated task failed; it stays offered");
 			}
@@ -161,19 +182,7 @@ export class TaskExecutor implements ExecutorApi {
 		if (task.status !== "offered" && !(reaccept && execState(task).blockedFor === "tree")) {
 			throw ApiError.conflict(`Task is ${task.status}; only an offered task (or one blocked on its working tree) can be accepted`, { status: task.status });
 		}
-		const key = normalizeRepoUrl(task.repoUrl)?.key ?? "";
-		const candidates = this.candidateProjects(key);
-		const projectId = choice.projectId ?? task.projectId ?? (candidates.length === 1 ? candidates[0]?.id : undefined);
-		if (!projectId) {
-			throw new ApiError(409, "project_required", candidates.length === 0 ? "No local project is linked to this repository; choose a project explicitly" : "Several local projects match this repository; choose one", {
-				candidates: candidates.map((p) => p.id),
-			});
-		}
-		const project = this.ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
-		if (!project) throw ApiError.notFound("Project");
-		if (!project.repository || `${project.repository.owner}/${project.repository.name}`.toLowerCase() !== key) {
-			throw new ApiError(409, "project_mismatch", "That project is not linked to the task's repository");
-		}
+		const project = task.repoUrl === null ? this.folderProject(task, choice.projectId) : this.repoProject(task, choice.projectId);
 		const agentId = choice.agentId ?? task.executorAgentId;
 		const agent = agentId ? this.ompAgent(agentId) : this.ctx.db.select().from(agents).where(eq(agents.runtime, "omp")).orderBy(asc(agents.createdAt)).get();
 		if (!agent) throw agentId ? new ApiError(400, "unknown_agent", "The agent does not exist on this node") : ApiError.unavailable("This node has no OMP agent configured");
@@ -186,6 +195,39 @@ export class TaskExecutor implements ExecutorApi {
 		this.hub.changed(task.id, { events: [event] });
 		this.drain();
 		return this.store.get(task.id);
+	}
+
+	/** Project of a task linked to a GitHub repository: the one asked for, else the only local project of that repository. */
+	private repoProject(task: TaskRow, chosen: string | undefined) {
+		const key = normalizeRepoUrl(task.repoUrl ?? "")?.key ?? "";
+		const candidates = this.candidateProjects(key);
+		const projectId = chosen ?? task.projectId ?? (candidates.length === 1 ? candidates[0]?.id : undefined);
+		if (!projectId) {
+			throw new ApiError(409, "project_required", candidates.length === 0 ? "No local project is linked to this repository; choose a project explicitly" : "Several local projects match this repository; choose one", {
+				candidates: candidates.map((p) => p.id),
+			});
+		}
+		const project = this.ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
+		if (!project) throw ApiError.notFound("Project");
+		if (!project.repository || `${project.repository.owner}/${project.repository.name}`.toLowerCase() !== key) {
+			throw new ApiError(409, "project_mismatch", "That project is not linked to the task's repository");
+		}
+		return project;
+	}
+
+	/**
+	 * Project of a task without a repository: a local project the human chose (of the task's workspace), the one already
+	 * assigned, or a fresh managed folder created for this task only.
+	 */
+	private folderProject(task: TaskRow, chosen: string | undefined) {
+		const projectId = chosen ?? task.projectId;
+		if (projectId) {
+			const project = this.ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
+			if (!project) throw ApiError.notFound("Project");
+			if (project.workspaceId !== task.workspaceId) throw new ApiError(409, "project_mismatch", "That project belongs to another workspace than the task");
+			return project;
+		}
+		return createManagedProject(this.ctx, { workspaceId: task.workspaceId, name: `Task ${task.id.slice(-6)}: ${task.title}`.slice(0, 80) });
 	}
 
 	private ompAgent(id: string) {
@@ -210,13 +252,16 @@ export class TaskExecutor implements ExecutorApi {
 		if (this.stopped) return;
 		const busy = new Set<string | null>();
 		for (const task of this.store.list({ direction: "incoming", statuses: ["running", "blocked"] })) {
-			if (task.status === "running" || execState(task).holdsTree) busy.add(task.projectId);
+			// A fenced task only holds the tree while its old agent is still running (until `release`).
+			if (task.fenced ? execState(task).holdsTree : task.status === "running" || execState(task).holdsTree) busy.add(task.projectId);
 		}
 		const queued = this.store
 			.list({ direction: "incoming", statuses: ["accepted"] })
 			.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : 1));
+		// A task a handoff holds (target steps 2–8) occupies its project's tree already: its restore checked out a branch there.
+		for (const task of queued) if (task.projectId && this.fence.isFrozen(task.id)) busy.add(task.projectId);
 		for (const task of queued) {
-			if (!task.projectId || busy.has(task.projectId)) continue;
+			if (task.fenced || this.fence.isFrozen(task.id) || !task.projectId || busy.has(task.projectId)) continue;
 			busy.add(task.projectId);
 			const { row, event } = this.store.transition(task.id, "running", { from: ["accepted"] });
 			this.hub.changed(task.id, { events: [event] });
@@ -235,6 +280,16 @@ export class TaskExecutor implements ExecutorApi {
 		}
 		const ref: ProjectRef = { id: project.id, path: project.path, repository: project.repository ?? null };
 		let prepared: PreparedBranch | null = null;
+		let folder: PreparedFolder | null = null;
+		if (task.repoUrl === null) {
+			// No repository: the input files go into the folder first, and its state is the base of the result.
+			try {
+				folder = await this.hub.files.prepareFolder(task, project.path);
+			} catch (error) {
+				await this.failTask(task.id, `The task folder could not be prepared: ${errorText(error)}`);
+				return;
+			}
+		}
 		if (task.deliverAs === "branch") {
 			try {
 				prepared = await this.git().prepare(task, ref);
@@ -268,10 +323,11 @@ export class TaskExecutor implements ExecutorApi {
 			description: task.description,
 			delegator: { agentName: task.senderAgentName, nodeName: task.senderNodeName },
 			executorNodeName: task.executorNodeName,
-			repo: { url: task.repoUrl, branch: task.repoBranch, commit: task.repoCommit },
+			repo: task.repoUrl === null ? null : { url: task.repoUrl, branch: task.repoBranch, commit: task.repoCommit },
 			baseBranch: prepared?.baseBranch ?? null,
 			workBranch: prepared?.workBranch ?? null,
-			deliverAs: task.deliverAs === "summary" ? "summary" : "branch",
+			deliverAs: task.deliverAs === "summary" ? "summary" : task.deliverAs === "files" ? "files" : "branch",
+			inputFiles: folder,
 			constraints: task.constraints,
 			priorMessages: thread.map((m) => ({
 				author: formatAuthor({ kind: m.authorKind as "human" | "agent" | "system", agentName: m.authorAgentName, nodeName: m.authorNodeName }),
@@ -322,7 +378,10 @@ export class TaskExecutor implements ExecutorApi {
 
 	private async handleEvent(taskId: string, sessionId: string, event: SessionEvent): Promise<void> {
 		const task = this.store.find(taskId);
-		if (!task || isTerminalStatus(task.status as TaskStatus)) return;
+		if (!task) return;
+		if (task.fenced) return this.handleFencedEvent(task, sessionId, event);
+		// Frozen: a handoff holds the task, the run is sealed. Nothing is recorded, no status changes, nothing completes.
+		if (isTerminalStatus(task.status as TaskStatus) || this.fence.isFrozen(taskId)) return;
 		const state = execState(task);
 		switch (event.type) {
 			case "prompt_result":
@@ -331,7 +390,7 @@ export class TaskExecutor implements ExecutorApi {
 				else if (event.status === "aborted" && !state.cancelling) this.store.patchExecState(taskId, { aborted: true });
 				return;
 			case "ui_request":
-				this.blockIfRunning(taskId, "approval", `Waiting for approval on ${this.hub.nodeName()}`);
+				this.blockIfRunning(taskId, "approval", event.method === "ask" ? `Waiting for an answer on ${this.hub.nodeName()}` : `Waiting for approval on ${this.hub.nodeName()}`);
 				return;
 			case "ui_request_resolved": {
 				if (task.status !== "blocked" || state.blockedFor !== "approval") return;
@@ -359,7 +418,7 @@ export class TaskExecutor implements ExecutorApi {
 			this.hub.log.warn({ err: errorText(error), taskId: task.id }, "could not read the session cost");
 		}
 		const current = this.store.get(task.id);
-		if (current.status !== "running") return;
+		if (current.status !== "running" || current.fenced || this.fence.isFrozen(task.id)) return;
 		const state = execState(current);
 
 		// The settle event is stale when work arrived while we were handling it (the other node's answer is fast on
@@ -420,6 +479,13 @@ export class TaskExecutor implements ExecutorApi {
 		}
 		return this.lock.run(found.id, async () => {
 			const task = this.store.get(found.id);
+			if (this.lostOwnership(task.id)) {
+				// This node no longer owns the task: what the agent finished is kept for a human to review, never merged into the outcome (§8.6).
+				this.recordLateResult(task.id, input.outcome, input.summary);
+				return `Task ${task.id} continues on another node and this node no longer owns it. Your result was stored for review only. End your turn now.`;
+			}
+			const handoffId = execState(task).handoffId;
+			if (handoffId !== undefined) throw new ApiError(409, "handoff_in_progress", `Task ${task.id} is being handed over (handoff ${handoffId}); mesh_complete is refused. End your turn now.`, { handoffId });
 			if (task.status !== "running" && task.status !== "blocked") {
 				throw new ApiError(409, "task_not_active", `Task ${task.id} is ${task.status}; mesh_complete only applies to a running task. Stop working on it and end your turn.`);
 			}
@@ -436,6 +502,12 @@ export class TaskExecutor implements ExecutorApi {
 		if (this.finalising.has(task.id)) return;
 		this.finalising.add(task.id);
 		try {
+			if (this.lostOwnership(task.id)) {
+				this.recordLateResult(task.id, outcome, summary);
+				await this.release(task.id);
+				return;
+			}
+			if (this.fence.isFrozen(task.id)) return;
 			if (outcome === "blocked") {
 				if (task.status === "blocked") return;
 				// The agent's own verdict is spent: the next completion must come from a fresh run after a message.
@@ -455,7 +527,8 @@ export class TaskExecutor implements ExecutorApi {
 
 	/** The result of a successful run: the delivery for `branch`, just the summary otherwise. Null when delivering failed the task. */
 	private async deliver(task: TaskRow, summary: string, autoCompleted: boolean): Promise<TaskResult | null> {
-		if (task.deliverAs !== "branch") return { summary, autoCompleted, branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [] };
+		if (task.deliverAs === "files") return this.deliverFiles(task, summary, autoCompleted);
+		if (task.deliverAs !== "branch") return { summary, autoCompleted, branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [], files: null };
 		const prepared = execState(task).prepared;
 		const project = task.projectId ? this.ctx.db.select().from(projects).where(eq(projects.id, task.projectId)).get() : undefined;
 		if (!prepared || !project) {
@@ -466,9 +539,29 @@ export class TaskExecutor implements ExecutorApi {
 			const delivery = await this.git().deliver(task, { id: project.id, path: project.path, repository: project.repository ?? null }, prepared, { sessionId: task.executorSessionId });
 			const event = this.store.appendEvent(task.id, { type: "progress", summary: delivery.note, payload: { branch: delivery.branch, pushed: delivery.pushed } });
 			this.hub.changed(task.id, { events: [event] });
-			return { summary, autoCompleted, branch: delivery.branch, commit: delivery.commit, pushed: delivery.pushed, compareUrl: delivery.compareUrl, artifacts: delivery.artifacts };
+			return { summary, autoCompleted, branch: delivery.branch, commit: delivery.commit, pushed: delivery.pushed, compareUrl: delivery.compareUrl, artifacts: delivery.artifacts, files: null };
 		} catch (error) {
 			await this.failTask(task.id, `Delivering the result failed: ${errorText(error)}`, { holdsLock: true });
+			return null;
+		}
+	}
+
+	/** `deliverAs: files`: bundle what the agent created or changed in the task folder. Null when delivering failed the task. */
+	private async deliverFiles(task: TaskRow, summary: string, autoCompleted: boolean): Promise<TaskResult | null> {
+		const project = task.projectId ? this.ctx.db.select().from(projects).where(eq(projects.id, task.projectId)).get() : undefined;
+		if (!project) {
+			await this.failTask(task.id, "The task folder is gone, so the result files could not be delivered", { holdsLock: true });
+			return null;
+		}
+		try {
+			const { files, withheld } = await this.hub.files.collectResult(task, project.path);
+			const note = files ? `Result files bundled: ${files.fileCount} file(s).` : "The agent created or changed no files.";
+			const withheldNote = withheld.length > 0 ? ` Not returned: ${withheld.slice(0, 10).map((w) => `${w.path} (${w.reason})`).join("; ")}.` : "";
+			const event = this.store.appendEvent(task.id, { type: "progress", summary: `${note}${withheldNote}`, payload: { files: files?.fileCount ?? 0, withheld: withheld.length } });
+			this.hub.changed(task.id, { events: [event] });
+			return { summary: withheld.length > 0 ? `${summary}\n\n(Files not returned: ${withheld.map((w) => `${w.path} — ${w.reason}`).join("; ")})` : summary, autoCompleted, branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [], files };
+		} catch (error) {
+			await this.failTask(task.id, `Delivering the result files failed: ${errorText(error)} The files are still in the task folder on ${this.hub.nodeName()}.`, { holdsLock: true });
 			return null;
 		}
 	}
@@ -500,16 +593,24 @@ export class TaskExecutor implements ExecutorApi {
 			if (!task || (task.status !== "running" && task.status !== "blocked")) return;
 			const left = await this.leftovers(task);
 			const text = left.note ? `${reason}; ${left.note}` : reason;
-			await this.conclude(taskId, "failed", text, { summary: o.summary ?? reason, autoCompleted: o.autoCompleted ?? false, branch: left.branch, commit: null, pushed: false, compareUrl: null, artifacts: [] });
+			await this.conclude(taskId, "failed", text, { summary: o.summary ?? reason, autoCompleted: o.autoCompleted ?? false, branch: left.branch, commit: null, pushed: false, compareUrl: null, artifacts: [], files: null });
 		};
 		if (o.holdsLock) await body();
 		else await this.lock.run(taskId, body);
 	}
 
 	private async conclude(taskId: string, to: "succeeded" | "failed", reason: string | null, result: TaskResult): Promise<void> {
+		if (this.lostOwnership(taskId)) {
+			// Fenced while the run finished: the outcome is for human review only, the task's status and result stay as they are.
+			this.recordLateResult(taskId, to, result.summary);
+			await this.release(taskId);
+			return;
+		}
 		const { event } = this.store.transition(taskId, to, { reason, patch: { result }, from: ["running", "blocked"] });
 		const resultEvent = this.store.appendEvent(taskId, { type: "result", summary: `Result: ${result.summary.replace(/\s+/g, " ").trim().slice(0, 300)}`, payload: result });
 		this.hub.changed(taskId, { events: [event, resultEvent] });
+		// A task that came home has no mirror row polling for its end: the delegating session is told directly.
+		if (this.store.isSelfPeer(this.store.get(taskId))) void this.hub.injector.injectStatusNote(this.store.get(taskId));
 		await this.release(taskId);
 	}
 
@@ -530,13 +631,15 @@ export class TaskExecutor implements ExecutorApi {
 		this.drain();
 	}
 
-	async cancel(taskId: string, options: { reason: string | null; by: "sender" | "local" }): Promise<TaskRow> {
+	async cancel(taskId: string, options: { reason: string | null; by: "sender" | "local" | "handoff" }): Promise<TaskRow> {
 		const first = this.store.get(taskId);
 		if (isTerminalStatus(first.status as TaskStatus)) return first;
-		const why = options.reason ?? (options.by === "sender" ? `Cancelled by ${first.senderNodeName}` : `Cancelled on ${this.hub.nodeName()}`);
+		if (options.by !== "handoff") this.assertNotMoving(first);
+		const why = options.reason ?? (options.by === "sender" ? `Cancelled by ${first.senderNodeName}` : options.by === "handoff" ? `Cancelled by the handoff of this task on ${this.hub.nodeName()}` : `Cancelled on ${this.hub.nodeName()}`);
 		return this.lock.run(taskId, async () => {
 			const task = this.store.get(taskId);
 			if (isTerminalStatus(task.status as TaskStatus)) return task;
+			if (options.by !== "handoff") this.assertNotMoving(task);
 			if (task.status === "offered" || task.status === "accepted") {
 				const { event } = this.store.transition(taskId, "cancelled", { reason: why, from: ["offered", "accepted"] });
 				this.hub.changed(taskId, { events: [event] });
@@ -563,6 +666,7 @@ export class TaskExecutor implements ExecutorApi {
 	async messageInjected(task: TaskRow, _message: TaskMessageRow): Promise<void> {
 		await this.lock.run(task.id, async () => {
 			const current = this.store.get(task.id);
+			if (current.fenced || this.fence.isFrozen(task.id)) return;
 			const blockedFor = execState(current).blockedFor;
 			if (current.status !== "blocked" || !blockedFor || !UNBLOCKED_BY_MESSAGE.includes(blockedFor)) return;
 			const { event } = this.store.transition(task.id, "running", { from: ["blocked"] });
@@ -571,9 +675,110 @@ export class TaskExecutor implements ExecutorApi {
 		});
 	}
 
+	// ------------------------------------------------------------------ fencing and handoff
+
+	/** 409 for the sender's or a human's request against a task that a handoff holds or that moved away. */
+	private assertNotMoving(task: TaskRow): void {
+		if (task.fenced) throw new ApiError(409, "task_fenced", `Task ${task.id} continues on another node (epoch ${Math.max(task.highestSeenEpoch, task.epoch)})`, { currentEpoch: Math.max(task.highestSeenEpoch, task.epoch) });
+		const handoffId = execState(task).handoffId;
+		if (handoffId !== undefined) throw new ApiError(409, "handoff_in_progress", `Task ${task.id} is being handed over (handoff ${handoffId}); cancel the handoff first`, { handoffId });
+	}
+
+	/** The local owner guard (`FenceApi.assertOwner`, re-reads the row): true when this node lost the task. */
+	private lostOwnership(taskId: string): boolean {
+		try {
+			this.fence.assertOwner(taskId);
+			return false;
+		} catch (error) {
+			if (error instanceof ApiError && error.code === "task_fenced") return true;
+			throw error;
+		}
+	}
+
+	/** Store what a fenced task's agent finished as a `late_result` event (once); status, result and the sender are untouched (§8.6). */
+	private recordLateResult(taskId: string, outcome: string, summary: string): void {
+		const task = this.store.get(taskId);
+		if (execState(task).lateResultAt) return;
+		this.store.patchExecState(taskId, { lateResultAt: new Date().toISOString() });
+		const event = this.store.appendEvent(taskId, {
+			type: "late_result",
+			summary: `Late result (${outcome}) from ${this.hub.nodeName()}, which no longer owns this task: ${summary.replace(/\s+/g, " ").trim().slice(0, 200)}`,
+			payload: { outcome, summary, epoch: task.epoch, currentEpoch: Math.max(task.highestSeenEpoch, task.epoch) },
+		});
+		this.hub.changed(taskId, { events: [event], notifyPeer: false });
+	}
+
+	/** A fenced task's runtime events: only a finished run matters (`late_result`), and only once the agent really ended a turn itself. */
+	private async handleFencedEvent(task: TaskRow, sessionId: string, event: SessionEvent): Promise<void> {
+		if (event.type === "prompt_result") {
+			if (event.status === "completed") this.finishedWhileFenced.add(task.id);
+			return;
+		}
+		if (event.type !== "settled" || !this.finishedWhileFenced.has(task.id)) return;
+		this.finishedWhileFenced.delete(task.id);
+		const state = execState(task);
+		this.recordLateResult(task.id, state.completion?.outcome ?? "succeeded", state.completion?.summary ?? (await this.lastAssistantText(sessionId)));
+		await this.release(task.id);
+	}
+
+	adoptHandedOver(taskId: string): void {
+		const task = this.store.get(taskId);
+		if (task.fenced) throw new ApiError(409, "task_fenced", `Task ${taskId} is fenced on this node and cannot be adopted`);
+		const sessionId = task.executorSessionId;
+		if (task.direction !== "incoming" || task.status !== "running" || !sessionId) {
+			throw ApiError.conflict(`Task ${taskId} is ${task.status}${sessionId ? "" : " without an agent session"}; only a running task with a session can be adopted`, { status: task.status });
+		}
+		this.registerOverrides(task, sessionId);
+		this.sessionTasks.set(sessionId, taskId);
+		this.store.patchExecState(taskId, { holdsTree: true, sessionStarted: true, handoffId: undefined });
+	}
+
+	async thaw(taskId: string, handoffId: string): Promise<void> {
+		await this.lock.run(taskId, async () => {
+			const task = this.store.find(taskId);
+			if (!task || task.direction !== "incoming" || task.fenced || this.fence.isFrozen(taskId) || this.stopped) return;
+			// In doubt (boot): `resumeInDoubt` resumes the session once reconciled; a second prompt from here would double it.
+			if (this.fence.blockedResume(taskId)) return;
+			const sessionId = task.executorSessionId;
+			if (task.status !== "running" || !sessionId) {
+				this.drain();
+				return;
+			}
+			// Mid-turn: the next `settled` event is handled normally.
+			if (this.ctx.runtime.get(sessionId)?.status().state === "busy") return;
+			this.sessionTasks.set(sessionId, taskId);
+			this.registerOverrides(task, sessionId);
+			const completion = execState(task).completion;
+			if (completion) {
+				await this.finalize(task, completion.outcome, completion.summary, false);
+				return;
+			}
+			await this.ctx.sessions.prompt(sessionId, { message: buildResumePrompt({ taskId, title: task.title }), clientId: `task_${taskId}_thaw_${handoffId}` });
+			const event = this.store.appendEvent(taskId, { type: "progress", summary: "The handoff ended without moving the task; the agent was asked to continue" });
+			this.hub.changed(taskId, { events: [event] });
+		});
+		void this.hub.injector.retryPending();
+	}
+
+	async resumeInDoubt(taskId: string): Promise<void> {
+		// A `thaw` queued by the unfreeze that preceded this call must see the block first and leave the prompt to us.
+		await this.lock.run(taskId, async () => undefined);
+		this.fence.unblockResume(taskId);
+		const task = this.store.get(taskId);
+		if (task.fenced || this.fence.isFrozen(taskId) || this.stopped) return;
+		if (task.status === "running" || execState(task).blockedFor === "approval") await this.recover(task);
+	}
+
+	released(taskId: string): void {
+		const task = this.store.find(taskId);
+		if (task && execState(task).holdsTree) this.store.patchExecState(taskId, { holdsTree: false });
+		this.drain();
+	}
+
 	// ------------------------------------------------------------------ restart recovery
 
 	private async recover(task: TaskRow): Promise<void> {
+		if (task.fenced || this.fence.isFrozen(task.id)) return;
 		const state = execState(task);
 		if (state.cancelling) {
 			await this.cancel(task.id, { reason: "Cancelled before the node restarted", by: "local" });
@@ -605,7 +810,7 @@ export class TaskExecutor implements ExecutorApi {
 				this.hub.changed(task.id, { events: [event] });
 				current = this.store.get(task.id);
 			}
-			if (current.status !== "running") return;
+			if (current.status !== "running" || current.fenced || this.fence.isFrozen(task.id)) return;
 			const completion = execState(current).completion;
 			if (completion) {
 				await this.finalize(current, completion.outcome, completion.summary, false);

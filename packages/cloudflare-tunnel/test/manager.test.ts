@@ -299,6 +299,22 @@ describe("failure handling", () => {
 		expect(() => process.kill(s.pid as number, 0)).toThrow();
 	});
 
+	it("does not report reconnecting while a stop is draining the process", async () => {
+		process.env.FAKE_CF_IGNORE_TERM = "1";
+		process.env.FAKE_CF_TERM_DRAINS = "1";
+		const m = make({ stopGraceMs: 600 });
+		const seen = track(m);
+		const s = await m.start({ mode: "quick" });
+		const stopping = m.stop();
+		await sleep(300);
+		// Mid-stop the process is alive but draining; the state must not flip to a misleading "reconnecting".
+		expect(m.state().state).not.toBe("reconnecting");
+		await stopping;
+		expect(m.state().state).toBe("stopped");
+		expect(phases(seen)).toEqual(["starting", "running", "stopped"]);
+		expect(() => process.kill(s.pid as number, 0)).toThrow();
+	});
+
 	it("restarts a never-ready attempt after startTimeoutMs", async () => {
 		await writeFile(join(fakeDir, "conns"), "0");
 		const m = make({ startTimeoutMs: 600 });

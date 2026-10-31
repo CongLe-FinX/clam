@@ -20,7 +20,7 @@ export type EventFor<T extends string> = T extends `session:${string}`
 					? Extract<TopicPayload, { topic: `git-op:${string}` }>["event"]
 					: T extends `task:${string}`
 						? Extract<TopicPayload, { topic: `task:${string}` }>["event"]
-						: T extends "sessions" | "runtime" | "node" | "network" | "tunnel" | "tasks"
+						: T extends "sessions" | "runtime" | "node" | "network" | "tunnel" | "tasks" | "contexts"
 							? Extract<TopicPayload, { topic: T }>["event"]
 							: AnyEvent;
 

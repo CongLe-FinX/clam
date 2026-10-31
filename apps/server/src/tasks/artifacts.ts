@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { chmod, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { artifacts } from "@clam/database";
 import { scanForSecrets } from "@clam/git-engine";
 import { ApiError } from "../http/errors.ts";
 import { newArtifactId, type ArtifactRow, type TaskStore } from "./store.ts";
@@ -20,6 +22,56 @@ export class ArtifactStore {
 		private readonly store: TaskStore,
 		private readonly root: string,
 	) {}
+
+	/**
+	 * Move an existing file (a folder bundle built next to it) into place as an artifact and return the row values, WITHOUT
+	 * inserting them (the caller inserts them in its own transaction). The digest is computed while reading. `id` lets a node
+	 * keep a copy under the id the other node knows it by. Bundles are not text-scanned here: their files are scanned before
+	 * the bundle is built.
+	 */
+	async placeFile(taskId: string, input: { name: string; mediaType: string; file: string; id?: string }): Promise<typeof artifacts.$inferInsert> {
+		const { size } = await stat(input.file);
+		if (size > MAX_ARTIFACT_BYTES) throw new ApiError(413, "artifact_too_large", `Artifact ${input.name} is ${size} bytes; the limit is ${MAX_ARTIFACT_BYTES}`);
+		const hash = createHash("sha256");
+		for await (const chunk of createReadStream(input.file) as AsyncIterable<Buffer>) hash.update(chunk);
+		const id = input.id ?? newArtifactId();
+		const relative = path.join(taskId, id);
+		const absolute = path.join(this.root, relative);
+		await mkdir(path.dirname(absolute), { recursive: true, mode: 0o700 });
+		await chmod(input.file, 0o600);
+		await rename(input.file, absolute);
+		return {
+			id,
+			taskId,
+			name: input.name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 120) || "artifact",
+			mediaType: input.mediaType,
+			size,
+			sha256: hash.digest("hex"),
+			storagePath: relative,
+		};
+	}
+
+	/** `placeFile` + insert the row. */
+	async addFile(taskId: string, input: { name: string; mediaType: string; file: string; id?: string }): Promise<ArtifactRow> {
+		return this.store.insertArtifact(await this.placeFile(taskId, input));
+	}
+
+	/** Forget an artifact's file (the row stays out of it: callers delete the row with the task). */
+	async removeFile(row: ArtifactRow): Promise<void> {
+		await rm(this.absolutePath(row), { force: true });
+	}
+
+	/** The directory holding a task's artifacts (and its executor-private files). */
+	taskDir(taskId: string): string {
+		return path.join(this.root, taskId);
+	}
+
+	/** A scratch path inside the artifact root (same filesystem as the final location, so `addFile` is a rename). */
+	async scratch(taskId: string, label: string): Promise<string> {
+		const dir = path.join(this.root, taskId);
+		await mkdir(dir, { recursive: true, mode: 0o700 });
+		return path.join(dir, `.${label}.${process.pid}.${Date.now()}.tmp`);
+	}
 
 	async add(taskId: string, input: { name: string; mediaType: string; bytes: Buffer }): Promise<ArtifactRow> {
 		if (input.bytes.length > MAX_ARTIFACT_BYTES) {

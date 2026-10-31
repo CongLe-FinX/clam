@@ -10,6 +10,7 @@ export const buttonVariants = cva(
 		variants: {
 			variant: {
 				primary: "bg-accent text-accent-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.18)] hover:bg-accent-hover",
+				soft: "bg-accent-soft text-accent shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--accent)_22%,transparent)] hover:bg-accent/20",
 				secondary: "bg-surface-3 text-foreground hover:bg-border-strong",
 				outline: "bg-transparent text-foreground shadow-[inset_0_0_0_1px_var(--border-strong)] hover:bg-surface-2",
 				ghost: "bg-transparent text-muted-foreground hover:bg-surface-2 hover:text-foreground",

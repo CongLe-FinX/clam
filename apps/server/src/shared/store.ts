@@ -6,6 +6,7 @@ import {
 	sharedInvites,
 	sharedMessages,
 	sharedMirrorMessages,
+	sharedAttachments,
 	sharedMirrorState,
 	sharedParticipants,
 	sharedSessions,
@@ -21,11 +22,42 @@ export type ParticipantRow = typeof sharedParticipants.$inferSelect;
 export type SharedMessageRow = typeof sharedMessages.$inferSelect;
 export type CheckpointRow = typeof sharedCheckpoints.$inferSelect;
 export type InviteRow = typeof sharedInvites.$inferSelect;
+export type AttachmentRow = typeof sharedAttachments.$inferSelect;
+
+/** `GET /shared/:id/messages`: page size without and at most with `limit`. */
+export const MESSAGES_PAGE_DEFAULT = 50;
+export const MESSAGES_PAGE_MAX = 200;
+
+/** Where a message sits in the log: its sort key `(hlc, origin node, id)`. */
+export interface MessagePosition {
+	hlc: string;
+	origin: string;
+	id: string;
+}
+
+/** The opaque cursor of a position (`before` of `GET /shared/:id/messages`). */
+export function encodeMessageCursor(position: MessagePosition): string {
+	return Buffer.from(JSON.stringify([position.hlc, position.origin, position.id]), "utf8").toString("base64url");
+}
+
+/** The position a cursor names; 400 for anything this node did not issue. */
+export function decodeMessageCursor(cursor: string): MessagePosition {
+	try {
+		const parsed: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
+		if (Array.isArray(parsed) && parsed.length === 3 && parsed.every((part) => typeof part === "string" && part.length > 0 && part.length <= 256)) {
+			return { hlc: parsed[0] as string, origin: parsed[1] as string, id: parsed[2] as string };
+		}
+	} catch {
+		// falls through to the error below
+	}
+	throw ApiError.badRequest("The cursor is not valid");
+}
 export type MirrorStateRow = typeof sharedMirrorState.$inferSelect;
 
 export const newSharedId = (): string => `shs_${ulid()}`;
 export const newInviteId = (): string => `shi_${ulid()}`;
 export const newSharedMessageId = (): string => `shm_${ulid()}`;
+export const newAttachmentId = (): string => `att_${ulid()}`;
 export const newStreamId = (): string => `str_${ulid()}`;
 export const newTransferId = (): string => `trf_${ulid()}`;
 
@@ -226,6 +258,26 @@ export class SharedStore {
 		return this.db.select().from(sharedMessages).where(eq(sharedMessages.sharedSessionId, sharedId)).orderBy(asc(sharedMessages.hlc), asc(sharedMessages.authorNodeId), asc(sharedMessages.id)).all();
 	}
 
+	/**
+	 * One page of the log, ascending like `messages`: the newest `limit` messages, or the `limit` before `before` (exclusive).
+	 * `older` is the position of the first message of the page when more precede it (the `before` for the next page), else null.
+	 * Positions are `(hlc, origin node, id)` tuples, so a message that arrives later never moves what a cursor points at.
+	 */
+	messagesPage(sharedId: string, options: { before?: MessagePosition | undefined; limit: number }): { rows: SharedMessageRow[]; older: MessagePosition | null } {
+		const { before, limit } = options;
+		const rows = this.db
+			.select()
+			.from(sharedMessages)
+			.where(and(eq(sharedMessages.sharedSessionId, sharedId), before ? sql`(${sharedMessages.hlc}, ${sharedMessages.authorNodeId}, ${sharedMessages.id}) < (${before.hlc}, ${before.origin}, ${before.id})` : undefined))
+			.orderBy(desc(sharedMessages.hlc), desc(sharedMessages.authorNodeId), desc(sharedMessages.id))
+			.limit(limit + 1)
+			.all();
+		const more = rows.length > limit;
+		const page = rows.slice(0, limit).reverse();
+		const first = page[0];
+		return { rows: page, older: more && first ? { hlc: first.hlc, origin: first.authorNodeId, id: first.id } : null };
+	}
+
 	/** Catch-up cursor: per origin the highest sequence N such that this node holds 1..N (a gap stops the count, so it is asked for again). */
 	cursor(sharedId: string): Record<string, number> {
 		const rows = this.db
@@ -320,19 +372,24 @@ export class SharedStore {
 		return this.db.select().from(sharedCheckpoints).where(eq(sharedCheckpoints.sharedSessionId, sharedId)).orderBy(desc(sharedCheckpoints.seq)).limit(1).get();
 	}
 
-	/** The newest checkpoint whose snapshot this node holds on disk. */
+	/** The newest checkpoint whose snapshot (and, in files mode, folder bundle) this node holds on disk. */
 	latestHeldCheckpoint(sharedId: string): CheckpointRow | undefined {
 		return this.checkpoints(sharedId)
-			.filter((c) => c.snapshotPath !== null)
+			.filter((c) => c.snapshotPath !== null && (c.files === null || c.filesPath !== null))
 			.at(-1);
 	}
 
-	/** Checkpoints announced with a snapshot this node has not downloaded yet (restart recovery of downloads). */
+	/** Checkpoints announced with a snapshot or folder bundle this node has not downloaded yet (restart recovery of downloads). */
 	pendingSnapshots(): CheckpointRow[] {
 		return this.db
 			.select()
 			.from(sharedCheckpoints)
-			.where(and(isNull(sharedCheckpoints.snapshotPath), sql`${sharedCheckpoints.snapshotSha256} is not null`, ne(sharedCheckpoints.nodeId, this.self.nodeId)))
+			.where(
+				and(
+					or(and(isNull(sharedCheckpoints.snapshotPath), sql`${sharedCheckpoints.snapshotSha256} is not null`), and(isNull(sharedCheckpoints.filesPath), sql`${sharedCheckpoints.files} is not null`)),
+					ne(sharedCheckpoints.nodeId, this.self.nodeId),
+				),
+			)
 			.orderBy(asc(sharedCheckpoints.createdAt), asc(sharedCheckpoints.seq))
 			.all();
 	}
@@ -455,5 +512,71 @@ export class SharedStore {
 			.from(outbox)
 			.where(and(eq(outbox.kind, kind), eq(outbox.refId, refId)))
 			.all();
+	}
+
+	// ------------------------------------------------------------------ attachments (files posted in the group chat)
+
+	attachment(id: string): AttachmentRow | undefined {
+		return this.db.select().from(sharedAttachments).where(eq(sharedAttachments.id, id)).get();
+	}
+
+	attachmentsOfMessage(messageId: string): AttachmentRow[] {
+		return this.db.select().from(sharedAttachments).where(eq(sharedAttachments.messageId, messageId)).orderBy(asc(sharedAttachments.createdAt), asc(sharedAttachments.id)).all();
+	}
+
+	/** Insert a row; false when the id exists (a replayed message). */
+	insertAttachment(values: typeof sharedAttachments.$inferInsert): boolean {
+		return this.db.insert(sharedAttachments).values(values).onConflictDoNothing().run().changes > 0;
+	}
+
+	/** A file with this digest is already posted in `sharedId` from this folder path (the agent shared it, or it is a group file copied into the folder). */
+	postedFromFolder(sharedId: string, sha256: string, copiedPath: string): boolean {
+		return (
+			this.db
+				.select({ id: sharedAttachments.id })
+				.from(sharedAttachments)
+				.where(and(eq(sharedAttachments.sharedSessionId, sharedId), eq(sharedAttachments.sha256, sha256), eq(sharedAttachments.copiedPath, copiedPath), isNotNull(sharedAttachments.messageId)))
+				.limit(1)
+				.get() !== undefined
+		);
+	}
+
+	/** A file with exactly these bytes is already posted in `sharedId` by anybody (another member's agent shared it earlier; its copy reached this folder through folder sync). */
+	postedDigest(sharedId: string, sha256: string): boolean {
+		return (
+			this.db
+				.select({ id: sharedAttachments.id })
+				.from(sharedAttachments)
+				.where(and(eq(sharedAttachments.sharedSessionId, sharedId), eq(sharedAttachments.sha256, sha256), isNotNull(sharedAttachments.messageId)))
+				.limit(1)
+				.get() !== undefined
+		);
+	}
+
+	updateAttachment(id: string, patch: Partial<typeof sharedAttachments.$inferInsert>): void {
+		this.db.update(sharedAttachments).set(patch).where(eq(sharedAttachments.id, id)).run();
+	}
+
+	/** Reference uploaded attachments from the message that carries them. */
+	linkAttachments(ids: readonly string[], messageId: string): void {
+		if (ids.length > 0) this.db.update(sharedAttachments).set({ messageId }).where(inArray(sharedAttachments.id, [...ids])).run();
+	}
+
+	/** The bytes of a digest arrived on this node: every row with it (any session) is now stored. Returns the message ids whose attachments changed. */
+	markStored(sha256: string): string[] {
+		const rows = this.db.update(sharedAttachments).set({ stored: true }).where(and(eq(sharedAttachments.sha256, sha256), eq(sharedAttachments.stored, false))).returning({ messageId: sharedAttachments.messageId }).all();
+		return rows.flatMap((r) => (r.messageId ? [r.messageId] : []));
+	}
+
+	/** Attachments of active shared sessions whose bytes this node does not hold yet and that a message references, oldest first. */
+	missingAttachments(): AttachmentRow[] {
+		return this.db
+			.select({ row: sharedAttachments })
+			.from(sharedAttachments)
+			.innerJoin(sharedSessions, eq(sharedSessions.id, sharedAttachments.sharedSessionId))
+			.where(and(eq(sharedAttachments.stored, false), isNotNull(sharedAttachments.messageId), eq(sharedSessions.state, "active")))
+			.orderBy(asc(sharedAttachments.createdAt), asc(sharedAttachments.id))
+			.all()
+			.map((r) => r.row);
 	}
 }

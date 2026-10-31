@@ -1,6 +1,6 @@
 import { NetworkError, wire as wireSchemas } from "@clam/agent-network";
 import type { wire } from "@clam/agent-network";
-import type { SessionEvent, SharedMessage } from "@clam/contracts";
+import { ATTACHMENT_EAGER_MAX_BYTES, type MentionCandidate, type SessionEvent, type SharedMessage, type TurnOutputFile } from "@clam/contracts";
 import { agents, agentSessions } from "@clam/database";
 import {
 	buildSharedMessageInjection,
@@ -16,7 +16,6 @@ import {
 	wakesAgents,
 	type GroupMessageKind,
 	type Hlc,
-	type MentionCandidate,
 	type MessageKind,
 	type MessageTo,
 } from "@clam/task-engine";
@@ -25,10 +24,37 @@ import { ApiError } from "../http/errors.ts";
 import { KeyedLock, errorText } from "../network/util.ts";
 import { injectIntoSession } from "../tasks/session-injection.ts";
 import type { DiscussionApi, PostInput, SharedHub } from "./hub.ts";
-import { newSharedMessageId, type SharedMessageRow, type SharedRow } from "./store.ts";
+import { newSharedMessageId, type AttachmentRow, type SharedMessageRow, type SharedRow } from "./store.ts";
 
 /** Prompts of the machinery itself (briefing, continuation, driver-change note): the turn that answers them is not something the group should read. */
 const SILENT_PROMPTS = ["shared_brief_", "shared_continue_", "shared_driver_"] as const;
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes} B`;
+	const units = ["KB", "MB", "GB"];
+	let value = bytes / 1024;
+	let unit = 0;
+	while (value >= 1024 && unit < units.length - 1) {
+		value /= 1024;
+		unit++;
+	}
+	return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
+}
+
+/** Files of the turns a reply carries at most (the others stay in the agent's folder; it can send one with `mesh_share_file`). */
+const REPLY_MAX_FILES = 10;
+const OFFICE = /\.(docx?|xlsx?|pptx?|od[tsp])$/i;
+const DATA = /^(text\/(csv|markdown|plain|tab-separated-values)|application\/json)$/;
+
+/** What a group reply attaches, most showable first: images, video, PDF, office documents, audio, then csv/markdown/text/json. Null = never attached (archives, code, binaries...). */
+function showableRank(file: TurnOutputFile): number | null {
+	if (file.mimeType.startsWith("image/")) return 0;
+	if (file.mimeType.startsWith("video/")) return 1;
+	if (file.mimeType === "application/pdf") return 2;
+	if (OFFICE.test(file.name)) return 3;
+	if (file.mimeType.startsWith("audio/")) return 4;
+	return DATA.test(file.mimeType) ? 5 : null;
+}
+
 /** The wire's body limit. A longer final text is cut and says so. */
 const REPLY_MAX_CHARS = 20_000;
 const SYNC_PAGE = 100;
@@ -49,7 +75,12 @@ interface Target {
 interface Run {
 	completedPrompts: string[];
 	finalText: string | null;
+	/** The (normalized) text of every message the agent itself posted during the turn (`mesh_say`, `mesh_share_file` captions): a final text that repeats one of them is not posted again. */
+	posted: Set<string>;
 }
+
+/** Whitespace-collapsed and trimmed: two texts that differ only in line breaks or spacing are the same line for the group. */
+const normalizeText = (text: string): string => text.replace(/\s+/g, " ").trim();
 
 /** What a stored message means for the local agent: `wake` = addressed to it, `buffer` = for the group (shown on its next addressed turn), the rest is not its business. */
 type Disposition = "skip" | "own" | "history" | "wake" | "buffer";
@@ -165,6 +196,8 @@ export class DiscussionService implements DiscussionApi {
 		if (input.kind === "instruction" && input.author.kind === "agent" && shared.localRole !== "driver") {
 			throw ApiError.badRequest("only the lead's agent may send an instruction; use question, answer or note");
 		}
+		const attachments = this.hub.attachments.claim(sharedId, input.attachmentIds ?? []);
+		if (input.text.trim() === "" && attachments.length === 0) throw ApiError.badRequest("Write a message or attach a file");
 		const candidates = this.candidates(sharedId);
 		if (input.to) {
 			const unknown = input.to.agents.find((a) => !candidates.some((c) => c.nodeId === a.nodeId && c.agentId === a.agentId));
@@ -188,7 +221,11 @@ export class DiscussionService implements DiscussionApi {
 				);
 			}
 		}
-		const row = this.append(shared, { authorKind: input.author.kind, agent: input.author.kind === "agent" ? { id: input.author.agentId, name: input.author.agentName } : undefined, kind: input.kind, text: input.text, to });
+		const row = this.append(shared, { authorKind: input.author.kind, agent: input.author.kind === "agent" ? { id: input.author.agentId, name: input.author.agentName } : undefined, kind: input.kind, text: input.text, to, attachments });
+		if (input.author.kind === "agent") {
+			const target = this.targetOf(shared);
+			if (target && normalizeText(input.text) !== "") this.run(target.sessionId).posted.add(normalizeText(input.text));
+		}
 		if (lost) {
 			const reason = lost.offline ? "is offline" : "cannot run its agent right now";
 			this.note(sharedId, fallback ? `${lost.nodeName} (lead) ${reason} — sent to ${formatParticipant(fallback)}` : `${lost.nodeName} (lead) ${reason} and no other agent is reachable — the message waits in the group`);
@@ -231,7 +268,7 @@ export class DiscussionService implements DiscussionApi {
 	}
 
 	/** Accept a message on this node: stamp, store, fan out to every other active member, publish. */
-	private append(shared: SharedRow, input: { authorKind: "human" | "agent" | "system"; agent?: { id: string | null; name: string | null } | undefined; kind: GroupMessageKind; text: string; to: MessageTo; replicate?: boolean }): SharedMessageRow {
+	private append(shared: SharedRow, input: { authorKind: "human" | "agent" | "system"; agent?: { id: string | null; name: string | null } | undefined; kind: GroupMessageKind; text: string; to: MessageTo; replicate?: boolean; attachments?: readonly AttachmentRow[] }): SharedMessageRow {
 		const replicate = input.replicate ?? true;
 		const recipients = replicate ? this.store.activePeers(shared.id) : [];
 		const system = input.authorKind === "system";
@@ -256,6 +293,8 @@ export class DiscussionService implements DiscussionApi {
 			},
 			{ replicate },
 		);
+		// Linked before anything is queued, so the wire body of the message always carries its files.
+		this.store.linkAttachments((input.attachments ?? []).map((a) => a.id), row.id);
 		for (const recipient of recipients) this.enqueue(row, recipient.nodeId);
 		this.hub.changed(shared.id, { messages: [row] });
 		return row;
@@ -272,6 +311,7 @@ export class DiscussionService implements DiscussionApi {
 			origin: { nodeId: message.authorNodeId, nodeName: message.authorNodeName, seq: message.originSeq },
 			hlc: message.hlc,
 			createdAt: message.createdAt,
+			attachments: this.store.attachmentsOfMessage(message.id).map((a) => ({ id: a.id, name: a.name, mimeType: a.mimeType, size: a.size, sha256: a.sha256 })),
 		};
 	}
 
@@ -330,6 +370,7 @@ export class DiscussionService implements DiscussionApi {
 			injectedSessionId: request.kind === "system" ? "system" : null,
 		});
 		if (!inserted) return false;
+		this.hub.attachments.received(shared.id, row.id, request.origin.nodeId, request.attachments);
 		this.observe(request.hlc);
 		this.hub.changed(shared.id, { messages: [row] });
 		void this.route(shared.id);
@@ -468,16 +509,18 @@ export class DiscussionService implements DiscussionApi {
 		const buffered = pending.slice(0, last).map((p) => p.row);
 		try {
 			this.ctx.sessions.get(sessionId);
+			const files = await this.describeFiles(sessionId, [...buffered, trigger]);
+			const withFiles = (row: SharedMessageRow): string => [row.text, files.get(row.id)].filter((part) => part !== undefined && part !== "").join("\n\n");
 			const text = buildSharedMessageInjection({
 				sharedSessionId: sharedId,
 				title: shared.title,
 				author: { kind: trigger.authorKind as "human" | "agent" | "system", agentName: trigger.authorAgentName, nodeName: trigger.authorNodeName },
 				kind: trigger.kind as GroupMessageKind,
-				text: trigger.text,
+				text: withFiles(trigger),
 				role: target.role,
 				leadOffline: target.role === "participant" ? this.offlineLead(shared) : null,
 				sinceLastTurn: buildSinceLastTurnBlock(
-					buffered.map((row) => ({ author: { kind: row.authorKind as "human" | "agent" | "system", agentName: row.authorAgentName, nodeName: row.authorNodeName }, kind: row.kind as GroupMessageKind, text: row.text })),
+					buffered.map((row) => ({ author: { kind: row.authorKind as "human" | "agent" | "system", agentName: row.authorAgentName, nodeName: row.authorNodeName }, kind: row.kind as GroupMessageKind, text: withFiles(row) })),
 				),
 			});
 			await injectIntoSession(this.ctx, { sessionId, clientId: `shared_msg_${trigger.id}`, text, kind: DELIVERY_KIND[trigger.kind as GroupMessageKind] });
@@ -490,6 +533,27 @@ export class DiscussionService implements DiscussionApi {
 		const handed = [...buffered.map((row) => row.id), trigger.id];
 		this.store.markInjected(handed, sessionId);
 		this.hub.changed(sharedId, { messages: handed.flatMap((id) => this.store.message(id) ?? []) });
+	}
+
+	/**
+	 * The files of these messages, copied into the agent's working folder (`attachments/<name>`, never overwriting) and described
+	 * for the prompt: one block per message that has files, with the folder-relative paths the agent can read.
+	 */
+	private async describeFiles(sessionId: string, rows: readonly SharedMessageRow[]): Promise<Map<string, string>> {
+		const blocks = new Map<string, string>();
+		const files = rows.flatMap((row) => this.store.attachmentsOfMessage(row.id));
+		if (files.length === 0) return blocks;
+		const placed = await this.hub.attachments.placeInFolder(sessionId, files);
+		for (const row of rows) {
+			const mine = placed.filter((p) => p.file.messageId === row.id);
+			if (mine.length === 0) continue;
+			const lines = mine.map(({ file, relativePath }) => {
+				const what = `${file.mimeType}, ${formatBytes(file.size)}`;
+				return relativePath ? `- ${relativePath} (${what})` : `- ${file.name} (${what}) — NOT available on this node: no member node that holds it could be reached; ask the group to post it again`;
+			});
+			blocks.set(row.id, `Attached files, copied into your working folder (paths relative to it):\n${lines.join("\n")}\nTo send a file you produced back to the group, call mesh_share_file.`);
+		}
+		return blocks;
 	}
 
 	private scheduleRetry(sharedId: string): void {
@@ -513,7 +577,9 @@ export class DiscussionService implements DiscussionApi {
 	// ------------------------------------------------------------------ replies: the final text of every turn
 
 	private onRuntimeEvent(sessionId: string, event: SessionEvent): void {
-		if (event.type === "prompt_result") {
+		if (event.type === "agent_start") {
+			this.run(sessionId); // a turn that ends without a prompt result or message still has files to be forgotten at `settled`
+		} else if (event.type === "prompt_result") {
 			if (event.status === "completed") this.run(sessionId).completedPrompts.push(event.clientId);
 		} else if (event.type === "message_end") {
 			if (event.message.role !== "assistant") return;
@@ -523,16 +589,17 @@ export class DiscussionService implements DiscussionApi {
 		} else if (event.type === "settled") {
 			const run = this.runs.get(sessionId);
 			this.runs.delete(sessionId);
-			const finalText = run?.finalText;
-			if (!finalText || !run.completedPrompts.some((clientId) => !SILENT_PROMPTS.some((prefix) => clientId.startsWith(prefix)))) return;
+			if (!run) return;
+			const answered = run.completedPrompts.some((clientId) => !SILENT_PROMPTS.some((prefix) => clientId.startsWith(prefix)));
 			// Not inside the runtime's own event dispatch: posting does database work and publishes, and must not delay the runtime's settle handling.
-			setImmediate(() => void this.postReply(sessionId, finalText));
+			// Also for a run that posts nothing: the files its turns produced are taken (forgotten) here either way.
+			setImmediate(() => void this.chains.run(`reply:${sessionId}`, () => this.postReply(sessionId, { answered, finalText: run.finalText, posted: run.posted })));
 		}
 	}
 
 	private run(sessionId: string): Run {
 		let run = this.runs.get(sessionId);
-		if (!run) this.runs.set(sessionId, (run = { completedPrompts: [], finalText: null }));
+		if (!run) this.runs.set(sessionId, (run = { completedPrompts: [], finalText: null, posted: new Set() }));
 		return run;
 	}
 
@@ -544,11 +611,43 @@ export class DiscussionService implements DiscussionApi {
 		return undefined;
 	}
 
-	/** Post the final text of a turn to the group as this agent's reply. Never throws. */
-	private async postReply(sessionId: string, text: string): Promise<void> {
+	/** Files a turn produced that belong in the group chat, stored as unposted attachments of this shared session: at most `REPLY_MAX_FILES`, the most showable first. Never throws. */
+	private async attachProduced(shared: SharedRow, sessionId: string, produced: readonly TurnOutputFile[]): Promise<AttachmentRow[]> {
+		const wanted = produced
+			.filter((file) => file.size <= ATTACHMENT_EAGER_MAX_BYTES && showableRank(file) !== null)
+			.sort((a, b) => (showableRank(a) as number) - (showableRank(b) as number) || a.path.localeCompare(b.path));
+		const rows: AttachmentRow[] = [];
+		for (const file of wanted) {
+			if (rows.length >= REPLY_MAX_FILES) break;
+			try {
+				const row = await this.hub.attachments.registerFromFolder(shared.id, sessionId, file.path, { maxBytes: ATTACHMENT_EAGER_MAX_BYTES, skipIfPosted: true });
+				if (row) rows.push(row);
+			} catch (error) {
+				// Deleted or moved since the turn, outside the folder, a link to elsewhere: the reply goes out without it.
+				this.hub.log.debug({ err: errorText(error), sharedId: shared.id, sessionId, path: file.path }, "a file of the turn was not attached to the reply");
+			}
+		}
+		return rows;
+	}
+
+	/**
+	 * Post the final text of a turn to the group as this agent's reply, with the files its turns produced in the working folder
+	 * (images, video, audio, PDF, office files, csv/text: up to `REPLY_MAX_FILES`) as attachments, replicated like a person's
+	 * uploads. A turn that produced files but no text still posts. `answered` is false for a run that answers nothing the group
+	 * should read (the machinery's own prompts): its files are forgotten. A final text that repeats (whitespace aside) a message
+	 * the agent posted itself during the turn (it answered through `mesh_say`) is not posted again, which would show the same
+	 * line twice and wake the same agents twice; the turn's files still are. Never throws.
+	 */
+	private async postReply(sessionId: string, run: { answered: boolean; finalText: string | null; posted: ReadonlySet<string> }): Promise<void> {
 		try {
+			const produced = await this.ctx.turnOutputs.takeRunOutputs(sessionId);
+			if (!run.answered) return;
 			const shared = this.memberOf(sessionId);
 			if (!shared) return;
+			const final = run.finalText ?? "";
+			const text = run.posted.has(normalizeText(final)) ? "" : final;
+			const attachments = await this.attachProduced(shared, sessionId, produced);
+			if (text === "" && attachments.length === 0) return;
 			const agent = this.ctx.db
 				.select({ id: agents.id, name: agents.name })
 				.from(agentSessions)
@@ -561,7 +660,7 @@ export class DiscussionService implements DiscussionApi {
 			// A reply cannot be refused (it is the turn's answer): over the loop budget it is posted, but wakes nobody.
 			if (limited) to = { mode: "agents", agents: [] };
 			const body = text.length > REPLY_MAX_CHARS ? `${text.slice(0, REPLY_MAX_CHARS - 80)}\n\n… (reply cut at ${REPLY_MAX_CHARS - 80} characters; the rest is in ${this.hub.nodeName()}'s session)` : text;
-			this.append(shared, { authorKind: "agent", agent: agent ?? { id: null, name: null }, kind: "reply", text: body, to });
+			this.append(shared, { authorKind: "agent", agent: agent ?? { id: null, name: null }, kind: "reply", text: body, to, attachments });
 			if (limited) {
 				this.note(shared.id, `${agent?.name ?? "An agent"}@${this.hub.nodeName()} mentioned another agent, but this node's agents already posted ${budget.limit} messages that wake an agent without a human message in between: nobody was woken. A human must continue in the group chat.`);
 			}

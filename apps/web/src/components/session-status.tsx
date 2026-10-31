@@ -1,6 +1,8 @@
 import type { AgentSession, RuntimeState } from "@clam/contracts";
 import { Badge } from "@/ui/badge";
 import { StatusDot, type DotStatus } from "@/ui/status-dot";
+import { MessageCircleQuestion } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export function sessionDot(status: AgentSession["status"]): DotStatus {
 	return status === "running" ? "busy" : status === "error" ? "crashed" : status === "stopped" ? "offline" : "online";
@@ -34,10 +36,21 @@ export function SessionStatusBadge({ status }: { status: AgentSession["status"] 
 	);
 }
 
-/** Marks sessions that belong to a shared session: a live mirror of another node's work, a moved copy, or a session shared with other nodes. */
+/** Marks sessions that belong to a shared session: a live mirror of another machine's work, a moved copy, or a session shared with other machines. */
 export function SessionKindBadge({ session, className }: { session: Pick<AgentSession, "kind" | "movedTo" | "sharedSessionId">; className?: string }) {
 	if (session.movedTo) return <Badge variant="warning" className={className}>Moved to {session.movedTo.nodeName}</Badge>;
 	if (session.kind === "mirror") return <Badge variant="accent" className={className}>Live view</Badge>;
 	if (session.sharedSessionId) return <Badge variant="outline" className={className}>Shared</Badge>;
 	return null;
+}
+
+/** The agent is waiting for an answer or an approval in this session. */
+export function PendingBadge({ session, className }: { session: Pick<AgentSession, "pendingRequests">; className?: string }) {
+	const n = session.pendingRequests;
+	if (!n) return null;
+	return (
+		<Badge variant="warning" className={cn("gap-1", className)} title={n === 1 ? "The agent is waiting for your answer" : `The agent is waiting for ${n} answers`}>
+			<MessageCircleQuestion aria-hidden /> Needs you
+		</Badge>
+	);
 }
