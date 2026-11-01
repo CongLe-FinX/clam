@@ -170,6 +170,11 @@ export const TunnelState = z.object({
 	state: z.enum(["stopped", "starting", "running", "reconnecting", "error"]),
 	/** HTTPS base URL peers use to reach this node's `/api/v1`. */
 	publicUrl: z.string().nullable(),
+	/**
+	 * Named mode only: CLAM's own connector is not running, yet `https://<hostname>/api/v1/node/info` answered with THIS node's id and
+	 * fingerprint — another cloudflared (on this machine or network) serves the route. Then `publicUrl` is `https://<hostname>`.
+	 */
+	externalConnector: z.boolean(),
 	pid: z.number().nullable(),
 	/** Active edge connections reported by cloudflared. */
 	connections: z.number().int(),

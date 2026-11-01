@@ -1,9 +1,8 @@
 import { type AgentSession, type Project, routes } from "@clam/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router";
-import { BookMarked, Check, FileCode2, Folder, FolderGit2, FolderTree, GitBranch, MessageSquare, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Send, Terminal, Trash2, X } from "lucide-react";
+import { BookMarked, Check, Folder, FolderGit2, FolderTree, GitBranch, MessageSquare, MoreHorizontal, Pencil, Plus, RefreshCw, Search, Send, Terminal, Trash2, X } from "lucide-react";
 import { type KeyboardEvent, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyButton } from "@/components/code-block";
@@ -18,14 +17,15 @@ import { Button } from "@/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { EmptyState } from "@/ui/empty-state";
 import { Skeleton } from "@/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/ui/tabs";
 import { Tip } from "@/ui/tooltip";
-import { FileExplorer } from "./file-explorer.tsx";
-import { FileViewer } from "./file-viewer.tsx";
+import { QuickLookHost, useQuickLook } from "./use-quick-look.tsx";
 import { SessionList, SessionSkeletonRows, useDebounced } from "./session-list.tsx";
 
 const GitWorkbench = lazy(() => import("@/features/git/git-panel.tsx"));
 const ProjectContextTab = lazy(() => import("@/features/context/project-context-tab.tsx"));
+const FileBrowser = lazy(() => import("./file-browser.tsx"));
+
+type ProjectTab = "sessions" | "files" | "git" | "context";
 
 const mqWide = typeof matchMedia === "function" ? matchMedia("(min-width: 1024px)") : null;
 function useIsWide(): boolean {
@@ -41,20 +41,21 @@ function useIsWide(): boolean {
 
 export default function ProjectPage() {
 	const { projectId } = useParams({ strict: false }) as { projectId: string };
-	const { file, tab: rawTab } = useSearch({ strict: false }) as { file?: string; tab?: "git" | "context" };
+	const { tab: rawTab } = useSearch({ strict: false }) as { tab?: "files" | "git" | "context" };
 	const navigate = useNavigate();
 	const project = useProject(projectId);
 	const wide = useIsWide();
-	// A plain-folder project has no Git view: a stale `?tab=git` falls back to the workspace view.
-	const tab = rawTab === "git" && project.data?.vcs === "none" ? undefined : rawTab;
+	const ql = useQuickLook();
+	// A plain-folder project has no Git view: a stale `?tab=git` falls back to the sessions view.
+	const stored = rawTab === "git" && project.data?.vcs === "none" ? undefined : rawTab;
+	// Links from before the Files tab (`?file=…` on the workspace view) land on Files with the file open in Quick Look.
+	const tab: ProjectTab = stored ?? (ql.file ? "files" : "sessions");
 
-	const openFile = useCallback(
-		(path: string) => void navigate({ to: "/projects/$projectId", params: { projectId }, search: { file: path, tab: undefined } }),
-		[navigate, projectId],
-	);
-	const closeFile = useCallback(() => void navigate({ to: "/projects/$projectId", params: { projectId }, search: { file: undefined, tab: undefined }, replace: true }), [navigate, projectId]);
+	useEffect(() => {
+		if (ql.file && !rawTab) void navigate({ to: "/projects/$projectId", params: { projectId }, search: (prev) => ({ ...prev, tab: "files" as const }), replace: true });
+	}, [ql.file, rawTab, navigate, projectId]);
 	const setTab = useCallback(
-		(next: "workspace" | "git" | "context") => void navigate({ to: "/projects/$projectId", params: { projectId }, search: { file: undefined, tab: next === "workspace" ? undefined : next }, replace: true }),
+		(next: ProjectTab) => void navigate({ to: "/projects/$projectId", params: { projectId }, search: { file: undefined, tab: next === "sessions" ? undefined : next }, replace: true }),
 		[navigate, projectId],
 	);
 
@@ -87,7 +88,7 @@ export default function ProjectPage() {
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<ProjectHeader project={p} compact={tab === "git" && !wide} />
-			<ProjectTabs projectId={p.id} vcs={p.vcs} tab={tab === "git" ? "git" : tab === "context" ? "context" : "workspace"} onChange={setTab} />
+			<ProjectTabs projectId={p.id} vcs={p.vcs} tab={tab} onChange={setTab} />
 			{tab === "context" ? (
 				<div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain">
 					<div className="mx-auto w-full max-w-4xl px-4 py-4 sm:px-6 sm:py-5">
@@ -102,42 +103,32 @@ export default function ProjectPage() {
 						<GitWorkbench projectId={p.id} />
 					</Suspense>
 				</div>
-			) : wide ? (
-				<PanelGroup direction="horizontal" autoSaveId="clam.project.cols" className="min-h-0 flex-1">
-					<Panel id="threads" order={1} defaultSize={30} minSize={22} maxSize={48} className="min-w-0">
-						<ThreadsPane projectId={p.id} />
-					</Panel>
-					<PanelResizeHandle aria-label={t("Resize threads pane")} />
-					<Panel id="files" order={2} minSize={40} className="min-w-0">
-						<PanelGroup direction="horizontal" autoSaveId="clam.project.files" className="h-full">
-							<Panel id="explorer" order={1} defaultSize={32} minSize={20} maxSize={60} className="min-w-0">
-								<FileExplorer projectId={p.id} selectedPath={file ?? null} onOpenFile={openFile} />
-							</Panel>
-							<PanelResizeHandle aria-label={t("Resize file explorer")} />
-							<Panel id="viewer" order={2} minSize={30} className="min-w-0">
-								{file ? (
-									<FileViewer key={file} projectId={p.id} path={file} onClose={closeFile} />
-								) : (
-									<EmptyState icon={FileCode2} title={t("No file open")} description={t("Pick a file from the tree to view it here. The open file is kept in the URL.")} className="h-full" />
-								)}
-							</Panel>
-						</PanelGroup>
-					</Panel>
-				</PanelGroup>
+			) : tab === "files" ? (
+				<div className="min-h-0 flex-1">
+					<Suspense fallback={<GitTabSkeleton />}>
+						<FileBrowser projectId={p.id} openPath={ql.file} onOpenFile={ql.open} />
+					</Suspense>
+				</div>
 			) : (
-				<CompactLayout project={p} file={file} onOpenFile={openFile} onCloseFile={closeFile} />
+				<div className="min-h-0 flex-1">
+					<div className="h-full max-w-[60rem]">
+						<ThreadsPane projectId={p.id} />
+					</div>
+				</div>
 			)}
+			<QuickLookHost projectId={p.id} ql={ql} />
 		</div>
 	);
 }
 
 // ───────────────────────────── tabs ─────────────────────────────
 
-function ProjectTabs({ projectId, vcs, tab, onChange }: { projectId: string; vcs: Project["vcs"]; tab: "workspace" | "git" | "context"; onChange: (t: "workspace" | "git" | "context") => void }) {
+function ProjectTabs({ projectId, vcs, tab, onChange }: { projectId: string; vcs: Project["vcs"]; tab: ProjectTab; onChange: (t: ProjectTab) => void }) {
 	const status = useGitStatus(projectId, { enabled: vcs === "git" }).data;
 	const dirty = status?.isRepo ? status.files.length : 0;
 	const items = [
-		{ id: "workspace" as const, label: t("Workspace"), icon: FolderTree },
+		{ id: "sessions" as const, label: t("Sessions"), icon: MessageSquare },
+		{ id: "files" as const, label: t("Files"), icon: FolderTree },
 		...(vcs === "git" ? [{ id: "git" as const, label: t("Git"), icon: GitBranch }] : []),
 		{ id: "context" as const, label: t("Context"), icon: BookMarked },
 	];
@@ -177,47 +168,6 @@ function GitTabSkeleton() {
 			<Skeleton className="h-6" />
 			<Skeleton className="h-6 w-5/6" />
 		</div>
-	);
-}
-
-// ───────────────────────────── compact (tablet / mobile) ─────────────────────────────
-
-function CompactLayout({ project, file, onOpenFile, onCloseFile }: { project: Project; file?: string; onOpenFile: (p: string) => void; onCloseFile: () => void }) {
-	const [tab, setTab] = useState("threads");
-	// A file appearing in the URL (opened or deep-linked) shows the viewer; closing/back returns to the tree.
-	useEffect(() => {
-		setTab((t) => (file ? "viewer" : t === "viewer" ? "files" : t));
-	}, [file]);
-
-	return (
-		<Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
-			<div className="shrink-0 border-b px-3 py-2">
-				<TabsList className="w-full">
-					<TabsTrigger value="threads" className="flex-1">
-						<MessageSquare /> {t("Threads")}
-					</TabsTrigger>
-					<TabsTrigger value="files" className="flex-1">
-						<FolderTree /> {t("Files")}
-					</TabsTrigger>
-					{file ? (
-						<TabsTrigger value="viewer" className="flex-1">
-							<FileCode2 /> {t("Viewer")}
-						</TabsTrigger>
-					) : null}
-				</TabsList>
-			</div>
-			<TabsContent value="threads" className="min-h-0 flex-1">
-				<ThreadsPane projectId={project.id} />
-			</TabsContent>
-			<TabsContent value="files" className="min-h-0 flex-1">
-				<FileExplorer projectId={project.id} selectedPath={file ?? null} onOpenFile={onOpenFile} />
-			</TabsContent>
-			{file ? (
-				<TabsContent value="viewer" className="min-h-0 flex-1">
-					<FileViewer key={file} projectId={project.id} path={file} onClose={onCloseFile} />
-				</TabsContent>
-			) : null}
-		</Tabs>
 	);
 }
 
@@ -567,16 +517,7 @@ function ProjectSkeleton() {
 				<Skeleton className="h-3.5 w-80 max-w-full" />
 				<Skeleton className="mt-1 h-6 w-64 max-w-full" />
 			</div>
-			<div className="flex min-h-0 flex-1">
-				<div className="w-full flex-1 lg:w-1/3 lg:flex-none lg:border-r">
-					<SessionSkeletonRows count={8} />
-				</div>
-				<div className="hidden flex-1 flex-col gap-2 p-4 lg:flex">
-					{Array.from({ length: 10 }, (_, i) => (
-						<Skeleton key={i} className="h-5" style={{ width: `${40 + ((i * 17) % 50)}%` }} />
-					))}
-				</div>
-			</div>
+			<SessionSkeletonRows count={8} />
 		</div>
 	);
 }

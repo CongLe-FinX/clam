@@ -2,6 +2,7 @@ import { AccessService } from "./auth/service.ts";
 import { BrowserService, type BrowserServiceOptions } from "./browser/service.ts";
 import { ContextService, type ContextServiceOptions } from "./context/service.ts";
 import { HandoffService, type HandoffServiceOptions } from "./handoff/service.ts";
+import { PreviewService, type PreviewServiceOptions } from "./preview/service.ts";
 import { createNetwork, type NetworkOptions } from "./network/index.ts";
 import type { NetworkBase } from "./network/types.ts";
 import type { ServerContext } from "./context.ts";
@@ -18,10 +19,11 @@ import { TaskService, type TaskServiceOptions } from "./tasks/service.ts";
  * services, the task engine and the shared sessions (which the network listener serves, hence `attachTasks` /
  * `attachShared`). Nothing runs until `network.listen()` and `tasks.start()` (which starts the shared sessions too).
  */
-export function assembleContext(base: NetworkBase, options: { network?: NetworkOptions; cloudflaredBinary?: string; tasks?: TaskServiceOptions; shared?: SharedServiceOptions; contexts?: ContextServiceOptions; handoffs?: HandoffServiceOptions; terminal?: TerminalOptions; browser?: BrowserServiceOptions } = {}): ServerContext {
+export function assembleContext(base: NetworkBase, options: { network?: NetworkOptions; cloudflaredBinary?: string; tasks?: TaskServiceOptions; shared?: SharedServiceOptions; contexts?: ContextServiceOptions; handoffs?: HandoffServiceOptions; terminal?: TerminalOptions; browser?: BrowserServiceOptions; preview?: PreviewServiceOptions } = {}): ServerContext {
 	const network = createNetwork(base, { ...options.network, ...(options.cloudflaredBinary !== undefined && { cloudflaredBinary: options.cloudflaredBinary }) });
 	const ctx = { ...base, network } as ServerContext;
 	ctx.access = new AccessService(ctx);
+	ctx.preview = new PreviewService(ctx, options.preview);
 	ctx.terminals = new TerminalService(ctx, options.terminal);
 	ctx.browser = new BrowserService(ctx, options.browser);
 	ctx.turnOutputs = new TurnOutputService(ctx);

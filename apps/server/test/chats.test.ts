@@ -85,6 +85,37 @@ describe("a chat started without a project", () => {
 	});
 });
 
+describe("deleting a chat", () => {
+	it("removes the chat's own project and its managed folder with the session", async () => {
+		const { session, project } = await newChat();
+		await promptAndWait(node, session.id, "@@fake-sh echo hi > report.md");
+		expect(existsSync(path.join(project.path, "report.md"))).toBe(true);
+		expect((await api(node).del(`/sessions/${session.id}`)).status).toBe(204);
+		expect((await api(node).get(`/projects/${project.id}`)).status).toBe(404);
+		expect(existsSync(project.path)).toBe(false);
+	});
+
+	it("with keepFiles the folder stays and the project becomes a normal (user) project", async () => {
+		const { session, project } = await newChat();
+		await promptAndWait(node, session.id, "@@fake-sh echo hi > report.md");
+		expect((await api(node).del(`/sessions/${session.id}?keepFiles=1`)).status).toBe(204);
+		const kept = await api(node).get<Project>(`/projects/${project.id}`);
+		expect(kept.body).toMatchObject({ origin: "user", managed: true, sessionCount: 0 });
+		expect(existsSync(path.join(project.path, "report.md"))).toBe(true);
+	});
+
+	it("leaves the project of a non-chat session untouched", async () => {
+		const { project } = await newChat();
+		const ws = project.workspaceId;
+		const made = await api(node).post<Project>("/projects", { workspaceId: ws, name: "managed" });
+		const session = await api(node).post<AgentSession>("/sessions", { projectId: made.body.id });
+		expect(session.status, JSON.stringify(session.body)).toBe(201);
+		expect((await api(node).del(`/sessions/${session.body.id}`)).status).toBe(204);
+		expect((await api(node).get<Project>(`/projects/${made.body.id}`)).body).toMatchObject({ origin: "user", sessionCount: 0 });
+		expect(existsSync(made.body.path)).toBe(true);
+	});
+});
+
 describe("projectRaw", () => {
 	let project: Project;
 	const bytes = Buffer.from("0123456789abcdefghij");

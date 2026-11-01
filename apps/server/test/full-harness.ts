@@ -20,6 +20,7 @@ import type { HandoffTimings } from "../src/handoff/hub.ts";
 import type { FaultOptions } from "../src/handoff/fault.ts";
 import { assembleContext } from "../src/assemble.ts";
 import type { TerminalOptions } from "../src/terminal/service.ts";
+import type { PreviewServiceOptions } from "../src/preview/service.ts";
 import type { NetworkOptions, NetworkService } from "../src/network/index.ts";
 import { createAutostartManager } from "../src/services/autostart.ts";
 import { ensureDefaultAgent, ensureNodeRow } from "../src/services/bootstrap.ts";
@@ -89,6 +90,8 @@ export async function createFullHarness(
 		contextTimings?: Partial<ContextTimings>;
 		/** Terminal service limits/timers (TerminalOptions). */
 		terminal?: TerminalOptions;
+		/** Preview service seams (the reachability check's HTTP client). */
+		preview?: PreviewServiceOptions;
 	} = {},
 ): Promise<FullHarness> {
 	const dataDir = options.dataDir ?? mkdtempSync(join(tmpdir(), "clam-full-"));
@@ -164,6 +167,7 @@ export async function createFullHarness(
 		contexts: { timings: { reconcileMs: 400, ...options.contextTimings } },
 		shared: { timings: { mirrorFlushMs: 40, checkpointDebounceMs: 150, retryMs: 150, reconcileMs: 1_000, idleTimeoutMs: 20_000, transferTimeoutMs: 20_000, transferAcceptTimeoutMs: 20_000, transferStopTimeoutMs: 10_000, transferPollMs: 50, downloadIdleMs: 5_000, ...options.sharedTimings } },
 		terminal: options.terminal,
+		preview: options.preview,
 		handoffs: { ...(options.handoffTimings && { timings: options.handoffTimings }), ...(options.handoffFault && { fault: options.handoffFault }) },
 	});
 	const net = ctx.network;

@@ -9,6 +9,7 @@ import type { AccessService } from "./auth/service.ts";
 import type { BrowserService } from "./browser/service.ts";
 import type { ContextService } from "./context/service.ts";
 import type { NetworkService } from "./network/types.ts";
+import type { PreviewService } from "./preview/service.ts";
 import type { AutostartManager } from "./services/autostart.ts";
 import type { GitService } from "./services/git-service.ts";
 import type { HostToolRegistry } from "./services/host-tool-registry.ts";
@@ -105,6 +106,8 @@ export interface ServerContext {
 	terminals: TerminalService;
 	/** The machine's own browser: a headless Chromium on this machine streamed to the UI (`browser/`). Loopback UI always; through the domain only when switched on (`AccessService.assertTool`). Closed with the server. */
 	browser: BrowserService;
+	/** Preview: this machine's localhost apps in the owner's own browser via per-port subdomains of the named tunnel hostname (`preview/`). Needs `AccessService` (tickets/sessions) and the tunnel config. */
+	preview: PreviewService;
 	/** Task engine (M4): delegation, execution, discussion, outbox, mirror. */
 	tasks: TaskService;
 	/** Shared sessions (M5): driver/participants, mirror, shared thread, checkpoints, takeover. Starts and stops with the task engine. */

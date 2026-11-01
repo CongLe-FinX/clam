@@ -7,6 +7,7 @@ export type GlobalDialog =
 	| { kind: "create-project"; workspaceId?: string; mode?: "existing" | "clone" | "empty" }
 	| { kind: "create-session"; projectId?: string }
 	| { kind: "new-chat" }
+	| { kind: "delete-chat"; sessionId: string }
 	| { kind: "invite-node"; workspaceId?: string }
 	| { kind: "join-node" }
 	| { kind: "pairing-requests" }

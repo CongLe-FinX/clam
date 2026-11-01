@@ -34,6 +34,8 @@ export const AccessStatus = z.object({
 	 */
 	remoteTerminalEnabled: z.boolean(),
 	remoteBrowserEnabled: z.boolean(),
+	/** Preview (`preview.ts`) through the domain: a remote session may open this machine's localhost apps in its own browser via per-port subdomains. Off by default. */
+	remotePreviewEnabled: z.boolean(),
 	/** Remote sessions: until when a recent password re-entry ("step-up") is valid; opening a terminal remotely needs it. Null for loopback / not elevated. */
 	elevatedUntil: IsoDate.nullable(),
 });
@@ -56,7 +58,8 @@ export const UpdateAccessBody = z.object({
 	sessionTtlHours: z.number().int().min(1).max(24 * 7).optional(),
 	remoteTerminalEnabled: z.boolean().optional(),
 	remoteBrowserEnabled: z.boolean().optional(),
-	/** Required on a remote session when turning `remoteTerminalEnabled` / `remoteBrowserEnabled` on. */
+	remotePreviewEnabled: z.boolean().optional(),
+	/** Required on a remote session when turning `remoteTerminalEnabled` / `remoteBrowserEnabled` / `remotePreviewEnabled` on. */
 	password: z.string().min(1).max(256).optional(),
 });
 /** Remote session: re-enter the owner password to unlock sensitive actions (remote terminal) for `ELEVATION_MINUTES`. */

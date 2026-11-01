@@ -22,7 +22,7 @@ declare module "fastify" {
 /** Routes a remote caller may reach with no session: the status probe the login page needs, and the login itself. */
 const PUBLIC_ROUTES = new Set([`GET ${LOCAL_API_PREFIX}/access`, `POST ${LOCAL_API_PREFIX}/access/login`]);
 /** Routes that change how this node is exposed: only the person at the machine (the loopback UI port), never through the tunnel. */
-const LOOPBACK_ONLY_ROUTES = new Set([`PUT ${LOCAL_API_PREFIX}/tunnel/config`]);
+const LOOPBACK_ONLY_ROUTES = new Set([`PUT ${LOCAL_API_PREFIX}/tunnel/config`, `PUT ${LOCAL_API_PREFIX}/preview/config`]);
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const HSTS = "max-age=31536000";
 

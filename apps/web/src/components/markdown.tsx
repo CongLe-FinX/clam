@@ -1,4 +1,5 @@
 import { isLocalAppUrl, OpenInMachineBrowser } from "@/features/browser/open-in-browser.tsx";
+import { OpenPreview } from "@/features/preview/open-preview.tsx";
 import { createContext, memo, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components, defaultUrlTransform, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -75,6 +76,7 @@ function Link({ href, children }: { href?: string; children?: ReactNode }) {
 			<>
 				{link}
 				<OpenInMachineBrowser href={href} className="ml-1 align-middle" />
+				<OpenPreview href={href} className="align-middle" />
 			</>
 		) : (
 			link

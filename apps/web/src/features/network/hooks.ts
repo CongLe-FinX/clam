@@ -142,6 +142,7 @@ export function useTunnelActions() {
 		save: useMutation({ mutationFn: (body: TunnelConfigInput) => api.put<TunnelState>(routes.tunnelConfig, body), onSuccess: set }),
 		start: useMutation({ mutationFn: () => api.post<TunnelState>(routes.tunnelStart), onSuccess: set, onError: (e) => toast.error(t("Could not start the tunnel"), { description: errorText(e) }) }),
 		stop: useMutation({ mutationFn: () => api.post<TunnelState>(routes.tunnelStop), onSuccess: set, onError: (e) => toast.error(t("Could not stop the tunnel"), { description: errorText(e) }) }),
+		probe: useMutation({ mutationFn: () => api.post<TunnelState>(routes.tunnelProbe), onSuccess: set, onError: (e) => toast.error(t("Could not check the hostname"), { description: errorText(e) }) }),
 	};
 }
 

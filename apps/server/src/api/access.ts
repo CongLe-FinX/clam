@@ -44,7 +44,7 @@ export default async function accessRoutes(app: FastifyInstance, { ctx }: RouteP
 			// How the UI itself is exposed (on/off, session lifetime) stays with the person at the machine.
 			if (patch.remoteUiEnabled !== undefined || patch.sessionTtlHours !== undefined) throw new ApiError(403, "loopback_only", LOOPBACK_ONLY);
 			// Switching a machine tool ON from a signed-in remote session needs the owner password in the same request; OFF never does.
-			if (patch.remoteTerminalEnabled === true || patch.remoteBrowserEnabled === true) {
+			if (patch.remoteTerminalEnabled === true || patch.remoteBrowserEnabled === true || patch.remotePreviewEnabled === true) {
 				const session = request.access.session;
 				if (!session) throw new ApiError(401, "auth_required", i18nMsg("Sign in to continue"));
 				if (!password) throw ApiError.badRequest(i18nMsg("password is required to switch this on from a remote session"));

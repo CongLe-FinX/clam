@@ -2,7 +2,7 @@ import { type FileContent, routes } from "@clam/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertTriangle, ChevronRight, Download, FileQuestion, FileX, RefreshCw, WrapText, X } from "lucide-react";
-import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, lazy, type ReactNode, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { CopyButton, HlLineView } from "@/components/code-block";
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { t } from "@/i18n";
@@ -22,6 +22,8 @@ export interface FileViewerProps {
 	path: string;
 	className?: string;
 	onClose?: () => void;
+	/** Extra toolbar controls (Quick Look: previous / next file, terminal), placed before the copy and download buttons. */
+	actions?: ReactNode;
 }
 
 const LINE_HEIGHT = 20;
@@ -48,7 +50,7 @@ function useWrapPref() {
 
 const FilePreview = lazy(() => import("@/components/file-preview.tsx"));
 
-export function FileViewer({ projectId, path, className, onClose }: FileViewerProps) {
+export function FileViewer({ projectId, path, className, onClose, actions }: FileViewerProps) {
 	const kind = previewKind(path);
 	const media = isMediaKind(kind);
 	const rawUrl = localUrl(routes.projectRaw(projectId), { path });
@@ -108,6 +110,7 @@ export function FileViewer({ projectId, path, className, onClose }: FileViewerPr
 						</Button>
 					</Tip>
 				) : null}
+				{actions}
 				<span className="hidden sm:contents"><CopyButton text={path} label={t("Copy path")} /></span>
 				<Tip label={t("Download")}>
 					<Button asChild variant="ghost" size="icon-sm">

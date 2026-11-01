@@ -236,6 +236,18 @@ describe.skipIf(!found)("machine browser (real headless Chromium)", () => {
 		expect(again.id).toBeTruthy();
 		expect(service.status().state).toBe("running");
 	}, 60_000);
+
+	it("never hands a tab that is being closed to a concurrent openTab as the reusable blank page", async () => {
+		await service.stop();
+		await service.ensureStarted(); // a fresh browser: its first about:blank page is the reusable blank tab
+		const [blank] = service.listTabs();
+		expect(blank?.url).toBe("");
+		const closing = service.closeTab(blank!.id);
+		const opened = await service.openTab();
+		await closing;
+		expect(opened.id).not.toBe(blank!.id);
+		expect(service.listTabs().map((t) => t.id)).toEqual([opened.id]);
+	}, 60_000);
 });
 
 // Port discovery against REAL listening sockets of a separate process (this process's own ports are excluded by design).

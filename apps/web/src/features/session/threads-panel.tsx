@@ -2,11 +2,11 @@ import type { AgentSession } from "@clam/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Archive, FolderTree, MessagesSquare, MoreHorizontal, Pencil, Plus, RefreshCw } from "lucide-react";
-import { type CSSProperties, lazy, type RefObject, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Archive, MessagesSquare, MoreHorizontal, Pencil, Plus, RefreshCw } from "lucide-react";
+import { type CSSProperties, type RefObject, useMemo, useRef, useState } from "react";
 import { msg, t, tr, type Msg } from "@/i18n";
 import { errorText } from "@/lib/api";
-import { useProject, useSessions } from "@/lib/queries";
+import { useSessions } from "@/lib/queries";
 import { useUi } from "@/lib/store";
 import { cn, relativeTime } from "@/lib/utils";
 import { PendingBadge, SessionKindBadge, sessionDot } from "@/components/session-status";
@@ -15,11 +15,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { EmptyState } from "@/ui/empty-state";
 import { Skeleton } from "@/ui/skeleton";
 import { StatusDot } from "@/ui/status-dot";
-import { Tabs, TabsList, TabsTrigger } from "@/ui/tabs";
 import { useUpdateSession } from "./session-actions.ts";
 import { warmHandlers } from "./preload.ts";
-
-const FileExplorer = lazy(() => import("@/features/projects/file-explorer.tsx").then((m) => ({ default: m.FileExplorer })));
 
 /** Above this many threads the list is virtualized (only the rows in view are mounted). */
 const VIRTUALIZE_AFTER = 60;
@@ -159,61 +156,31 @@ function ThreadRow({ s, current, onNavigate, style, index, rowRef }: { s: AgentS
 
 export function ThreadsPanel({
 	session,
-	selectedFile,
-	onOpenFile,
 	onNavigate,
 	className,
 }: {
 	session: AgentSession;
-	selectedFile: string | null;
-	onOpenFile: (path: string) => void;
 	/** Called after switching thread (closes overlay sheets). */
 	onNavigate?: () => void;
 	className?: string;
 }) {
-	const [tab, setTab] = useState<"threads" | "files">("threads");
-	const [filesSeen, setFilesSeen] = useState(false);
 	const openDialog = useUi((s) => s.openDialog);
-	// A chat has no repository: its folder is the point, so the panel opens on Files.
-	const isChat = useProject(session.projectId).data?.origin === "chat";
-	const filesFirst = useRef(false);
-	useEffect(() => {
-		if (!isChat || filesFirst.current) return;
-		filesFirst.current = true;
-		setTab("files");
-		setFilesSeen(true);
-	}, [isChat]);
 	const threads = useSessions({ projectId: session.projectId });
 	const sorted = useMemo(() => [...(threads.data ?? [])].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)), [threads.data]);
 	const scrollRef = useRef<HTMLDivElement>(null);
 
 	return (
 		<div className={cn("flex h-full min-h-0 flex-col bg-surface-1", className)}>
-			<div className="flex shrink-0 items-center justify-between gap-2 border-b px-2.5 py-2">
-				<Tabs
-					value={tab}
-					onValueChange={(v) => {
-						setTab(v as "threads" | "files");
-						if (v === "files") setFilesSeen(true);
-					}}
-				>
-					<TabsList>
-						<TabsTrigger value="threads">
-							<MessagesSquare /> {t("Threads")}
-						</TabsTrigger>
-						<TabsTrigger value="files">
-							<FolderTree /> {t("Files")}
-						</TabsTrigger>
-					</TabsList>
-				</Tabs>
-				{tab === "threads" ? (
-					<Button size="icon-sm" variant="secondary" aria-label={t("New thread")} onClick={() => openDialog({ kind: "create-session", projectId: session.projectId })}>
-						<Plus />
-					</Button>
-				) : null}
+			<div className="flex h-11 shrink-0 items-center justify-between gap-2 border-b px-3">
+				<h2 className="flex items-center gap-1.5 text-[13px] font-medium">
+					<MessagesSquare className="size-4 text-muted-foreground" aria-hidden /> {t("Threads")}
+				</h2>
+				<Button size="icon-sm" variant="secondary" aria-label={t("New thread")} onClick={() => openDialog({ kind: "create-session", projectId: session.projectId })}>
+					<Plus />
+				</Button>
 			</div>
 
-			<div ref={scrollRef} className={cn("scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5", tab !== "threads" && "hidden")}>
+			<div ref={scrollRef} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5">
 				{threads.isPending ? (
 					<div className="flex flex-col gap-1.5 p-1" aria-busy="true">
 						{[0, 1, 2, 3].map((i) => (
@@ -248,22 +215,6 @@ export function ThreadsPanel({
 					<ThreadList sessions={sorted} currentId={session.id} scrollRef={scrollRef} onNavigate={onNavigate} />
 				)}
 			</div>
-
-			{filesSeen ? (
-				<div className={cn("min-h-0 flex-1", tab !== "files" && "hidden")}>
-					<Suspense
-						fallback={
-							<div className="flex flex-col gap-1.5 p-3" aria-busy="true">
-								{[0, 1, 2, 3, 4, 5].map((i) => (
-									<Skeleton key={i} className="h-6" />
-								))}
-							</div>
-						}
-					>
-						<FileExplorer projectId={session.projectId} selectedPath={selectedFile} onOpenFile={onOpenFile} className="h-full" />
-					</Suspense>
-				</div>
-			) : null}
 		</div>
 	);
 }

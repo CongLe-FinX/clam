@@ -4,6 +4,7 @@ import b from "./vi/part-b.ts";
 import c from "./vi/part-c.ts";
 import d from "./vi/part-d.ts";
 import e from "./vi/part-e.ts";
+import f from "./vi/part-f.ts";
 
-const vi: Catalog = { ...a, ...b, ...c, ...d, ...e };
+const vi: Catalog = { ...a, ...b, ...c, ...d, ...e, ...f };
 export default vi;

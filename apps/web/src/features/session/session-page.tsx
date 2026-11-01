@@ -1,7 +1,7 @@
 import type { AgentSession } from "@clam/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { BookMarked, Bot, ChevronDown, FileText, GitBranch, MessagesSquare, RotateCw, ScrollText, SearchX, TriangleAlert, Users, X } from "lucide-react";
+import { BookMarked, Bot, ChevronDown, GitBranch, RotateCw, ScrollText, SearchX, TriangleAlert, Users, X } from "lucide-react";
 import { lazy, type ReactNode, type RefObject, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ImperativePanelHandle, Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import { useGitStatus } from "@/features/git/hooks";
 import { useSharedDetail, useSharedLive } from "@/features/shared/hooks";
 import { GroupBar, GroupChat } from "@/features/shared/group-chat";
 import { driverOf, participantLabel } from "@/features/shared/format";
+import { QuickLookHost, useQuickLook } from "@/features/projects/use-quick-look.tsx";
 import { SharedBanner } from "@/features/shared/shared-banner";
 import { TaskBanner } from "@/features/tasks/task-banner";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
@@ -17,7 +18,7 @@ import { t } from "@/i18n";
 import { projectAssets } from "@/components/rich/assets";
 import { useAgents, useProject, useSession, useWorkspaces } from "@/lib/queries";
 import { type SessionKind, useUi } from "@/lib/store";
-import { basename, cn } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/ui/sheet";
@@ -28,18 +29,19 @@ import { OmpContext, OmpStore, useOmpState } from "./omp/omp-store.ts";
 import { PlanChip } from "./omp/plan-ui.tsx";
 import { SubagentViewer } from "./omp/subagent-viewer.tsx";
 import { SubagentsPanel } from "./omp/subagents-panel.tsx";
+import { changedFiles } from "./changed-files.ts";
 import { Composer } from "./composer.tsx";
 import { ContextPanel } from "./context-panel.tsx";
 import { Conversation } from "./conversation.tsx";
 import { RuntimeLog } from "./runtime-log.tsx";
 import { SessionHeader } from "./session-header.tsx";
 import { type SessionEnv, SessionEnvContext } from "./session-env.ts";
-import { SessionStream, StreamContext, useStreamMeta } from "./stream-store.ts";
+import { SessionStream, StreamContext, useAllOutputs, useStreamMeta } from "./stream-store.ts";
 import { ThreadsPanel } from "./threads-panel.tsx";
 import { useKeyboardInset } from "./use-keyboard-inset.ts";
 
 const GitWorkbench = lazy(() => import("@/features/git/git-panel.tsx"));
-const FileViewer = lazy(() => import("@/features/projects/file-viewer.tsx").then((m) => ({ default: m.FileViewer })));
+const SessionFiles = lazy(() => import("./session-files.tsx"));
 const TeamPanel = lazy(() => import("@/features/shared/team-panel.tsx").then((m) => ({ default: m.TeamPanel })));
 const MemoryPanel = lazy(() => import("@/features/context/memory-panel.tsx"));
 const AddAgentDialog = lazy(() => import("@/features/shared/add-agent-dialog.tsx"));
@@ -159,7 +161,7 @@ const WIDE_PX = 1600;
 
 /**
  * Opens the side panels a session starts with: the user's last choice for this kind of session, else (≥1600px) both, else one
- * (chats → Files, project sessions → Context). Returns false until applied so the layout never flashes the wrong panels. After
+ * (chats → nothing open, project sessions → Context). Returns false until applied so the layout never flashes the wrong panels. After
  * that, every open/close (toggle or drag) is saved for the kind. Sizes are persisted by the PanelGroup's `autoSaveId`.
  */
 function usePanelLayout({
@@ -188,7 +190,7 @@ function usePanelLayout({
 		let second = 0;
 		const first = requestAnimationFrame(() => {
 			const wide = window.innerWidth >= WIDE_PX;
-			const want = storedRef.current ?? (wide ? { left: true, right: true } : kind === "chat" ? { left: true, right: false } : { left: false, right: true });
+			const want = storedRef.current ?? (wide ? { left: true, right: true } : { left: false, right: kind !== "chat" });
 			for (const [ref, open] of [
 				[left, want.left],
 				[right, want.right],
@@ -293,6 +295,7 @@ function Workspace({ session }: { session: AgentSession }) {
 	const workspace = useMemo(() => workspaces?.find((w) => w.id === project?.workspaceId), [workspaces, project?.workspaceId]);
 	const kbInset = useKeyboardInset(!desktop);
 	const detail = useSharedDetail(session.sharedSessionId).data;
+	const allOutputs = useAllOutputs(stream);
 	useSharedLive(session.sharedSessionId);
 	/** Mirrors show another machine's conversation; moved copies belong to the machine that took over. Neither accepts prompts. */
 	const readOnly = session.kind === "mirror" || session.movedTo !== null;
@@ -309,9 +312,13 @@ function Workspace({ session }: { session: AgentSession }) {
 		};
 	}, [session.title]);
 
-	// files opened from the explorer become extra center tabs
-	const [openFiles, setOpenFiles] = useState<string[]>([]);
-	const [tab, setTab] = useState<"chat" | string>("chat");
+	// Files open in Quick Look over the chat (`?file=` in the URL); the Files drawer lists the folder and what the agent changed.
+	const ql = useQuickLook();
+	const qlRef = useRef(ql);
+	qlRef.current = ql;
+	const [filesOpen, setFilesOpen] = useState(false);
+	const [filesMounted, setFilesMounted] = useState(false);
+	const changed = useMemo(() => changedFiles(allOutputs), [allOutputs]);
 	const [sheets, setSheets] = useState({ left: false, right: false, log: false });
 	const [fill, setFill] = useState<{ text: string; nonce: number } | null>(null);
 	const [rightTab, setRightTab] = useState<"context" | "memory" | "changes" | "team" | "agents">("context");
@@ -352,19 +359,12 @@ function Workspace({ session }: { session: AgentSession }) {
 		} else setSheets((s) => (s.right ? s : { ...s, right: true }));
 	}, [desktop, rightOpen, rightRef]);
 
-	const openFile = useCallback((path: string) => {
-		setOpenFiles((f) => (f.includes(path) ? f : [...f, path]));
-		setTab(path);
-		setView("workspace");
-		setSheets((s) => (s.left ? { ...s, left: false } : s));
+	/** Stable (the conversation rows are memoized on it): always reads the latest Quick Look state. */
+	const openFile = useCallback((path: string) => qlRef.current.open(path), []);
+	const toggleFiles = useCallback(() => {
+		setFilesMounted(true);
+		setFilesOpen((o) => !o);
 	}, []);
-	const closeFile = useCallback(
-		(path: string) => {
-			setOpenFiles((f) => f.filter((p) => p !== path));
-			setTab((t) => (t === path ? "chat" : t));
-		},
-		[],
-	);
 
 	const agents = useAgents().data;
 	const agentName = agents?.find((a) => a.id === session.agentId)?.name ?? t("The agent");
@@ -382,11 +382,12 @@ function Workspace({ session }: { session: AgentSession }) {
 	}, [selectedTool, desktop, rightOpen]);
 
 	// `[` threads · `]` context · `\` runtime log
-	const toggles = useRef({ left: () => {}, right: () => {}, log: () => {} });
+	const toggles = useRef({ left: () => {}, right: () => {}, log: () => {}, files: () => {} });
 	toggles.current = {
 		left: desktop ? left.toggle : () => setSheets((s) => ({ ...s, left: !s.left })),
 		right: desktop ? right.toggle : () => setSheets((s) => ({ ...s, right: !s.right })),
 		log: desktop ? log.toggle : () => setSheets((s) => ({ ...s, log: !s.log })),
+		files: toggleFiles,
 	};
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
@@ -394,6 +395,7 @@ function Workspace({ session }: { session: AgentSession }) {
 			if (e.key === "[") toggles.current.left();
 			else if (e.key === "]") toggles.current.right();
 			else if (e.key === "\\") toggles.current.log();
+			else if (e.key === "f") toggles.current.files();
 			else return;
 			e.preventDefault();
 		};
@@ -401,7 +403,7 @@ function Workspace({ session }: { session: AgentSession }) {
 		return () => removeEventListener("keydown", onKey);
 	}, []);
 
-	const threadsEl = (onNavigate?: () => void) => <ThreadsPanel session={session} selectedFile={tab === "chat" ? null : tab} onOpenFile={openFile} onNavigate={onNavigate} />;
+	const threadsEl = (onNavigate?: () => void) => <ThreadsPanel session={session} onNavigate={onNavigate} />;
 	const contextEl = (
 		<RightPanel
 			session={session}
@@ -425,18 +427,6 @@ function Workspace({ session }: { session: AgentSession }) {
 
 	const center = (
 		<div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-			{openFiles.length > 0 ? (
-				<div role="tablist" aria-label={t("Open views")} className="scrollbar-none flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto border-b bg-surface-1 px-1.5 coarse:h-11">
-					<TabButton active={tab === "chat"} onClick={() => setTab("chat")}>
-						<MessagesSquare className="size-3.5" /> {t("Chat")}
-					</TabButton>
-					{openFiles.map((p) => (
-						<TabButton key={p} active={tab === p} onClick={() => setTab(p)} onClose={() => closeFile(p)} title={p}>
-							<FileText className="size-3.5" /> <span className="max-w-[10rem] truncate font-mono">{basename(p)}</span>
-						</TabButton>
-					))}
-				</div>
-			) : null}
 			{sharedMode ? <ViewSwitch view={view} onView={setView} unread={detail?.shared.unreadMessages ?? 0} workspaceLabel={session.kind === "mirror" ? t("Live view") : session.movedTo ? t("Moved copy") : t("Workspace")} /> : null}
 			<TaskBanner sessionId={session.id} />
 			<SharedBanner session={session} detail={detail} onOpenTeam={openTeam} onOpenHandover={handover} />
@@ -469,22 +459,9 @@ function Workspace({ session }: { session: AgentSession }) {
 			) : null}
 			<div className={cn("flex min-h-0 flex-1 flex-col", showChat && "hidden")}>
 				<div className="relative flex min-h-0 flex-1 flex-col">
-					<div className={cn("flex min-h-0 flex-1 flex-col", tab !== "chat" && "hidden")}>
+					<div className="flex min-h-0 flex-1 flex-col">
 						<Conversation stream={stream} readOnly={readOnly} onPickPrompt={(text) => setFill({ text, nonce: Date.now() })} />
 					</div>
-					{tab !== "chat" ? (
-						<Suspense
-							fallback={
-								<div className="flex flex-col gap-2 p-4" aria-busy="true">
-									<Skeleton className="h-5 w-1/3" />
-									<Skeleton className="h-4 w-full" />
-									<Skeleton className="h-4 w-5/6" />
-								</div>
-							}
-						>
-							<FileViewer key={tab} projectId={session.projectId} path={tab} className="min-h-0 flex-1" onClose={() => closeFile(tab)} />
-						</Suspense>
-					) : null}
 				</div>
 				<AskDock store={omp} />
 				{readOnly ? null : <PlanChip stream={stream} className="mx-auto w-full max-w-[60rem] shrink-0 px-3 pb-1.5 sm:px-4" />}
@@ -509,9 +486,12 @@ function Workspace({ session }: { session: AgentSession }) {
 				showLeft: desktop ? !left.collapsed : sheets.left,
 				showRight: desktop ? !right.collapsed : sheets.right,
 				showLog: desktop ? !log.collapsed : sheets.log,
+				showFiles: filesOpen,
+				filesCount: changed.length,
 				onToggleLeft: () => toggles.current.left(),
 				onToggleRight: () => toggles.current.right(),
 				onToggleLog: () => toggles.current.log(),
+				onToggleFiles: () => toggles.current.files(),
 			}}
 		/>
 	);
@@ -554,8 +534,8 @@ function Workspace({ session }: { session: AgentSession }) {
 						) : null}
 						<Sheet open={sheets.left} onOpenChange={(v) => setSheet("left", v)}>
 							<SheetContent side="left" className="p-0" aria-describedby={undefined}>
-								<SheetTitle className="sr-only">{t("Threads and files")}</SheetTitle>
-								<SheetDescription className="sr-only">{t("Switch threads or browse project files.")}</SheetDescription>
+								<SheetTitle className="sr-only">{t("Threads")}</SheetTitle>
+								<SheetDescription className="sr-only">{t("Switch between the threads of this project.")}</SheetDescription>
 								{sheets.left ? threadsEl(() => setSheet("left", false)) : null}
 							</SheetContent>
 						</Sheet>
@@ -582,6 +562,12 @@ function Workspace({ session }: { session: AgentSession }) {
 						) : null}
 					</>
 				)}
+				{filesMounted ? (
+					<Suspense fallback={null}>
+						<SessionFiles session={session} changed={changed} open={filesOpen} onOpenChange={setFilesOpen} mobile={mobile} selectedPath={ql.file ?? null} onOpenFile={openFile} />
+					</Suspense>
+				) : null}
+				<QuickLookHost projectId={session.projectId} ql={ql} />
 				<SubagentViewer store={omp} />
 				{addAgent ? (
 					<Suspense fallback={null}>
@@ -726,21 +712,6 @@ function BottomPanel({ stream, session, tab, onTab, onCollapse }: { stream: Sess
 					<GitWorkbench projectId={session.projectId} sessionId={session.id} />
 				</Suspense>
 			</div>
-		</div>
-	);
-}
-
-function TabButton({ active, onClick, onClose, children, title }: { active: boolean; onClick: () => void; onClose?: () => void; children: ReactNode; title?: string }) {
-	return (
-		<div className={cn("flex h-7 shrink-0 items-center rounded-md text-xs transition-colors coarse:h-9", active ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:bg-surface-2 hover:text-foreground")}>
-			<button type="button" role="tab" aria-selected={active} title={title} onClick={onClick} className="flex h-full items-center gap-1.5 rounded-md px-2.5 outline-none">
-				{children}
-			</button>
-			{onClose ? (
-				<button type="button" aria-label={t("Close {title}", { title: title ?? t("tab") })} onClick={onClose} className="mr-1 grid size-5 place-items-center rounded text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-8">
-					<X className="size-3" />
-				</button>
-			) : null}
 		</div>
 	);
 }

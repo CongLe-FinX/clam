@@ -91,4 +91,5 @@ export default async function nodeRoutes(app: FastifyInstance, { ctx }: RoutePlu
 	app.put(routes.tunnelConfig, async (req): Promise<TunnelState> => ctx.network.tunnel.updateConfig(UpdateTunnelConfigBody.parse(req.body)));
 	app.post(routes.tunnelStart, async (): Promise<TunnelState> => ctx.network.tunnel.start());
 	app.post(routes.tunnelStop, async (): Promise<TunnelState> => ctx.network.tunnel.stop());
+	app.post(routes.tunnelProbe, async (): Promise<TunnelState> => ctx.network.tunnel.probe());
 }

@@ -2,6 +2,7 @@ import type { ListeningPort } from "@clam/contracts";
 import { ChevronRight, Server, ServerOff } from "lucide-react";
 import { useState } from "react";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
+import { OpenPreview } from "@/features/preview/open-preview";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
@@ -37,10 +38,13 @@ function fullTitle(p: ListeningPort): string {
 function Chip({ port, onOpen }: { port: ListeningPort; onOpen: (url: string) => void }) {
 	const full = fullTitle(port);
 	return (
-		<button type="button" className={chipClass} onClick={() => onOpen(port.url)} title={`${full} · ${port.url}${runsAs(port) ? ` · ${runsAs(port)}` : ""}`} aria-label={t("Open {name} on port {port}", { name: full, port: port.port })}>
-			<span className="truncate text-foreground/90">{shortTitle(full)}</span>
-			<span className="shrink-0 font-mono text-2xs text-subtle">:{port.port}</span>
-		</button>
+		<span className="inline-flex shrink-0 items-center gap-0.5">
+			<button type="button" className={chipClass} onClick={() => onOpen(port.url)} title={`${full} · ${port.url}${runsAs(port) ? ` · ${runsAs(port)}` : ""}`} aria-label={t("Open {name} on port {port}", { name: full, port: port.port })}>
+				<span className="truncate text-foreground/90">{shortTitle(full)}</span>
+				<span className="shrink-0 font-mono text-2xs text-subtle">:{port.port}</span>
+			</button>
+			<OpenPreview port={port.port} className="rounded-full text-subtle hover:text-foreground" />
+		</span>
 	);
 }
 
@@ -56,7 +60,7 @@ function OtherPorts({ ports, onOpen, compact }: { ports: ListeningPort[]; onOpen
 	const list = (
 		<ul className="scrollbar-thin max-h-[min(24rem,60dvh)] overflow-y-auto overscroll-contain">
 			{ports.map((p) => (
-				<li key={`${p.address}:${p.port}`}>
+				<li key={`${p.address}:${p.port}`} className="flex items-center gap-0.5">
 					<button
 						type="button"
 						onClick={() => {
@@ -64,7 +68,7 @@ function OtherPorts({ ports, onOpen, compact }: { ports: ListeningPort[]; onOpen
 							onOpen(p.url);
 						}}
 						title={`${fullTitle(p)} · ${p.url}`}
-						className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface-3 focus-visible:bg-surface-3 coarse:min-h-12"
+						className="flex min-w-0 flex-1 items-center gap-3 rounded-lg px-2.5 py-2 text-left outline-none transition-colors hover:bg-surface-3 focus-visible:bg-surface-3 coarse:min-h-12"
 					>
 						<Server className="size-4 shrink-0 text-subtle" />
 						<span className="min-w-0 flex-1">
@@ -73,6 +77,7 @@ function OtherPorts({ ports, onOpen, compact }: { ports: ListeningPort[]; onOpen
 						</span>
 						<span className="shrink-0 font-mono text-xs text-muted-foreground">:{p.port}</span>
 					</button>
+					<OpenPreview port={p.port} className="text-subtle hover:text-foreground" />
 				</li>
 			))}
 		</ul>

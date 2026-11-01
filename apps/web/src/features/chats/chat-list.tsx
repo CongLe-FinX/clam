@@ -2,6 +2,7 @@ import type { AgentSession } from "@clam/contracts";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMemo, useRef } from "react";
 import { SessionRow } from "@/components/session-row";
+import { ChatRowMenu } from "./chat-actions";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 
@@ -46,6 +47,16 @@ function Heading({ label }: { label: string }) {
 	return <h2 className="border-b bg-surface-1 px-4 pb-1.5 pt-3.5 text-2xs font-semibold uppercase tracking-wider text-subtle">{label}</h2>;
 }
 
+/** A chat row with its "⋯" menu (hover/focus on desktop, always on touch). */
+function ChatRow({ chat }: { chat: AgentSession }) {
+	return (
+		<div className="group/row flex items-center pr-2">
+			<SessionRow session={chat} className="min-w-0 flex-1 border-b-0" />
+			<ChatRowMenu session={chat} />
+		</div>
+	);
+}
+
 /**
  * The chats of this machine grouped by day (Today / Yesterday / …). Long lists render only the rows in view. The list is its
  * own scroll area that shrinks to its content, so a short list sits under the header and a long one scrolls.
@@ -71,13 +82,21 @@ export function ChatList({ chats, className }: { chats: readonly AgentSession[];
 						if (!it) return null;
 						return (
 							<div key={item.key} data-index={item.index} ref={v.measureElement} className={cn("absolute left-0 top-0 w-full", it.kind === "chat" && "border-b")} style={{ transform: `translateY(${item.start}px)` }}>
-								{it.kind === "heading" ? <Heading label={it.label} /> : <SessionRow session={it.chat} />}
+								{it.kind === "heading" ? <Heading label={it.label} /> : <ChatRow chat={it.chat} />}
 							</div>
 						);
 					})}
 				</div>
 			) : (
-				items.map((it) => (it.kind === "heading" ? <Heading key={it.key} label={it.label} /> : <SessionRow key={it.key} session={it.chat} />))
+				items.map((it) =>
+					it.kind === "heading" ? (
+						<Heading key={it.key} label={it.label} />
+					) : (
+						<div key={it.key} className="border-b last:border-b-0">
+							<ChatRow chat={it.chat} />
+						</div>
+					),
+				)
 			)}
 		</div>
 	);

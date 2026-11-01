@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { ELEVATION_MINUTES, type AccessStatus, type UpdateAccessBody, i18nMsg } from "@clam/contracts";
+import { ELEVATION_MINUTES, PREVIEW_TICKET_SECONDS, type AccessStatus, type UpdateAccessBody, i18nMsg } from "@clam/contracts";
 import { settings } from "@clam/database";
 import { eq } from "drizzle-orm";
 import type { z } from "zod";
@@ -10,11 +10,14 @@ import { readNodeSettings } from "../services/settings.ts";
 import { LoginLimiter, type LimiterOptions } from "./limiter.ts";
 import { dummyHash, hashPassword, verifyPassword } from "./password.ts";
 import { sessionCookieValue, signToken, verifyToken, type SessionClaims } from "./token.ts";
+import { TokenBuckets } from "../network/rate-limit.ts";
+import { previewCookieValue, signPreviewSession, signTicket, verifyPreviewSession, verifyTicket, type PreviewClaims } from "./preview-token.ts";
 
 const KEY_PASSWORD = "access.password";
 const KEY_CONFIG = "access.config";
 const KEY_EPOCH = "access.epoch";
 const KEY_REVOKED = "access.revoked";
+const KEY_PREVIEW_EPOCH = "access.preview-epoch";
 const SECRET_SIGNING_KEY = "access.session-key";
 
 /** A session lives at most this long after the login, however active it is. */
@@ -36,13 +39,21 @@ export interface RequestAccess {
 }
 
 /** The machine tools reachable through the domain once switched on (loopback: always). */
-export type MachineTool = "terminal" | "browser";
+export type MachineTool = "terminal" | "browser" | "preview";
 
 export interface AccessConfig {
 	remoteUiEnabled: boolean;
 	sessionTtlHours: number;
 	remoteTerminalEnabled: boolean;
 	remoteBrowserEnabled: boolean;
+	remotePreviewEnabled: boolean;
+}
+
+/** A preview session cookie ready to send. */
+export interface IssuedPreviewSession {
+	claims: PreviewClaims;
+	token: string;
+	maxAgeSeconds: number;
 }
 
 export interface IssuedSession {
@@ -78,6 +89,10 @@ export class AccessService {
 	private sweeper: NodeJS.Timeout | null = null;
 	private pending = 0;
 	private queue: Promise<unknown> = Promise.resolve();
+	/** Preview tickets minted and not yet redeemed (jti → expiry). In memory on purpose: a restart voids every pending ticket. */
+	private readonly tickets = new Map<string, number>();
+	/** Ticket minting budget per owner session (or the loopback UI): a burst of a few, then one every few seconds. */
+	private readonly ticketBuckets = new TokenBuckets(8, 0.4);
 
 	constructor(
 		private readonly ctx: Pick<ServerContext, "db" | "secrets" | "network" | "config" | "identity" | "log">,
@@ -120,6 +135,7 @@ export class AccessService {
 			sessionTtlHours: typeof ttl === "number" && Number.isInteger(ttl) && ttl >= 1 && ttl <= 24 * 7 ? ttl : DEFAULT_TTL_HOURS,
 			remoteTerminalEnabled: stored.remoteTerminalEnabled === true,
 			remoteBrowserEnabled: stored.remoteBrowserEnabled === true,
+			remotePreviewEnabled: stored.remotePreviewEnabled === true,
 		};
 	}
 
@@ -132,6 +148,7 @@ export class AccessService {
 		this.writeRow(KEY_EPOCH, String(this.epoch() + 1));
 		this.liveExp.clear();
 		this.elevated.clear();
+		this.tickets.clear();
 	}
 
 	private signingKey(): Promise<Buffer> {
@@ -216,17 +233,24 @@ export class AccessService {
 			sessionTtlHours: body.sessionTtlHours ?? current.sessionTtlHours,
 			remoteTerminalEnabled: body.remoteTerminalEnabled ?? current.remoteTerminalEnabled,
 			remoteBrowserEnabled: body.remoteBrowserEnabled ?? current.remoteBrowserEnabled,
+			remotePreviewEnabled: body.remotePreviewEnabled ?? current.remotePreviewEnabled,
 		};
-		if ((next.remoteUiEnabled || next.remoteTerminalEnabled || next.remoteBrowserEnabled) && !this.passwordSet()) {
+		if ((next.remoteUiEnabled || next.remoteTerminalEnabled || next.remoteBrowserEnabled || next.remotePreviewEnabled) && !this.passwordSet()) {
 			throw new ApiError(409, "password_required", i18nMsg("Set an owner password before enabling remote access to this machine"));
 		}
 		this.writeRow(KEY_CONFIG, JSON.stringify(next));
-		for (const [field, label] of [["remoteUiEnabled", "ui"], ["remoteTerminalEnabled", "terminal"], ["remoteBrowserEnabled", "browser"]] as const) {
+		for (const [field, label] of [["remoteUiEnabled", "ui"], ["remoteTerminalEnabled", "terminal"], ["remoteBrowserEnabled", "browser"], ["remotePreviewEnabled", "preview"]] as const) {
 			if (current[field] !== next[field]) recordAudit(this.ctx, "access.remote_toggle", { tool: label, enabled: next[field], via }, next[field] ? "warning" : "info");
 		}
 		// Switching a tool off ends its live sockets at once (not at the next sweep).
 		if (current.remoteTerminalEnabled && !next.remoteTerminalEnabled) this.closeSockets((tracked) => tracked.tool === "terminal");
 		if (current.remoteBrowserEnabled && !next.remoteBrowserEnabled) this.closeSockets((tracked) => tracked.tool === "browser");
+		if (current.remotePreviewEnabled && !next.remotePreviewEnabled) {
+			// Preview sessions started before the switch-off must not come back when it is switched on again.
+			this.writeRow(KEY_PREVIEW_EPOCH, String(this.previewEpoch() + 1));
+			this.tickets.clear();
+			this.closeSockets((tracked) => tracked.tool === "preview");
+		}
 		if (current.remoteUiEnabled && !next.remoteUiEnabled) {
 			// Turning the door off also ends every session behind it: re-enabling later starts from a clean slate.
 			this.bumpEpoch();
@@ -259,14 +283,16 @@ export class AccessService {
 	assertTool(access: RequestAccess, tool: MachineTool, options: { stepUp?: boolean } = {}): void {
 		if (access.via === "loopback") return;
 		const config = this.config();
-		const enabled = tool === "terminal" ? config.remoteTerminalEnabled : config.remoteBrowserEnabled;
+		const enabled = tool === "terminal" ? config.remoteTerminalEnabled : tool === "browser" ? config.remoteBrowserEnabled : config.remotePreviewEnabled;
 		if (!config.remoteUiEnabled || !enabled) {
 			throw new ApiError(
 				403,
-				"tool_disabled",
+				tool === "preview" ? "preview_disabled" : "tool_disabled",
 				tool === "terminal"
 					? i18nMsg("The Terminal is switched off for remote sign-ins on this machine. Turn it on from the machine's local UI (Settings → Security).")
-					: i18nMsg("The Browser is switched off for remote sign-ins on this machine. Turn it on from the machine's local UI (Settings → Security)."),
+					: tool === "browser"
+						? i18nMsg("The Browser is switched off for remote sign-ins on this machine. Turn it on from the machine's local UI (Settings → Security).")
+						: i18nMsg("Preview is switched off for remote sign-ins on this machine. Turn it on from the machine's local UI (Settings → Security)."),
 			);
 		}
 		if (!access.session) throw new ApiError(401, "auth_required", i18nMsg("Sign in to continue"));
@@ -341,6 +367,85 @@ export class AccessService {
 		this.closeSockets(() => true);
 	}
 
+	// ---------------------------------------------------------------------------------------------- preview sessions
+
+	private previewEpoch(): number {
+		const value = Number(this.readRow(KEY_PREVIEW_EPOCH) ?? 0);
+		return Number.isSafeInteger(value) && value >= 0 ? value : 0;
+	}
+
+	private mintPreview(claims: PreviewClaims, key: Buffer, now: number): IssuedPreviewSession {
+		return { claims, token: signPreviewSession(key, claims), maxAgeSeconds: Math.max(0, Math.floor((claims.exp - now) / 1000)) };
+	}
+
+	private previewValid(claims: { sid: string; iat: number; exp: number; epoch: number; pepoch: number }, now: number): boolean {
+		return this.valid({ ...claims, ren: now }, now) && claims.pepoch === this.previewEpoch() && this.config().remoteUiEnabled && this.config().remotePreviewEnabled;
+	}
+
+	/**
+	 * A one-time sign-in ticket for the preview host `host`, landing on `path` (`/port/<port>/…`), valid `PREVIEW_TICKET_SECONDS`. The caller has already
+	 * checked `assertTool(access, "preview")`; the budget is per owner session (429 `rate_limited`).
+	 */
+	async issuePreviewTicket(access: RequestAccess, spec: { port: number; host: string; path: string }): Promise<{ token: string; expiresAt: number }> {
+		const wait = this.ticketBuckets.take(access.session?.sid ?? "loopback");
+		if (wait > 0) throw new ApiError(429, "rate_limited", i18nMsg("Too many preview requests. Try again in a moment."), { retryAfterSeconds: wait });
+		const key = await this.signingKey();
+		const now = Date.now();
+		for (const [jti, until] of this.tickets) if (until <= now) this.tickets.delete(jti);
+		const jti = randomBytes(16).toString("hex");
+		const exp = now + PREVIEW_TICKET_SECONDS * 1000;
+		this.tickets.set(jti, exp);
+		const token = signTicket(key, {
+			jti,
+			port: spec.port,
+			host: spec.host,
+			path: spec.path,
+			sid: access.session?.sid ?? randomBytes(16).toString("hex"),
+			sessionIat: access.session?.iat ?? now,
+			epoch: this.epoch(),
+			pepoch: this.previewEpoch(),
+			exp,
+		});
+		return { token, expiresAt: exp };
+	}
+
+	/**
+	 * Trade a ticket for a preview session cookie. Single use (the ticket is spent even when a later check fails), bound to the host it
+	 * was minted for, void after a logout-all / password change / remote-UI or Preview switch-off, or once its owner session is logged out.
+	 */
+	async redeemPreviewTicket(ticket: string, host: string): Promise<{ session: IssuedPreviewSession; path: string } | null> {
+		if (!this.passwordSet()) return null;
+		const key = await this.signingKey();
+		const claims = verifyTicket(key, ticket);
+		if (!claims) return null;
+		const issued = this.tickets.delete(claims.jti);
+		const now = Date.now();
+		if (!issued || claims.exp <= now || claims.host !== host.toLowerCase() || claims.epoch !== this.epoch() || claims.pepoch !== this.previewEpoch()) return null;
+		const exp = Math.min(now + this.config().sessionTtlHours * 3_600_000, claims.sessionIat + MAX_SESSION_MS);
+		const session: PreviewClaims = { sid: claims.sid, iat: claims.sessionIat, ren: now, exp, epoch: claims.epoch, pepoch: claims.pepoch };
+		if (!this.previewValid(session, now)) return null;
+		this.noteExpiry(session.sid, exp);
+		return { session: this.mintPreview(session, key, now), path: claims.path };
+	}
+
+	/** The preview session behind a `Cookie` header, or null. `renewed` carries the re-issued cookie when the sliding expiry moved. */
+	async authenticatePreview(cookieHeader: string | undefined): Promise<{ claims: PreviewClaims; renewed: IssuedPreviewSession | null } | null> {
+		const raw = previewCookieValue(cookieHeader);
+		if (!raw || !this.passwordSet()) return null;
+		const key = await this.signingKey();
+		const claims = verifyPreviewSession(key, raw);
+		const now = Date.now();
+		if (!claims || !this.previewValid(claims, now)) return null;
+		if (now - claims.ren < RENEW_AFTER_MS) {
+			this.noteExpiry(claims.sid, claims.exp);
+			return { claims, renewed: null };
+		}
+		const exp = Math.min(now + this.config().sessionTtlHours * 3_600_000, claims.iat + MAX_SESSION_MS);
+		const renewed = this.mintPreview({ ...claims, ren: now, exp }, key, now);
+		this.noteExpiry(claims.sid, exp);
+		return { claims: renewed.claims, renewed };
+	}
+
 	// ---------------------------------------------------------------------------------------------- live sockets
 
 	/** Register a remote WebSocket so it ends with its session. Returns the unregister function. */
@@ -367,7 +472,7 @@ export class AccessService {
 		const now = Date.now();
 		const config = this.config();
 		const enabled = config.remoteUiEnabled;
-		const toolOn = (tool: MachineTool | undefined): boolean => tool === undefined || (tool === "terminal" ? config.remoteTerminalEnabled : config.remoteBrowserEnabled);
+		const toolOn = (tool: MachineTool | undefined): boolean => tool === undefined || (tool === "terminal" ? config.remoteTerminalEnabled : tool === "browser" ? config.remoteBrowserEnabled : config.remotePreviewEnabled);
 		for (const [sid, until] of this.elevated) if (until <= now) this.elevated.delete(sid);
 		this.closeSockets((tracked) => !enabled || !toolOn(tracked.tool) || !this.valid({ ...tracked.claims, exp: Math.max(tracked.claims.exp, this.liveExp.get(tracked.claims.sid) ?? 0) }, now));
 		for (const [sid, exp] of this.liveExp) if (exp <= now) this.liveExp.delete(sid);
@@ -396,6 +501,7 @@ export class AccessService {
 			sessionTtlHours: config.sessionTtlHours,
 			remoteTerminalEnabled: config.remoteTerminalEnabled,
 			remoteBrowserEnabled: config.remoteBrowserEnabled,
+			remotePreviewEnabled: config.remotePreviewEnabled,
 			elevatedUntil: remote ? ((until) => (until === null ? null : new Date(until).toISOString()))(this.elevatedUntil(access.session)) : null,
 		};
 	}

@@ -18,7 +18,7 @@ import type { ContextService } from "../context/service.ts";
 import type { HandoffService } from "../handoff/service.ts";
 
 /** What the network services are built from: the server context before `network` exists. */
-export type NetworkBase = Omit<ServerContext, "network" | "access" | "sessions" | "turnOutputs" | "gitService" | "hostTools" | "tasks" | "shared" | "contexts" | "handoffs" | "terminals" | "browser">;
+export type NetworkBase = Omit<ServerContext, "network" | "access" | "sessions" | "turnOutputs" | "gitService" | "hostTools" | "tasks" | "shared" | "contexts" | "handoffs" | "terminals" | "browser" | "preview">;
 
 /**
  * Everything the agent network is made of. Lives on `ServerContext.network`; the `/api/local` routes use the

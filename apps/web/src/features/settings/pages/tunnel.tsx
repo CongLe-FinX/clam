@@ -7,6 +7,7 @@ import { TUNNEL_MODE_LABEL, TUNNEL_STATE } from "@/features/network/format";
 import { tunnelBusy, useTunnelActions } from "@/features/network/hooks";
 import { T, msg, renderServerText, t, tr, type Msg } from "@/i18n";
 import { errorText } from "@/lib/api";
+import { PreviewSection } from "@/features/preview/preview-section";
 import { useTunnel } from "@/lib/queries";
 import { cn, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
@@ -86,6 +87,7 @@ export default function TunnelPage() {
 	const busy = tunnelBusy(tn.state);
 	const origin = `http://${tn.networkListener.host}:${tn.networkListener.port}`;
 
+	const wasStopped = tn.state === "stopped";
 	const save = () =>
 		actions.save.mutate(
 			{
@@ -95,9 +97,9 @@ export default function TunnelPage() {
 				autoStart: d.autoStart,
 			},
 			{
-				onSuccess: () => {
+				onSuccess: (saved) => {
 					setDraft(null);
-					toast.success(t("Tunnel settings saved"));
+					toast.success(wasStopped && saved.state !== "stopped" ? t("Tunnel settings saved and the tunnel started") : t("Tunnel settings saved"));
 				},
 			},
 		);
@@ -134,6 +136,20 @@ export default function TunnelPage() {
 					}
 				>
 					<div className="flex flex-col gap-4">
+						{tn.externalConnector ? (
+							<div role="status" className="flex items-start gap-2.5 rounded-xl bg-success/10 p-3 text-[13px]">
+								<CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" />
+								<span className="min-w-0 break-words">
+									<strong className="block font-semibold">{t("Served by another cloudflared on this machine or network")}</strong>
+									<span className="text-muted-foreground">{t("{hostname} already reaches this machine through a connector CLAM did not start, so CLAM's own connector is optional. Start it only if you want CLAM to run the tunnel itself.", { hostname: tn.config.hostname ?? "" })}</span>
+								</span>
+							</div>
+						) : tn.state === "stopped" && tn.config.mode !== "off" ? (
+							<div role="status" className="flex items-start gap-2.5 rounded-xl bg-warning/10 p-3 text-[13px]">
+								<AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" />
+								<span className="min-w-0 break-words text-muted-foreground">{t("The tunnel is stopped. Saved settings are not live until it is started — press Start tunnel, or turn on “Start automatically”.")}</span>
+							</div>
+						) : null}
 						{tn.publicUrl ? (
 							<div className="flex flex-col gap-1.5 rounded-xl bg-surface-2 p-3.5 shadow-[inset_0_0_0_1px_var(--border-strong)]">
 								<span className="text-2xs font-semibold uppercase tracking-wider text-subtle">{t("Public address of this machine")}</span>
@@ -186,6 +202,11 @@ export default function TunnelPage() {
 									<Play /> {t("Start tunnel")}
 								</Button>
 							)}
+							{!busy && tn.config.mode === "named" && tn.config.hostname ? (
+								<Button variant="outline" loading={actions.probe.isPending} onClick={() => actions.probe.mutate()}>
+									{t("Check hostname")}
+								</Button>
+							) : null}
 							{!busy && !tn.cloudflared.installed ? <span className="text-xs text-warning">{t("Install cloudflared first.")}</span> : null}
 							{!busy && tn.cloudflared.installed && !savedReady ? <span className="text-xs text-muted-foreground">{tn.config.mode === "off" ? t("Choose and save a mode below.") : t("Save a hostname and token for the named tunnel first.")}</span> : null}
 							{!busy && dirty && savedReady ? <span className="text-xs text-muted-foreground">{t("Save your changes first.")}</span> : null}
@@ -335,7 +356,7 @@ export default function TunnelPage() {
 						<label className="flex min-h-11 items-center justify-between gap-4">
 							<span className="flex flex-col">
 								<span className="text-[13px] font-medium">{t("Start automatically")}</span>
-								<span className="text-xs text-muted-foreground">{t("Start the tunnel whenever this machine's server starts.")}</span>
+								<span className="text-xs text-muted-foreground">{t("Start the tunnel when this machine's server starts and whenever you save these settings while it is stopped.")}</span>
 							</span>
 							<Switch checked={d.autoStart} onCheckedChange={(v) => patch({ autoStart: v })} disabled={d.mode === "off"} aria-label={t("Start automatically")} />
 						</label>
@@ -357,6 +378,8 @@ export default function TunnelPage() {
 						</div>
 					</div>
 				</SettingsSection>
+
+				<PreviewSection tn={tn} />
 			</PageBody>
 		</>
 	);

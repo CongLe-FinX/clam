@@ -19,7 +19,7 @@ import { DevtoolsPanel } from "./devtools-panel.tsx";
 import { downloadHref } from "./downloads.tsx";
 import { FileChooserDialog, PageDialog } from "./page-dialogs.tsx";
 import { PortsRow } from "./ports-row.tsx";
-import { BrowserSkeleton, ErrorCard, InstallCard, RemoteOffCard, StartPage } from "./states.tsx";
+import { BrowserSkeleton, ErrorCard, InstallCard, NoTabsPage, OpeningTab, RemoteOffCard, StartPage } from "./states.tsx";
 import { TabStrip } from "./tab-strip.tsx";
 import { BrowserToolbar } from "./toolbar.tsx";
 import { BrowserViewer } from "./viewer.tsx";
@@ -90,6 +90,8 @@ function BrowserWorkspace({ status }: { status: BrowserStatus }) {
 	const [activeId, setActiveId] = useState<string | null>(search.tab ?? null);
 	const [creating, setCreating] = useState(false);
 	const [opening, setOpening] = useState(false);
+	// The first tab listing of this visit has been acted on (a blank tab opened if the browser had none). After that an empty list is the user's doing and stays empty.
+	const [arrived, setArrived] = useState(false);
 	const creatingRef = useRef(false);
 	const handledUrl = useRef<string | null>(null);
 	const addressRef = useRef<HTMLInputElement>(null);
@@ -99,6 +101,8 @@ function BrowserWorkspace({ status }: { status: BrowserStatus }) {
 	const holdConnection = Boolean(search.url) || opening;
 	const effectiveId = !tabsQuery.isSuccess || holdConnection ? null : tabs.some((t) => t.id === activeId) ? activeId : (tabs[0]?.id ?? null);
 	const activeTab = tabs.find((t) => t.id === effectiveId) ?? null;
+	// No tab, and nothing on its way: every tab was closed. Shown as an empty state, never as a spinner.
+	const empty = arrived && tabsQuery.isSuccess && tabs.length === 0 && !creating && !opening;
 
 	const openTab = useCallback(
 		async (url?: string) => {
@@ -121,26 +125,37 @@ function BrowserWorkspace({ status }: { status: BrowserStatus }) {
 		[qc],
 	);
 
-	// Arrival: `?url=` opens a new tab and is stripped; with no tab at all, open a blank one.
+	// Arrival: `?url=` opens a new tab and is stripped. A visit that finds the browser with no tab at all opens one blank tab, once;
+	// a tab list that empties afterwards (the user closed the last tab, or the page closed itself) is never refilled behind their back.
 	useEffect(() => {
 		if (!search.url) handledUrl.current = null;
 		if (!tabsQuery.isSuccess) return;
 		if (search.url) {
 			if (handledUrl.current === search.url) return;
 			handledUrl.current = search.url;
+			setArrived(true);
 			setOpening(true);
 			void openTab(search.url);
 			void navigate({ to: "/browser", search: search.tab ? { tab: search.tab } : {}, replace: true });
 			return;
 		}
+		if (arrived) return;
+		setArrived(true);
 		if (tabs.length === 0 && !creatingRef.current) void openTab();
-	}, [tabsQuery.isSuccess, search.url, search.tab, tabs.length, openTab, navigate]);
+	}, [tabsQuery.isSuccess, search.url, search.tab, tabs.length, arrived, openTab, navigate]);
 
 	// Keep `?tab=` in step with what is shown, so a reload comes back to the same tab.
 	useEffect(() => {
 		if (!effectiveId || search.url || search.tab === effectiveId) return;
 		void navigate({ to: "/browser", search: { tab: effectiveId }, replace: true });
 	}, [effectiveId, search.url, search.tab, navigate]);
+
+	// Nothing to show: the stale `?tab=` of a closed tab goes, and (with a mouse or keyboard) the address bar is ready for the next page.
+	useEffect(() => {
+		if (!empty) return;
+		if (search.tab) void navigate({ to: "/browser", search: {}, replace: true });
+		if (!window.matchMedia("(pointer: coarse)").matches) addressRef.current?.focus({ preventScroll: true });
+	}, [empty, search.tab, navigate]);
 
 	const handleClosed = useCallback(
 		(tabId: string) => {
@@ -201,7 +216,7 @@ function BrowserWorkspace({ status }: { status: BrowserStatus }) {
 	if (tabsQuery.isError) {
 		return isToolDisabled(tabsQuery.error) ? <RemoteOffCard /> : <ErrorCard title={t("Can't list the browser's tabs")} message={errorText(tabsQuery.error)} onRetry={() => void tabsQuery.refetch()} retrying={tabsQuery.isFetching} />;
 	}
-	if (tabsQuery.isPending || (tabs.length === 0 && (creating || opening))) return <BrowserSkeleton label={creating || status.state === "starting" ? t("Starting the browser on this machine…") : undefined} />;
+	if (tabsQuery.isPending || (tabs.length === 0 && (creating || opening || !arrived))) return <BrowserSkeleton label={creating || status.state === "starting" ? t("Starting the browser on this machine…") : undefined} />;
 
 	const blank = activeTab !== null && (activeTab.url === "" || activeTab.url === "about:blank");
 	const devtools = (
@@ -232,20 +247,27 @@ function BrowserWorkspace({ status }: { status: BrowserStatus }) {
 				onHistory={(action) => conn?.send({ type: "history", action })}
 				onCopy={copyFromPage}
 				onMenu={() => setDrawer(true)}
+				empty={empty}
 			/>
 			<TabStrip tabs={tabs} activeId={effectiveId} creating={creating} onSelect={setActiveId} onClose={closeTab} onNew={() => void openTab()} />
 			<PortsRow ports={ports.data} onOpen={navigateTo} className="border-b bg-surface-1" />
 			<div className="relative min-h-0 flex-1">
-				<BrowserViewer
-					conn={conn}
-					state={snapshot.state}
-					viewport={snapshot.viewport}
-					device={device}
-					onViewerSize={onViewerSize}
-					onFocusAddress={() => addressRef.current?.focus()}
-					onRetry={() => void qc.invalidateQueries({ queryKey: bk.all })}
-					className="absolute inset-0"
-				/>
+				{effectiveId ? (
+					<BrowserViewer
+						conn={conn}
+						state={snapshot.state}
+						viewport={snapshot.viewport}
+						device={device}
+						onViewerSize={onViewerSize}
+						onFocusAddress={() => addressRef.current?.focus()}
+						onRetry={() => void qc.invalidateQueries({ queryKey: bk.all })}
+						className="absolute inset-0"
+					/>
+				) : empty ? (
+					<NoTabsPage ports={ports.data} onOpen={navigateTo} onNewTab={() => void openTab()} />
+				) : (
+					<OpeningTab />
+				)}
 				{blank ? <StartPage ports={ports.data} onOpen={navigateTo} /> : null}
 				{debug ? <DebugOverlay /> : null}
 			</div>

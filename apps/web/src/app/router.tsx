@@ -132,9 +132,9 @@ const agentsRoute = createRoute({
 const projectRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/projects/$projectId",
-	validateSearch: (s: Record<string, unknown>): { file?: string; tab?: "git" | "context" } => ({
+	validateSearch: (s: Record<string, unknown>): { file?: string; tab?: "files" | "git" | "context" } => ({
 		file: typeof s.file === "string" && s.file ? s.file : undefined,
-		tab: s.tab === "git" ? "git" : s.tab === "context" ? "context" : undefined,
+		tab: s.tab === "files" ? "files" : s.tab === "git" ? "git" : s.tab === "context" ? "context" : undefined,
 	}),
 	loader: ({ context: { queryClient: qc }, params }) => {
 		prefetch(qc, qk.project(params.projectId), routes.project(params.projectId));
@@ -147,6 +147,8 @@ const projectRoute = createRoute({
 const sessionRoute = createRoute({
 	getParentRoute: () => rootRoute,
 	path: "/sessions/$sessionId",
+	// `?file=` is the file open in Quick Look.
+	validateSearch: (s: Record<string, unknown>): { file?: string } => ({ file: typeof s.file === "string" && s.file ? s.file : undefined }),
 	loader: ({ context: { queryClient: qc }, params }) => {
 		prefetch(qc, qk.session(params.sessionId), routes.session(params.sessionId));
 	},

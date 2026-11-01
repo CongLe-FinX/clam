@@ -27,10 +27,11 @@ const { Component: PairingRequestsDialog, preload: loadPairingRequestsDialog } =
 const { Component: DelegateDialog, preload: loadDelegateDialog } = lazyPreload(() => import("@/features/tasks/delegate-dialog.tsx"));
 const { Component: ContextEditorDialog, preload: loadContextEditorDialog } = lazyPreload(() => import("@/features/context/editor-dialog.tsx"));
 const { Component: NewChatDialog, preload: loadNewChatDialog } = lazyPreload(() => import("@/features/chats/new-chat-dialog.tsx"));
+const { Component: DeleteChatDialog, preload: loadDeleteChatDialog } = lazyPreload(() => import("@/features/chats/delete-chat-dialog.tsx"));
 const { Component: HandoverDialog, preload: loadHandoverDialog } = lazyPreload(() => import("@/features/shared/handover-dialog.tsx"));
 
 /** Warms every dialog body so the first open of any of them paints without a Suspense round trip. */
-export const preloadDialogBodies = (): Promise<unknown> => Promise.all([loadCloneForm(), loadInviteDialog(), loadJoinDialog(), loadPairingRequestsDialog(), loadDelegateDialog(), loadContextEditorDialog(), loadNewChatDialog(), loadHandoverDialog()]);
+export const preloadDialogBodies = (): Promise<unknown> => Promise.all([loadCloneForm(), loadInviteDialog(), loadJoinDialog(), loadPairingRequestsDialog(), loadDelegateDialog(), loadContextEditorDialog(), loadNewChatDialog(), loadDeleteChatDialog(), loadHandoverDialog()]);
 
 export default function GlobalDialogs() {
 	const dialog = useUi((s) => s.dialog);
@@ -49,6 +50,12 @@ export default function GlobalDialogs() {
 			return (
 				<Suspense fallback={null}>
 					<NewChatDialog onClose={close} />
+				</Suspense>
+			);
+		case "delete-chat":
+			return (
+				<Suspense fallback={null}>
+					<DeleteChatDialog sessionId={dialog.sessionId} onClose={close} />
 				</Suspense>
 			);
 		case "invite-node":

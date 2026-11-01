@@ -1,6 +1,6 @@
 import { type AccessStatus, type BrowserStatus, type ListeningPort, routes } from "@clam/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Download, Globe, Lock, Menu, RefreshCw, ShieldAlert, TriangleAlert } from "lucide-react";
+import { Download, Globe, Loader2, Lock, Menu, PanelTop, Plus, RefreshCw, ShieldAlert, TriangleAlert } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { accessKey, useAccess } from "@/features/auth/hooks";
@@ -216,6 +216,50 @@ export function StartPage({ ports, onOpen }: { ports: ListeningPort[] | undefine
 				) : (
 					<PortChips ports={ports} onOpen={onOpen} />
 				)}
+			</div>
+		</div>
+	);
+}
+
+/** Every tab is closed. Nothing is opened behind the user's back: the address bar, a New tab button and the machine's listeners are the ways on. */
+export function NoTabsPage({ ports, onOpen, onNewTab }: { ports: ListeningPort[] | undefined; onOpen: (url: string) => void; onNewTab: () => void }) {
+	return (
+		<div className="scrollbar-thin absolute inset-0 overflow-y-auto bg-background">
+			<div className="mx-auto flex min-h-full max-w-md flex-col items-center justify-center gap-5 px-6 py-10 text-center">
+				<div className="grid size-12 place-items-center rounded-2xl bg-surface-2 text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]">
+					<PanelTop className="size-6" />
+				</div>
+				<div className="flex flex-col gap-1.5">
+					<h2 className="text-base font-semibold tracking-tight">{t("No tabs open")}</h2>
+					<p className="text-[13px] text-muted-foreground">
+						<T text="Type <code>localhost:1234</code> above. It is this machine's own localhost, not yours." tags={{ code: <code className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-xs text-foreground" /> }} />
+					</p>
+				</div>
+				<Button onClick={onNewTab}>
+					<Plus /> {t("New tab")}
+				</Button>
+				<div className="flex flex-col items-center gap-2">
+					<span className="text-2xs font-medium uppercase tracking-wider text-subtle">{t("Running on this machine")}</span>
+					{ports === undefined ? (
+						<div className="flex gap-1.5" aria-hidden>
+							<Skeleton className="h-7 w-32 rounded-full coarse:h-11" />
+							<Skeleton className="h-7 w-28 rounded-full coarse:h-11" />
+						</div>
+					) : (
+						<PortChips ports={ports} onOpen={onOpen} />
+					)}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+/** A tab is being opened and its connection has not been handed to the viewer yet. */
+export function OpeningTab() {
+	return (
+		<div role="status" className="pointer-events-none absolute inset-0 grid place-items-center">
+			<div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+				<Loader2 className="size-4 animate-spin" /> {t("Opening a tab…")}
 			</div>
 		</div>
 	);

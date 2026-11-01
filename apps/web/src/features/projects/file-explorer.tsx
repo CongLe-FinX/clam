@@ -5,15 +5,6 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	AlertCircle,
 	ChevronRight,
-	File,
-	FileArchive,
-	FileCode,
-	FileCog,
-	FileImage,
-	FileJson,
-	FileLock,
-	FileTerminal,
-	FileText,
 	Folder,
 	FolderOpen,
 	Link2,
@@ -27,6 +18,7 @@ import { type KeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRe
 import { t } from "@/i18n";
 import { api, errorText } from "@/lib/api";
 import { hasFiles } from "@/lib/upload";
+import { ancestorsOf, byKindThenName, fileIcon, parentOf } from "./file-utils.ts";
 import { UploadDock, useProjectUploads } from "./uploads.tsx";
 import { qk } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -40,6 +32,10 @@ export interface FileExplorerProps {
 	projectId: string;
 	selectedPath?: string | null;
 	onOpenFile: (path: string) => void;
+	/** Also called when a folder row is activated (the Files tab shows that folder in its list). */
+	onSelectDir?: (path: string) => void;
+	/** Tree only: no toolbar, no upload (the host page provides both). */
+	bare?: boolean;
 	className?: string;
 }
 
@@ -84,27 +80,6 @@ function useExpanded(projectId: string) {
 
 // ───────────────────────────── icons ─────────────────────────────
 
-const CODE_EXT = new Set(["ts", "tsx", "js", "jsx", "mjs", "cjs", "py", "rs", "go", "java", "c", "h", "cpp", "cc", "hpp", "rb", "php", "swift", "kt", "css", "scss", "html", "htm", "vue", "svelte", "sql", "lua", "zig"]);
-const IMG_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "avif", "bmp"]);
-const ARCHIVE_EXT = new Set(["zip", "tar", "gz", "tgz", "bz2", "xz", "7z", "rar"]);
-const CONFIG_EXT = new Set(["yml", "yaml", "toml", "ini", "conf", "cfg", "env"]);
-const TEXT_EXT = new Set(["md", "mdx", "txt", "rst", "log", "csv"]);
-
-function fileIcon(name: string): { Icon: typeof File; tone: string } {
-	const lower = name.toLowerCase();
-	if (lower.endsWith(".lock") || lower === "pnpm-lock.yaml" || lower === "package-lock.json") return { Icon: FileLock, tone: "text-subtle" };
-	if (lower.startsWith(".env")) return { Icon: FileCog, tone: "text-warning" };
-	const ext = lower.includes(".") ? (lower.split(".").pop() as string) : "";
-	if (ext === "json" || ext === "jsonc" || ext === "jsonl") return { Icon: FileJson, tone: "text-warning" };
-	if (ext === "sh" || ext === "bash" || ext === "zsh") return { Icon: FileTerminal, tone: "text-success" };
-	if (CODE_EXT.has(ext)) return { Icon: FileCode, tone: "text-accent" };
-	if (IMG_EXT.has(ext)) return { Icon: FileImage, tone: "text-info" };
-	if (ARCHIVE_EXT.has(ext)) return { Icon: FileArchive, tone: "text-subtle" };
-	if (CONFIG_EXT.has(ext)) return { Icon: FileCog, tone: "text-muted-foreground" };
-	if (TEXT_EXT.has(ext)) return { Icon: FileText, tone: "text-muted-foreground" };
-	return { Icon: File, tone: "text-subtle" };
-}
-
 // ───────────────────────────── row model ─────────────────────────────
 
 type Row =
@@ -113,22 +88,8 @@ type Row =
 	| { type: "empty"; key: string; depth: number }
 	| { type: "error"; key: string; depth: number; path: string; message: string };
 
-const byKindThenName = (a: FileEntry, b: FileEntry) => {
-	const ad = a.kind === "dir" ? 0 : 1;
-	const bd = b.kind === "dir" ? 0 : 1;
-	return ad - bd || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
-};
-
 const INDENT = 14;
 const BASE_PAD = 8;
-
-const parentOf = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
-function ancestorsOf(p: string): string[] {
-	const parts = p.split("/");
-	const out: string[] = [];
-	for (let i = 1; i < parts.length; i++) out.push(parts.slice(0, i).join("/"));
-	return out;
-}
 
 interface DirState {
 	entries?: FileEntry[];
@@ -138,7 +99,7 @@ interface DirState {
 
 // ───────────────────────────── component ─────────────────────────────
 
-export function FileExplorer({ projectId, selectedPath, onOpenFile, className }: FileExplorerProps) {
+export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir, bare, className }: FileExplorerProps) {
 	const qc = useQueryClient();
 	const [expanded, updateExpanded] = useExpanded(projectId);
 	const [filter, setFilter] = useState("");
@@ -267,11 +228,13 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 		(row: Row) => {
 			if (row.type === "entry") {
 				setActiveKey(row.key);
-				if (row.entry.kind === "dir") toggleDir(row.entry.path);
-				else onOpenFile(row.entry.path);
+				if (row.entry.kind === "dir") {
+					toggleDir(row.entry.path);
+					onSelectDir?.(row.entry.path);
+				} else onOpenFile(row.entry.path);
 			}
 		},
-		[onOpenFile, toggleDir],
+		[onOpenFile, onSelectDir, toggleDir],
 	);
 
 	const moveTo = (idx: number) => {
@@ -361,30 +324,30 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 		<div
 			className={cn("relative flex h-full min-h-0 flex-col bg-surface-1", className)}
 			onDragEnter={(e) => {
-				if (!hasFiles(e)) return;
+				if (bare || !hasFiles(e)) return;
 				e.preventDefault();
 				dragDepth.current++;
 				setDragging(true);
 			}}
 			onDragOver={(e) => {
-				if (!hasFiles(e)) return;
+				if (bare || !hasFiles(e)) return;
 				e.preventDefault();
 				e.dataTransfer.dropEffect = "copy";
 			}}
 			onDragLeave={(e) => {
-				if (!hasFiles(e)) return;
+				if (bare || !hasFiles(e)) return;
 				dragDepth.current = Math.max(0, dragDepth.current - 1);
 				if (dragDepth.current === 0) setDragging(false);
 			}}
 			onDrop={(e) => {
-				if (!hasFiles(e)) return;
+				if (bare || !hasFiles(e)) return;
 				e.preventDefault();
 				dragDepth.current = 0;
 				setDragging(false);
 				uploads.upload(Array.from(e.dataTransfer.files), targetDir);
 			}}
 		>
-			<div ref={headerRef} className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5">
+			<div ref={headerRef} className={cn("flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5", bare && "hidden")}>
 				{filterShown ? (
 					<div className="relative min-w-0 flex-1">
 						<Search aria-hidden className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-subtle" />
@@ -452,16 +415,18 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 						</Tip>
 					</>
 				)}
-				<input
-					ref={fileInput}
-					type="file"
-					multiple
-					hidden
-					onChange={(e) => {
-						uploads.upload(Array.from(e.target.files ?? []), targetDir);
-						e.target.value = "";
-					}}
-				/>
+				{bare ? null : (
+					<input
+						ref={fileInput}
+						type="file"
+						multiple
+						hidden
+						onChange={(e) => {
+							uploads.upload(Array.from(e.target.files ?? []), targetDir);
+							e.target.value = "";
+						}}
+					/>
+				)}
 			</div>
 
 			<div
@@ -474,7 +439,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 				onFocus={() => {
 					if (activeKey === null && rows[0]?.type === "entry") setActiveKey(rows[0].key);
 				}}
-				className="scrollbar-thin min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--accent)]"
+				className="group/tree scrollbar-thin min-h-0 flex-1 overflow-auto overscroll-contain outline-none"
 			>
 				{q && rows.length === 0 ? (
 					<p className="px-4 py-6 text-center text-xs text-subtle">{t("No loaded files match “{query}”. Expand folders to load more.", { query: filter.trim() })}</p>
@@ -498,7 +463,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 					})}
 				</div>
 			</div>
-			<UploadDock uploads={uploads} />
+			{bare ? null : <UploadDock uploads={uploads} />}
 			{dragging ? (
 				<div aria-hidden className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl bg-accent-soft text-xs font-medium text-accent shadow-[inset_0_0_0_2px_var(--accent)]">
 					{targetDir ? t("Drop to upload into /{dir}", { dir: targetDir }) : t("Drop to upload into the project folder")}
@@ -577,7 +542,7 @@ const TreeRow = memo(function TreeRow({
 			className={cn(
 				"relative flex h-full cursor-pointer select-none items-center gap-1.5 pr-3 text-[13px] transition-colors hover:bg-surface-2",
 				selected && "bg-accent-soft text-foreground hover:bg-accent-soft",
-				active && "shadow-[inset_0_0_0_1px_var(--accent)]",
+				active && "group-focus-within/tree:shadow-[inset_0_0_0_1px_var(--accent)]",
 			)}
 			style={{ paddingLeft: pad }}
 		>

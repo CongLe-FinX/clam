@@ -1,12 +1,15 @@
 import { type BrowserDevice, type BrowserDownload, type BrowserTab, DESKTOP_VIEWPORT_WIDTH, IPHONE_VIEWPORT } from "@clam/contracts";
-import { Activity, ArrowLeft, ArrowRight, Check, ClipboardCopy, Download, Maximize2, Menu, Monitor, MoreVertical, RotateCw, Smartphone, SquareTerminal, X } from "lucide-react";
+import { Activity, ArrowLeft, ArrowRight, Check, ClipboardCopy, Download, ExternalLink, Maximize2, Menu, Monitor, MoreVertical, RotateCw, Smartphone, SquareTerminal, X } from "lucide-react";
 import { type ReactNode, type RefObject, useState } from "react";
+import { usePreviewOpener } from "@/features/preview/api";
+import { parseLocalApp } from "@/features/preview/local-url";
 import { msg, t, tr, type Msg } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/ui/sheet";
 import { Tip } from "@/ui/tooltip";
 import { AddressBar } from "./address-bar.tsx";
+import { isLocalAppUrl } from "./open-in-browser.tsx";
 import { DownloadsButton, DownloadsList } from "./downloads.tsx";
 import { SwipeZone } from "./swipe-zone.tsx";
 
@@ -24,6 +27,8 @@ function deviceLabel(id: BrowserDevice): string {
 
 export interface ToolbarProps {
 	tab: BrowserTab | null;
+	/** No tab is open: the address bar still works (typing an address opens a tab). */
+	empty: boolean;
 	/** The tab's socket is open: navigation controls are live. */
 	live: boolean;
 	device: BrowserDevice;
@@ -99,7 +104,11 @@ export function BrowserToolbar(p: ToolbarProps & { compact: boolean }) {
 	const [downloadsOpen, setDownloadsOpen] = useState(false);
 	const loading = p.tab?.loading ?? false;
 	const reload = () => p.onHistory(loading ? "stop" : "reload");
-	const address = <AddressBar url={p.tab?.url} loading={loading} progress={p.tab?.progress ?? 0} disabled={!p.tab} onSubmit={p.onNavigate} inputRef={p.addressRef} />;
+	// The tab shows an app of this machine's localhost: offer to open it in the user's own browser.
+	const preview = usePreviewOpener();
+	const localApp = p.tab && isLocalAppUrl(p.tab.url) ? parseLocalApp(p.tab.url) : null;
+	const openInMyBrowser = localApp ? () => preview.open(localApp.port, localApp.path) : null;
+	const address = <AddressBar url={p.tab?.url} loading={loading} progress={p.tab?.progress ?? 0} disabled={!p.tab && !p.empty} onSubmit={p.onNavigate} inputRef={p.addressRef} />;
 
 	if (!p.compact) {
 		return (
@@ -125,6 +134,11 @@ export function BrowserToolbar(p: ToolbarProps & { compact: boolean }) {
 				<IconButton label={p.debug ? t("Hide stream statistics") : t("Show stream statistics")} onClick={p.onToggleDebug} active={p.debug}>
 					<Activity />
 				</IconButton>
+				{openInMyBrowser ? (
+					<IconButton label={preview.why ?? t("Open in my browser")} onClick={openInMyBrowser} disabled={!preview.canOpen || preview.pending}>
+						<ExternalLink />
+					</IconButton>
+				) : null}
 				<DownloadsButton downloads={p.downloads} />
 			</div>
 		);
@@ -196,6 +210,17 @@ export function BrowserToolbar(p: ToolbarProps & { compact: boolean }) {
 									p.onCopy();
 								}}
 							/>
+							{openInMyBrowser ? (
+								<SheetRow
+									icon={<ExternalLink />}
+									label={t("Open in my browser")}
+									disabled={!preview.canOpen || preview.pending}
+									onClick={() => {
+										setMoreOpen(false);
+										openInMyBrowser();
+									}}
+								/>
+							) : null}
 							<SheetRow
 								icon={<Download />}
 								label={t("Downloads")}

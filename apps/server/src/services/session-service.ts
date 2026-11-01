@@ -28,6 +28,7 @@ import type { ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
 import { CHAT_RENDERING_GUIDANCE } from "./agent-guidance.ts";
 import { newId } from "./ids.ts";
+import { deleteManagedFolder } from "./project-folders.ts";
 
 type SessionRow = typeof agentSessions.$inferSelect;
 
@@ -427,7 +428,11 @@ export class SessionService {
 		return session;
 	}
 
-	async remove(id: string): Promise<void> {
+	/**
+	 * Delete a session. When it was the last session of a chat's own working folder (project origin `chat`), that folder goes
+	 * too: the project row and its managed folder, or with `keepFiles` the project becomes a normal one (origin `user`) so the files stay reachable.
+	 */
+	async remove(id: string, options: { keepFiles?: boolean } = {}): Promise<void> {
 		const row = this.get(id);
 		this.removeGuard?.(row);
 		await this.ctx.runtime.stop(id);
@@ -437,7 +442,21 @@ export class SessionService {
 		const dir = path.resolve(row.sessionDir);
 		const rel = path.relative(this.sessionsRoot, dir);
 		if (rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel)) await rm(dir, { recursive: true, force: true });
+		await this.releaseChatProject(row.projectId, options.keepFiles === true);
 		this.ctx.bus.publish("sessions", { type: "remove", sessionId: id });
+	}
+
+	private async releaseChatProject(projectId: string, keepFiles: boolean): Promise<void> {
+		const project = this.ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
+		if (!project || project.origin !== "chat") return;
+		const others = this.ctx.db.select({ id: agentSessions.id }).from(agentSessions).where(eq(agentSessions.projectId, projectId)).get();
+		if (others) return;
+		if (keepFiles) {
+			this.ctx.db.update(projects).set({ origin: "user", updatedAt: new Date().toISOString() }).where(eq(projects.id, projectId)).run();
+			return;
+		}
+		this.ctx.db.delete(projects).where(eq(projects.id, projectId)).run();
+		await deleteManagedFolder(this.ctx, project);
 	}
 
 	// ------------------------------------------------------------------ runtime access

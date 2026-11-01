@@ -205,6 +205,8 @@ Install `cloudflared` first (see [Requirements](#requirements)). Then, on each m
 4. In CLAM: **Settings → Cloudflare Tunnel** → **Tunnel mode: Named tunnel** → **Public hostname** `node-a.example.com` → **Tunnel token** paste the token → switch **Start automatically** on if you want it with the server → **Save configuration** → **Start tunnel**. The token goes to the OS secret store (write-only; never shown again).
 5. Repeat on machine B with its own tunnel and hostname (e.g. `node-b.example.com`). Each machine needs **its own tunnel and hostname**.
 
+Saved settings are not live until the tunnel is running. **Save configuration** with **Start automatically** on starts a stopped tunnel straight away (and at every server start); with it off, press **Start tunnel**. If another `cloudflared` — yours, outside CLAM — already routes the hostname to `127.0.0.1:4318`, CLAM does not need its own connector: the hostname you save is accepted as the `Host` header, and when `https://<hostname>/api/v1/node/info` answers with this machine's id and fingerprint the page shows **Served by another cloudflared on this machine or network** and that hostname becomes the address used in invitations.
+
 The tunnel exposes only the signed machine-to-machine API (and, if you turn it on, the owner-login UI). `https://<your domain>/api/local/*` always answers 404.
 
 ### 2. Pair: Invite on A → Join on B → verify → approve
@@ -243,7 +245,7 @@ Every machine can serve its **own** web UI through its tunnel domain, behind an 
 4. On the phone open `https://node-a.example.com/`, enter the owner password. Add it to the home screen for an app-like icon. You now see that machine's UI — its chats, Machines, Settings (remote sessions cannot change the owner password's first value, tunnel or remote-access switch; those stay machine-local).
 5. To use another machine's UI (B) open **B's** domain the same way; the *Open B's Terminal / Browser* buttons on a machine's page do exactly that.
 
-**Terminal and Browser through the domain** (off by default): in **Settings → Security → Terminal and Browser** switch on **Terminal through the domain** and/or **Browser through the domain**; turning one on asks for the owner password (from the machine itself, or from a signed-in remote session). Opening a terminal through the domain asks for the password again (valid 10 minutes). Switching a tool off, logging out or **Sign out everywhere** closes its live connections at once. The sidebar entries are **Terminal** and **Browser**; the Browser can emulate an iPhone viewport so you can test web apps an agent is serving on that machine's `localhost`.
+**Terminal and Browser through the domain** (off by default): in **Settings → Security → Terminal, Browser and Preview** switch on **Terminal through the domain** and/or **Browser through the domain**; turning one on asks for the owner password (from the machine itself, or from a signed-in remote session). Opening a terminal through the domain asks for the password again (valid 10 minutes). Switching a tool off, logging out or **Sign out everywhere** closes its live connections at once. The sidebar entries are **Terminal** and **Browser**; the Browser can emulate an iPhone viewport so you can test web apps an agent is serving on that machine's `localhost`.
 
 **Security notes**
 
@@ -251,6 +253,30 @@ Every machine can serve its **own** web UI through its tunnel domain, behind an 
 * Sign-in is throttled (5 wrong attempts → 30 s lockout doubling up to 15 min, plus a machine-wide lockout against distributed guessing). The session cookie is `HttpOnly`, `Secure`, `SameSite=Strict`; session length is configurable (**Sign-in lasts**) and renews while you use the UI.
 * The UI port 4317 is never exposed; the OMP RPC channel is never exposed. Optionally add a Cloudflare Access policy in front of the hostname for a second factor — the machine-to-machine API behind the same hostname uses signed requests, so an Access policy on the whole hostname would also block paired machines (**[INFERENCE]** — not tested; use a path-scoped policy or skip it).
 * More: [docs/security.md](docs/security.md).
+
+---
+
+## Preview a local web app
+
+Open a web app that runs on a machine (a Vite / Next / webpack dev server on `localhost:<port>`) in **your own browser** — crisp, smooth, with the real DevTools — from anywhere. The Browser tool (a headless Chromium streamed to the UI) stays for cases that need the machine's own browser.
+
+Each machine gets **one extra address of its own**, by default the first label of its tunnel hostname plus `-preview`: for `clamp-work.example.com` it is `clamp-work-preview.example.com`. You add that single hostname to the machine's tunnel once.
+
+1. **Needs a named tunnel** (**Settings → Cloudflare Tunnel → Named**). A quick tunnel's address changes on every start, so previews are not offered for it (the section explains why). On the machine's own UI (`http://127.0.0.1:4317`) you need none of this: the preview buttons simply open `http://localhost:<port>`.
+2. **Settings → Cloudflare Tunnel → Preview in your own browser** shows the *Preview address* (editable) and the exact Cloudflare step. In the Cloudflare dashboard open **Zero Trust → Networks → Tunnels → your tunnel → Public hostname → Add**:
+   * *Hostname*: `clamp-work-preview.example.com` (copy it from the page)
+   * *Service*: `HTTP` · `127.0.0.1:4318` (the network listener port the page shows)
+
+   No wildcard is needed, and a first-level name next to the tunnel hostname is covered by Cloudflare's free Universal SSL certificate. Two machines on one domain simply get two names (`clamp-work-preview…`, `clamp-home-preview…`), each on its own tunnel — never share one tunnel between machines.
+3. Press **Check**: CLAM asks `https://<preview address>/__clam_preview/health` and expects *this* machine (its node id) to answer.
+4. **Settings → Security → Terminal, Browser and Preview → Preview through the domain** → switch on (from the machine, or from a signed-in remote session with the owner password; it needs *Remote access to this web UI*). It is **off by default**.
+5. Use it: the **Open preview ↗** button next to a *Running on this machine* chip (Browser page), next to a `http://localhost:<port>` link in a chat, or **Open in my browser** in the Browser toolbar. CLAM mints a one-time ticket (valid 60 s) and opens `https://<preview address>/__clam_preview/auth?ticket=…` in a new tab; that sets the preview's own cookie and lands on your app at its natural root (`/`), so client-side routes (`/about`), absolute asset paths (`/assets/…`, `/@vite/client`), API calls and the HMR WebSocket all just work.
+
+**One app at a time per browser.** `https://<preview address>/port/5173/…` selects port 5173 (stored in a cookie) and redirects to `/…`; every other path then goes to that port. Opening another app from CLAM (or visiting `/port/3000/`) switches it. With nothing selected the address shows a small picker of the web apps listening on the machine.
+
+**What is and is not reachable.** Only web apps on the machine's loopback; never CLAM's own UI/network ports, and never databases, SSH, debuggers and similar ports (22, 3306, 5432, 6379, 27017, 9229, 9222, …) or ports below 1024 (except 80). The app sees `Host: localhost:<port>` (so Vite `allowedHosts` and friends accept it), redirects to `http://localhost:<port>/…` are rewritten to the preview address, and cookies stay host-only. Your CLAM cookies are never forwarded to the app.
+
+**Good to know.** All ports of a machine share the preview address's origin (as they share `localhost` cookies): treat apps you preview as one trust domain. Logging out, **Sign out everywhere**, changing the password, switching Preview off or turning remote access off ends every preview session at once. Opens are audited (`preview.open`, `preview.signin`).
 
 ---
 
@@ -309,6 +335,7 @@ Database migrations run automatically at startup and a snapshot `clam.db.pre-mig
 | **`better-sqlite3` / `node-pty` fails to build** | You need a prebuilt binary for your Node version or a toolchain: macOS `xcode-select --install`; Debian/Ubuntu `sudo apt install build-essential python3`. Prefer an LTS/even Node (22 or 24) if a prebuilt binary is missing for brand-new Node releases. Then `pnpm install` again. |
 | **`corepack: command not found`** | Node 25+ no longer ships corepack: `npm install -g pnpm@11`. |
 | **Tunnel stays "reconnecting" / quick tunnel unreachable** | Check **Settings → Cloudflare Tunnel** shows `cloudflared` installed and the **Network listener** port is the one your hostname routes to (named tunnel: service must be `http://127.0.0.1:4318`, token from that tunnel, hostname exactly as in Cloudflare). A fresh quick-tunnel hostname can take a few seconds to resolve. Corporate proxies/firewalls that block outbound `cloudflared` traffic (it uses outbound 7844/QUIC and HTTPS to Cloudflare) also cause this. Press **Stop tunnel** then **Start tunnel**. |
+| **`403 forbidden_host` — "This machine only answers for …" from your hostname** | The network listener answers only for `localhost`, `127.0.0.1`, `[::1]` and the **named hostname saved in Settings → Cloudflare Tunnel**. Open that page and make sure the mode is **Named tunnel** and **Public hostname** is exactly the hostname routed in Cloudflare (CLAM lower-cases it). Saved settings are not live until the tunnel runs: press **Start tunnel**, or switch **Start automatically** on and save (saving then starts it at once). If you run **your own** `cloudflared` for that hostname instead, the saved hostname alone is enough for the Host check, and the page shows **Served by another cloudflared on this machine or network** once `https://<hostname>/api/v1/node/info` is seen answering with this machine's identity (**Check hostname** re-tests on demand; CLAM re-checks every 60 s). Starting CLAM's own connector is then optional. Quick mode knows its random hostname only while its own tunnel runs. |
 | **Pairing: code expired / locked / used** | Codes are one-time, ≤ 10 min, locked after 5 wrong tries. On A: **Revoke** the old invitation and create a new one. If A's quick-tunnel address changed since you copied it, copy the new address. |
 | **Pairing: "no public address" or B cannot be reached** | Both machines need a running tunnel (B so A can finish the handshake). Without Cloudflare, only for development: `CLAM_ALLOW_LOOPBACK_PEERS=1` on both and `http://127.0.0.1:<network port>` as the address (insecure). |
 | **Remote login says locked / too many attempts** | Wait for the lockout (30 s doubling to 15 min); the counters are in memory, so **restarting the server clears them**. Even the right password is refused while locked. |

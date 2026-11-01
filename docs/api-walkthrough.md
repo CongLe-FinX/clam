@@ -62,6 +62,8 @@ Two nodes — two computers, or two data directories on one — pair with a shor
   curl -s -X POST http://127.0.0.1:4317/api/local/tunnel/start
   ```
 
+  Saved settings are live only while the tunnel runs: `PUT /tunnel/config` with `"autoStart":true` starts a stopped tunnel in the same call (the returned `TunnelState` already says `running`; a failed start is reported in `lastError`, the save still succeeds). In named mode the saved hostname is accepted as `Host` even while CLAM's own connector is stopped. If your own `cloudflared` serves that hostname, `POST /api/local/tunnel/probe` (also run every 60 s) checks `https://<hostname>/api/v1/node/info`; an answer with this node's id and fingerprint sets `externalConnector: true` and `publicUrl: "https://<hostname>"`.
+
 The tunnel exposes **only** `/api/v1` (signed node-to-node requests plus the public `GET /api/v1/node/info`); `https://<your tunnel>/` and `/api/local/*` answer 404.
 
 **2. Invite** (on node A). Create an invitation for one of A's workspaces; A shows a one-time code `XXXX-XXXX` (valid ≤ 10 minutes, one use, five wrong attempts lock it), A's tunnel URL and A's **fingerprint**.

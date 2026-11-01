@@ -13,6 +13,7 @@ import gitRoutes from "./api/git.ts";
 import networkRoutes from "./api/network.ts";
 import nodeRoutes from "./api/node.ts";
 import ompRoutes from "./api/omp.ts";
+import previewRoutes from "./api/preview.ts";
 import projectFileRoutes from "./api/project-files.ts";
 import projectRoutes from "./api/projects.ts";
 import sessionRoutes from "./api/sessions.ts";
@@ -60,6 +61,7 @@ const LOCAL_API_PLUGINS = [
 	handoffRoutes,
 	terminalRoutes,
 	browserRoutes,
+	previewRoutes,
 ];
 
 /**

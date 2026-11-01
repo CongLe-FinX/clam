@@ -208,6 +208,8 @@ Cài `cloudflared` trước (xem [Yêu cầu](#yêu-cầu)). Rồi trên từng 
 4. Trong CLAM: **Cài đặt → Cloudflare Tunnel** → **Chế độ tunnel: Tunnel có tên** → **Public hostname** `node-a.example.com` → **Token tunnel** (Tunnel token) dán token → bật **Tự khởi động** (Start automatically) nếu muốn tunnel chạy cùng server → **Lưu cấu hình** (Save configuration) → **Bật tunnel** (Start tunnel). Token đi vào kho bí mật của hệ điều hành (chỉ ghi, không bao giờ hiện lại).
 5. Lặp lại trên máy B với tunnel và hostname riêng (ví dụ `node-b.example.com`). Mỗi máy cần **tunnel và hostname riêng**.
 
+Cài đặt đã lưu chưa có hiệu lực cho tới khi tunnel đang chạy. **Lưu cấu hình** khi **Tự khởi động** đang bật sẽ bật ngay tunnel đang dừng (và mỗi lần server khởi động); nếu tắt, hãy bấm **Bật tunnel**. Nếu một `cloudflared` khác — của bạn, ngoài CLAM — đã route hostname tới `127.0.0.1:4318`, CLAM không cần connector riêng: hostname bạn lưu được chấp nhận làm header `Host`, và khi `https://<hostname>/api/v1/node/info` trả lời bằng id và dấu vân tay của máy này, trang hiện **Được phục vụ bởi một cloudflared khác trên máy hoặc mạng này** và hostname đó trở thành địa chỉ dùng trong lời mời.
+
 Tunnel chỉ lộ ra API máy-tới-máy có chữ ký (và, nếu bạn bật, giao diện đăng nhập chủ sở hữu). `https://<tên miền của bạn>/api/local/*` luôn trả 404.
 
 ### 2. Ghép nối: Mời trên A → Tham gia trên B → xác minh → duyệt
@@ -254,6 +256,30 @@ Mỗi máy có thể phục vụ giao diện web **riêng của nó** qua tên m
 * Đăng nhập bị giới hạn tốc độ (sai 5 lần → khóa 30 giây, tăng gấp đôi đến 15 phút, cộng khóa toàn máy chống đoán phân tán). Cookie phiên là `HttpOnly`, `Secure`, `SameSite=Strict`; thời hạn phiên chỉnh được (**Thời hạn đăng nhập** (Sign-in lasts)) và được gia hạn khi bạn còn dùng giao diện.
 * Cổng giao diện 4317 không bao giờ lộ ra; kênh OMP RPC không bao giờ lộ ra. Có thể thêm chính sách Cloudflare Access trước hostname để có lớp xác thực thứ hai — API máy-tới-máy sau cùng hostname dùng yêu cầu có chữ ký, nên một chính sách Access cho cả hostname cũng sẽ chặn các máy đã ghép nối (**[SUY ĐOÁN]** — chưa thử; hãy dùng chính sách theo đường dẫn hoặc bỏ qua).
 * Thêm: [docs/security.md](docs/security.md) (tiếng Anh).
+
+---
+
+## Xem trước một ứng dụng web cục bộ
+
+Mở một ứng dụng web chạy trên máy (dev server Vite / Next / webpack ở `localhost:<port>`) trong **trình duyệt của chính bạn** — sắc nét, mượt, có DevTools thật — từ bất cứ đâu. Công cụ Browser (Chromium headless truyền hình ảnh về giao diện) vẫn dùng cho trường hợp cần trình duyệt của chính máy đó.
+
+Mỗi máy có **một địa chỉ riêng thêm**, mặc định là nhãn đầu của hostname tunnel cộng `-preview`: với `clamp-work.example.com` là `clamp-work-preview.example.com`. Bạn chỉ thêm đúng một hostname đó vào tunnel của máy, một lần.
+
+1. **Cần tunnel có tên** (**Cài đặt → Cloudflare Tunnel → Named**). Địa chỉ quick tunnel đổi mỗi lần khởi động nên không hỗ trợ xem trước (phần cài đặt có giải thích). Trên giao diện của chính máy (`http://127.0.0.1:4317`) không cần các bước này: nút xem trước chỉ mở `http://localhost:<port>`.
+2. **Cài đặt → Cloudflare Tunnel → Xem trước trong trình duyệt của bạn** hiện *Địa chỉ xem trước* (sửa được) và bước Cloudflare chính xác. Trong dashboard Cloudflare mở **Zero Trust → Networks → Tunnels → tunnel của bạn → Public hostname → Add**:
+   * *Hostname*: `clamp-work-preview.example.com` (sao chép từ trang)
+   * *Service*: `HTTP` · `127.0.0.1:4318` (cổng network listener trang đang hiện)
+
+   Không cần wildcard, và tên cấp một nằm cạnh hostname tunnel được chứng chỉ Universal SSL miễn phí của Cloudflare phủ tới. Hai máy cùng một tên miền chỉ cần hai tên (`clamp-work-preview…`, `clamp-home-preview…`), mỗi tên trên tunnel riêng — không bao giờ dùng chung một tunnel giữa các máy.
+3. Bấm **Kiểm tra**: CLAM gọi `https://<địa chỉ xem trước>/__clam_preview/health` và mong chính máy *này* (node id) trả lời.
+4. **Cài đặt → Bảo mật → Terminal, Trình duyệt và Xem trước → Xem trước qua tên miền** → bật (từ máy, hoặc từ phiên từ xa đã đăng nhập kèm mật khẩu chủ sở hữu; cần bật *Truy cập từ xa vào giao diện web*). **Mặc định tắt.**
+5. Dùng: nút **Mở bản xem trước ↗** cạnh chip *Đang chạy trên máy này* (trang Browser), cạnh liên kết `http://localhost:<port>` trong chat, hoặc **Mở trong trình duyệt của tôi** trên thanh công cụ Browser. CLAM tạo vé dùng một lần (hiệu lực 60 giây) và mở `https://<địa chỉ xem trước>/__clam_preview/auth?ticket=…` ở tab mới; nó đặt cookie riêng của bản xem trước và đưa bạn tới ứng dụng ở gốc tự nhiên (`/`), nên route phía client (`/about`), đường dẫn tuyệt đối của asset (`/assets/…`, `/@vite/client`), lời gọi API và WebSocket HMR đều chạy bình thường.
+
+**Mỗi trình duyệt chỉ một ứng dụng tại một thời điểm.** `https://<địa chỉ xem trước>/port/5173/…` chọn cổng 5173 (lưu trong cookie) rồi chuyển hướng tới `/…`; mọi đường dẫn khác sau đó đi tới cổng đó. Mở ứng dụng khác từ CLAM (hoặc vào `/port/3000/`) sẽ đổi sang nó. Khi chưa chọn gì, địa chỉ hiện một bảng chọn nhỏ các ứng dụng web đang lắng nghe trên máy.
+
+**Truy cập được gì và không được gì.** Chỉ ứng dụng web trên loopback của máy; không bao giờ là cổng UI/network của chính CLAM, cũng không phải cơ sở dữ liệu, SSH, debugger và các cổng tương tự (22, 3306, 5432, 6379, 27017, 9229, 9222, …) hay cổng dưới 1024 (trừ 80). Ứng dụng thấy `Host: localhost:<port>` (nên `allowedHosts` của Vite và các công cụ tương tự chấp nhận), chuyển hướng tới `http://localhost:<port>/…` được viết lại về địa chỉ xem trước, và cookie chỉ gắn với host. Cookie của CLAM không bao giờ được chuyển cho ứng dụng.
+
+**Cần biết.** Mọi cổng của một máy dùng chung origin của địa chỉ xem trước (như chúng dùng chung cookie `localhost`): hãy coi các ứng dụng bạn xem trước là một vùng tin cậy. Đăng xuất, **Đăng xuất mọi nơi**, đổi mật khẩu, tắt Xem trước hoặc tắt truy cập từ xa sẽ kết thúc mọi phiên xem trước ngay. Việc mở được ghi nhật ký (`preview.open`, `preview.signin`).
 
 ---
 
@@ -312,6 +338,7 @@ Migration cơ sở dữ liệu chạy tự động khi khởi động và một 
 | **`better-sqlite3` / `node-pty` build lỗi** | Cần bản build sẵn cho phiên bản Node của bạn hoặc một toolchain: macOS `xcode-select --install`; Debian/Ubuntu `sudo apt install build-essential python3`. Ưu tiên Node LTS/số chẵn (22 hoặc 24) nếu chưa có bản build sẵn cho Node mới tinh. Rồi chạy lại `pnpm install`. |
 | **`corepack: command not found`** | Node 25+ không còn kèm corepack: `npm install -g pnpm@11`. |
 | **Tunnel cứ "reconnecting" / tunnel nhanh không truy cập được** | Kiểm tra **Cài đặt → Cloudflare Tunnel** hiện `cloudflared` đã cài và cổng **Bộ lắng nghe mạng** (Network listener) đúng là cổng hostname trỏ tới (tunnel có tên: dịch vụ phải là `http://127.0.0.1:4318`, token của đúng tunnel đó, hostname khớp chính xác với Cloudflare). Hostname tunnel nhanh mới có thể mất vài giây để phân giải. Proxy/tường lửa doanh nghiệp chặn lưu lượng ra của `cloudflared` (dùng 7844/QUIC và HTTPS tới Cloudflare) cũng gây ra lỗi này. Bấm **Dừng tunnel** rồi **Bật tunnel**. |
+| **`403 forbidden_host` — "Máy này chỉ phản hồi cho …" khi vào hostname của bạn** | Bộ lắng nghe mạng chỉ phản hồi cho `localhost`, `127.0.0.1`, `[::1]` và **hostname tunnel có tên đã lưu trong Cài đặt → Cloudflare Tunnel** (Settings → Cloudflare Tunnel). Mở trang đó, kiểm tra chế độ là **Tunnel có tên** và **Public hostname** đúng hệt hostname đã route trên Cloudflare (CLAM tự chuyển về chữ thường). Cài đặt đã lưu chưa có hiệu lực cho tới khi tunnel chạy: bấm **Bật tunnel** (Start tunnel), hoặc bật **Tự khởi động** (Start automatically) rồi lưu (lưu sẽ bật tunnel ngay). Nếu bạn chạy `cloudflared` **riêng của mình** cho hostname đó, chỉ cần hostname đã lưu là đủ để qua kiểm tra Host, và trang hiện **Được phục vụ bởi một cloudflared khác trên máy hoặc mạng này** khi `https://<hostname>/api/v1/node/info` trả lời đúng danh tính của máy này (**Kiểm tra hostname** (Check hostname) kiểm tra lại ngay; CLAM tự kiểm tra lại mỗi 60 giây). Khi đó connector riêng của CLAM là tùy chọn. Tunnel nhanh chỉ biết hostname ngẫu nhiên của nó khi tunnel của chính nó đang chạy. |
 | **Ghép nối: mã hết hạn / bị khóa / đã dùng** | Mã dùng một lần, ≤ 10 phút, khóa sau 5 lần sai. Trên A: **Thu hồi** lời mời cũ và tạo lời mời mới. Nếu địa chỉ tunnel nhanh của A đã đổi kể từ lúc bạn sao chép, hãy sao chép địa chỉ mới. |
 | **Ghép nối: "chưa có địa chỉ công khai" hoặc không tới được B** | Cả hai máy cần tunnel đang chạy (B để A hoàn tất bắt tay). Không có Cloudflare thì chỉ để phát triển: `CLAM_ALLOW_LOOPBACK_PEERS=1` trên cả hai và dùng `http://127.0.0.1:<cổng mạng>` làm địa chỉ (không an toàn). |
 | **Đăng nhập từ xa báo bị khóa / quá nhiều lần thử** | Chờ hết thời gian khóa (30 giây tăng gấp đôi đến 15 phút); bộ đếm nằm trong bộ nhớ nên **khởi động lại server sẽ xóa chúng**. Đúng mật khẩu vẫn bị từ chối trong lúc bị khóa. |

@@ -1,7 +1,7 @@
 import { type AccessStatus, MIN_PASSWORD_LENGTH, routes } from "@clam/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useRouter } from "@tanstack/react-router";
-import { ExternalLink, Globe, Info, KeyRound, LogOut, Monitor, ShieldAlert, Terminal } from "lucide-react";
+import { ExternalLink, Globe, Info, KeyRound, LogOut, Monitor, MonitorPlay, ShieldAlert, Terminal } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -168,7 +168,7 @@ function RemoteAccessSection({ a }: { a: AccessStatus }) {
 	);
 }
 
-type ToolKey = "remoteTerminalEnabled" | "remoteBrowserEnabled";
+type ToolKey = "remoteTerminalEnabled" | "remoteBrowserEnabled" | "remotePreviewEnabled";
 
 function MachineToolRow({
 	a,
@@ -243,8 +243,8 @@ function MachineToolsSection({ a }: { a: AccessStatus }) {
 	const user = info.data?.user;
 	return (
 		<SettingsSection
-			title={t("Terminal and Browser")}
-			description={t("This machine's own Terminal and Browser always work from this computer. Switch them on to use them from a browser that signed in through the domain too.")}
+			title={t("Terminal, Browser and Preview")}
+			description={t("This machine's own Terminal, Browser and Preview always work from this computer. Switch them on to use them from a browser that signed in through the domain too.")}
 		>
 			<div className="divide-y divide-border">
 				<MachineToolRow
@@ -282,6 +282,19 @@ function MachineToolsSection({ a }: { a: AccessStatus }) {
 						passwordTitle: t("Turn on the Browser through the domain"),
 					}}
 					risk={t("It can reach anything on this machine's localhost and its local network, including services that expect only local access.")}
+				/>
+				<MachineToolRow
+					a={a}
+					tool="remotePreviewEnabled"
+					icon={MonitorPlay}
+					texts={{
+						title: t("Preview"),
+						description: t("Open a web app that runs on this machine (a dev server) in your own browser, through the machine's preview address. Needs a named tunnel."),
+						switchLabel: t("Preview through the domain"),
+						confirmTitle: t("Allow Preview through the domain?"),
+						passwordTitle: t("Turn on Preview through the domain"),
+					}}
+					risk={t("A signed-in session can open any web app on this machine's localhost from its own browser — including dev servers that expect only local access. Databases, remote login and CL Agent Mesh itself are never opened.")}
 				/>
 			</div>
 			{a.via === "loopback" && !a.remoteUiEnabled && <LoopbackOnlyNote>{t("Remote access to the web UI is off, so these only matter once you turn it on above.")}</LoopbackOnlyNote>}

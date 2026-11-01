@@ -8,6 +8,7 @@ import { HANDOFF_PROMPT_PREFIX } from "../src/handoff/fence.ts";
 import { newHandoffId } from "../src/handoff/store.ts";
 import { writeNodeSettings } from "../src/services/settings.ts";
 import { api, type FullHarness } from "./full-harness.ts";
+import { type FakeNpm, installFakeNpm } from "./fake-npm.ts";
 import { BLOCK, FINISH, cloneFor, gitOut, handoffFor, linkedProject, makeRepo, managedProject, readProjectFile, startTrio, type Trio, waitForHandoff, waitForHandoffOf, waitForTaskOn, whenResumeSettled, writeProjectFile } from "./handoff-fixtures.ts";
 import { expectEventsLocalised, expectI18nMatches } from "./i18n-helpers.ts";
 import { eventually, signedRequest } from "./net-helpers.ts";
@@ -84,8 +85,12 @@ function expectGapFree(detail: HandoffDetail): void {
 	if (detail.handoff.failure?.i18n) expectI18nMatches(detail.handoff.failure, detail.handoff.failure.detail);
 }
 
-/** The task row exists exactly once as an executing one: on C only, B is fenced, A mirrors. */
+/**
+ * The task row exists exactly once as an executing one: on C only, B is fenced, A mirrors. C completes by its grace period without waiting for B,
+ * and B writes `handed_off` only after stopping its agent, right before its own handoff reaches `released`: B's row is read after that release.
+ */
 async function expectExecutorC(task: Task): Promise<void> {
+	await waitForHandoffOf(trio.b, task.id, "source", (h) => h.state === "released" || h.state === "completed", "B released the task");
 	const onC = trio.c.ctx.tasks.store.get(task.id);
 	expect(onC).toMatchObject({ direction: "incoming", epoch: 1, fenced: false });
 	const onB = trio.b.ctx.tasks.store.get(task.id);
@@ -343,6 +348,13 @@ describe("dependency setup policy", () => {
 	const PACKAGE = `@@fake-sh echo '{"name":"tiny","version":"1.0.0"}' > package.json`;
 	const MARK = "node -e \"require('fs').appendFileSync('setup-ran.txt','x')\"";
 
+	// The planned `npm install` (and the `npm --version` probe) hit an offline stand-in: the real npm only measures how loaded the machine is.
+	let fakeNpm: FakeNpm;
+	beforeAll(() => {
+		fakeNpm = installFakeNpm();
+	});
+	afterAll(() => fakeNpm.restore());
+
 	async function withSetup(setup: "ask" | "auto" | "skip", commands: string[] = [MARK], extra: Record<string, unknown> = {}) {
 		await begin({ setup });
 		const task = await delegate("Needs setup", PACKAGE);
@@ -359,6 +371,7 @@ describe("dependency setup policy", () => {
 		expect(detail.handoff.setup.map((s) => s.command)).toContain(MARK);
 		expect(detail.handoff.setup.every((s) => s.state === "pending_approval")).toBe(true);
 		expect(readProjectFile(projectPath(trio.c, task), "setup-ran.txt")).toBeNull();
+		expect(readProjectFile(projectPath(trio.c, task), "package-lock.json")).toBeNull();
 		// nothing moved on: B still owns the task, waiting for the ack
 		expect(trio.b.ctx.tasks.store.get(task.id)).toMatchObject({ fenced: false });
 		expect((await handoffFor(trio.b, task.id, "source"))?.state).toBe("awaiting_ack");
@@ -660,6 +673,45 @@ describe("the old source after the ack (§8)", () => {
 		expect(done.task.result?.summary).toBe("finished on the new executor");
 		expect(done.events.some((e) => e.type === "late_result")).toBe(false);
 		expect(promptsOf(trio.b)).toHaveLength(promptsBefore);
+	});
+
+	/**
+	 * C completes by its grace period without waiting for B (docs/handoff-protocol.md: "the handoff is already effective at `acked`"): B
+	 * answers the ack at once. B fences the task first, then stops its agent, and only then writes `handed_off` and advances to `released`: C's
+	 * `completed` therefore says nothing about B's row. Here B's runtime stop is held open to pin that gap: the fence must hold meanwhile, and
+	 * the executor expectation must follow B's own release instead of racing it.
+	 */
+	it("C completes while B is still stopping its agent: B is fenced meanwhile, and its task row reads handed_off only with its own release", async () => {
+		await begin();
+		const task = await delegate("Slow release", "@@fake-sh echo x > a.txt");
+		const oldSession = trio.b.ctx.tasks.store.get(task.id).executorSessionId as string;
+		const stopping = Promise.withResolvers<void>();
+		const proceed = Promise.withResolvers<void>();
+		const { runtime } = trio.b.ctx;
+		const stop = runtime.stop.bind(runtime);
+		runtime.stop = async (sessionId) => {
+			if (sessionId === oldSession) {
+				stopping.resolve();
+				await proceed.promise;
+			}
+			return stop(sessionId);
+		};
+		try {
+			await handOff(task);
+			await stopping.promise;
+			await waitForHandoffOf(trio.c, task.id, "target", (h) => h.state === "completed", "C completes without B's release");
+
+			// B holds the fence (token and epoch) but has not released: still `acked`, its row not yet handed off
+			expect((await handoffFor(trio.b, task.id, "source"))?.state).toBe("acked");
+			expect(trio.b.ctx.tasks.store.get(task.id)).toMatchObject({ fenced: true, highestSeenEpoch: 1 });
+			expect(trio.b.ctx.tasks.store.get(task.id).status).not.toBe("handed_off");
+			await expect(trio.b.ctx.sessions.prompt(oldSession, { message: "are you still there?", clientId: "late-prompt" })).rejects.toMatchObject({ status: 409, code: "task_fenced" });
+			expect(promptsOf(trio.b).some((p) => p.message.includes("are you still there?"))).toBe(false);
+		} finally {
+			// a failed assertion must not leave the agent's stop hanging for the cleanup
+			proceed.resolve();
+		}
+		await expectExecutorC(task);
 	});
 });
 

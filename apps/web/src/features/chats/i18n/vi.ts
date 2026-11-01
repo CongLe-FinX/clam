@@ -26,5 +26,17 @@ const vi: Catalog = {
 	"OMP default": "Mặc định của OMP",
 	"Cancel": "Hủy",
 	"Start chat": "Bắt đầu chat",
+	"Delete chat…": "Xóa chat…",
+	"Delete chat": "Xóa chat",
+	"Chat actions": "Thao tác chat",
+	"Actions for {title}": "Thao tác cho {title}",
+	"chat": "chat",
+	"Untitled chat": "Chat chưa đặt tên",
+	"Keep the files": "Giữ lại tệp",
+	"Delete “{title}”?": "Xóa “{title}”?",
+	"The conversation and its folder ({items}, {size}) will be permanently deleted from this machine.": "Cuộc trò chuyện và thư mục của nó ({items}, {size}) sẽ bị xóa vĩnh viễn khỏi máy này.",
+	"The conversation and its folder will be permanently deleted from this machine.": "Cuộc trò chuyện và thư mục của nó sẽ bị xóa vĩnh viễn khỏi máy này.",
+	"{count, plural, one {# item} other {# items}}": "{count, plural, other {# mục}}",
+	"This chat is shared: only this machine's copy is deleted, other members keep theirs.": "Chat này đang được chia sẻ: chỉ bản trên máy này bị xóa, các thành viên khác vẫn giữ bản của họ.",
 };
 export default vi;

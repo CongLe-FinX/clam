@@ -44,6 +44,12 @@ export interface NetworkOptions {
 	skewMs?: number;
 	/** How long a freshly started tunnel's hostname may take to resolve before peers are told about it anyway (default 90 s). */
 	dnsWaitMs?: number;
+	/** Test seam: HTTP client of the named tunnel's external-connector probe (default: global `fetch`). */
+	tunnelFetch?: typeof fetch;
+	/** Period of that probe while a named tunnel is not running (default 60 s). */
+	externalProbeMs?: number;
+	/** Timeout of one probe request (default 5 s). */
+	externalProbeTimeoutMs?: number;
 }
 
 /** A new quick-tunnel hostname can take a while to appear in DNS, and a lookup that comes too early may be negatively cached by the OS. */
@@ -84,6 +90,10 @@ export function createNetwork(base: NetworkBase, options: NetworkOptions = {}): 
 		bus,
 		log,
 		nodeId: identity.nodeId,
+		fingerprint: identity.fingerprint,
+		fetch: options.tunnelFetch,
+		externalProbeMs: options.externalProbeMs,
+		externalProbeTimeoutMs: options.externalProbeTimeoutMs,
 		runtimeDir: join(config.dataDir, "run"),
 		binary: options.cloudflaredBinary,
 		createManager: options.createTunnelManager,

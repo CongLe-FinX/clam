@@ -30,6 +30,13 @@ const MessagesQuery = z.object({
 	limit: z.coerce.number().int().min(1).max(256).optional(),
 });
 const IdParams = z.object({ id: z.string().min(1) });
+/** `DELETE /sessions/:id?keepFiles=1`: a chat's own folder survives (becomes a normal project) instead of being deleted with it. */
+const DeleteQuery = z.object({
+	keepFiles: z
+		.enum(["true", "false", "1", "0"])
+		.optional()
+		.transform((v) => v === "true" || v === "1"),
+});
 const SessionIdParams = z.object({ sessionId: z.string().min(1) });
 const SubagentParams = z.object({ id: z.string().min(1), subagentId: z.string().min(1) });
 
@@ -66,7 +73,8 @@ export default async function sessionRoutes(app: FastifyInstance, { ctx }: Route
 	});
 
 	app.delete(routes.session(":id"), async (req, reply) => {
-		await sessions.remove(IdParams.parse(req.params).id);
+		const { keepFiles } = DeleteQuery.parse(req.query);
+		await sessions.remove(IdParams.parse(req.params).id, { keepFiles });
 		return reply.status(204).send();
 	});
 

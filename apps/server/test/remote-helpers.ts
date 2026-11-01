@@ -5,6 +5,7 @@ import { request, type IncomingHttpHeaders } from "node:http";
 import type { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { PreviewServiceOptions } from "../src/preview/service.ts";
 import { createFullHarness, type FullHarness } from "./full-harness.ts";
 import { FakeTunnelManager } from "./fake-tunnel.ts";
 import { FAST } from "./net-helpers.ts";
@@ -215,7 +216,7 @@ export interface RemoteNode {
 }
 
 /** A full node with a (fake) quick tunnel that is already up at `PUBLIC_ORIGIN`, serving a tiny SPA from `dist`. */
-export async function remoteNode(options: { dataDir?: string; secrets?: SecretStore } = {}): Promise<RemoteNode> {
+export async function remoteNode(options: { dataDir?: string; secrets?: SecretStore; preview?: PreviewServiceOptions } = {}): Promise<RemoteNode> {
 	const dist = mkdtempSync(join(tmpdir(), "clam-remote-dist-"));
 	mkdirSync(join(dist, "assets"));
 	writeFileSync(join(dist, "index.html"), `<!doctype html><html><head><script>${INLINE_SCRIPT}</script></head><body><div id="root"></div><script type="module" src="/assets/app.js"></script></body></html>`);
@@ -226,6 +227,7 @@ export async function remoteNode(options: { dataDir?: string; secrets?: SecretSt
 		webDistDir: dist,
 		dataDir: options.dataDir,
 		secrets: options.secrets,
+		preview: options.preview,
 		network: { options: { ...FAST, createTunnelManager: () => fake, dnsWaitMs: 100 } },
 	});
 	// Quick tunnel up, exactly as a user would: configure, start.

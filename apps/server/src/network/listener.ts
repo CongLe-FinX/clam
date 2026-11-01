@@ -19,7 +19,7 @@ import {
 	wire,
 	type Signer,
 } from "@clam/agent-network";
-import { CAPABILITIES, type Capability, i18nMsg } from "@clam/contracts";
+import { CAPABILITIES, type ApiErrorBody, type Capability, i18nMsg } from "@clam/contracts";
 import fastify, { LogController, type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
@@ -27,6 +27,7 @@ import { installErrorHandler } from "../http/error-handler.ts";
 import { installBoundedClose } from "../http/shutdown.ts";
 import { registerUiSurface } from "../app.ts";
 import { hostnameOf, isLocalHostHeader } from "../http/host-guard.ts";
+import { PreviewGateway, takenOver } from "../preview/gateway.ts";
 import { HealthService } from "../services/health.ts";
 import { readNodeSettings } from "../services/settings.ts";
 import { NODE_STREAM } from "./events.ts";
@@ -91,6 +92,10 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 	installErrorHandler(app);
 	installBoundedClose(app);
 
+	// Preview hosts (`<port>-<tunnel hostname's first label>.<rest>`): answered before anything else, never part of the wire protocol or the UI surface.
+	// Their WebSocket upgrades are taken here, ahead of the UI surface's own upgrade handling.
+	const preview = net.ui ? new PreviewGateway(net.ui) : null;
+	if (preview) app.server.prependListener("upgrade", (req, socket, head) => void preview.upgrade(req, socket, head));
 	// Keep the exact bytes (the digest covers them); never fail before authentication on malformed JSON.
 	app.removeAllContentTypeParsers();
 	app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, body, done) => {
@@ -105,6 +110,11 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 	});
 
 	app.addHook("onRequest", async (request, reply) => {
+		if (takenOver(request.raw)) {
+			// A preview WebSocket: its socket belongs to the preview gateway, which already answered or is proxying it.
+			reply.hijack();
+			return undefined;
+		}
 		// A WebSocket upgrade is only ever meant for the UI surface's sockets: `/ws` and the machine tools' `/ws/<tool>/…`. For anything
 		// else keep what Node did before this listener had an upgrade handler: drop the connection without an answer.
 		const upgrading = "upgrade" in request.raw && request.raw.upgrade === true;
@@ -124,9 +134,21 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 		request.requestId = typeof supplied === "string" && FORMAT.id.test(supplied) ? supplied : ulid();
 		reply.header("X-Request-Id", request.requestId);
 		const host = request.headers.host;
+		const previewRoute = preview?.resolve(request.raw) ?? null;
+		if (preview && previewRoute !== null) {
+			reply.hijack();
+			void preview.handle(request.raw, reply.raw, previewRoute);
+			return undefined;
+		}
 		const tunnelHost = hostnamesOfPublicUrl(net);
 		const allowed = isLocalHostHeader(host) || (tunnelHost !== null && host !== undefined && hostnameOf(host) === hostnameOf(tunnelHost));
-		if (!allowed) return reply.status(403).send({ error: { code: "forbidden_host", message: "Unexpected Host header" } });
+		if (!allowed) {
+			// Names only what this node already publishes (loopback + its configured public hostname); never the Host that was sent.
+			const say = i18nMsg("This machine only answers for {hostnames}. Set the hostname in Settings → Cloudflare Tunnel (named mode) or start the tunnel.", {
+				hostnames: ["localhost", "127.0.0.1", "[::1]", ...(tunnelHost ? [tunnelHost] : [])].join(", "),
+			});
+			return reply.status(403).send({ error: { code: "forbidden_host", message: say.text, i18n: say.i18n } } satisfies ApiErrorBody);
+		}
 		return undefined;
 	});
 	app.addHook("onSend", async (request, reply, payload) => {

@@ -75,17 +75,17 @@ export function useSessionActions() {
 	});
 
 	const remove = useMutation({
-		mutationFn: (id: string) => api.delete(routes.session(id)),
-		onMutate: async (id) => {
+		mutationFn: ({ id, keepFiles }: { id: string; keepFiles?: boolean; chat?: boolean }) => api.delete(keepFiles ? `${routes.session(id)}?keepFiles=1` : routes.session(id)),
+		onMutate: async ({ id }) => {
 			const snap = await snapshot();
 			for (const [key, data] of snap) if (data) qc.setQueryData<AgentSession[]>(key, data.filter((s) => s.id !== id));
 			return { snap };
 		},
-		onError: (e, _id, ctx) => {
+		onError: (e, v, ctx) => {
 			rollback(ctx?.snap);
-			toast.error(t("Could not delete session"), { description: errorText(e) });
+			toast.error(v.chat ? t("Could not delete chat") : t("Could not delete session"), { description: errorText(e) });
 		},
-		onSuccess: () => toast.success(t("Session deleted")),
+		onSuccess: (_d, v) => toast.success(v.chat ? t("Chat deleted") : t("Session deleted")),
 		onSettled: settle,
 	});
 
@@ -199,7 +199,7 @@ export function SessionList({
 				confirmLabel={t("Delete")}
 				danger
 				onConfirm={() => {
-					if (pendingDelete) remove.mutate(pendingDelete.id);
+					if (pendingDelete) remove.mutate({ id: pendingDelete.id });
 					setPendingDelete(null);
 				}}
 			/>

@@ -489,6 +489,8 @@ export class BrowserService {
 	async closeTab(id: string): Promise<void> {
 		const tab = this.tabs.get(id);
 		if (!tab || !this.running) throw ApiError.notFound("Tab");
+		// A tab on its way out must not be handed to a concurrent `openTab` as the reusable blank page.
+		if (this.initialBlank === id) this.initialBlank = null;
 		await this.running.cdp.send("Target.closeTarget", { targetId: id }).catch(() => undefined);
 		this.removeTab(id, "This tab was closed");
 	}

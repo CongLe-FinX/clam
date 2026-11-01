@@ -12,6 +12,10 @@ export const FAST: NetworkOptions = {
 	pairingTickMs: 100,
 	confirmRetryMs: 200,
 	probeTimeoutMs: 1_500,
+	// Tests never reach the real internet: the named tunnel's external-connector probe finds nothing unless a test says otherwise.
+	tunnelFetch: async () => {
+		throw new Error("offline");
+	},
 };
 
 export async function startNode(

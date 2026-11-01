@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { ArrowRightLeft, MoreHorizontal, PanelBottom, PanelRight, Terminal, UserPlus, Users } from "lucide-react";
+import { ArrowRightLeft, MoreHorizontal, PanelBottom, PanelRight, Terminal, Trash2, UserPlus, Users } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -27,6 +27,7 @@ export function SessionMenu({
 	onOpenTeam,
 	onToggleLog,
 	onToggleRight,
+	onDelete,
 }: {
 	projectId: string;
 	canAdd: boolean;
@@ -38,6 +39,8 @@ export function SessionMenu({
 	onOpenTeam: () => void;
 	onToggleLog: () => void;
 	onToggleRight: () => void;
+	/** Present for plain chats: opens the delete confirmation. */
+	onDelete?: (() => void) | undefined;
 }) {
 	const [open, setOpen] = useState(false);
 	const [dy, setDy] = useState(0);
@@ -115,15 +118,16 @@ export function SessionMenu({
 							<span className="flex-1">{t("Open terminal here")}</span>
 						</Link>
 					)}
+					{onDelete ? <Row icon={<Trash2 />} label={t("Delete chat…")} onClick={run(onDelete)} danger /> : null}
 				</nav>
 			</SheetContent>
 		</Sheet>
 	);
 }
 
-function Row({ icon, label, onClick, badge }: { icon: ReactNode; label: string; onClick: () => void; badge?: ReactNode }) {
+function Row({ icon, label, onClick, badge, danger }: { icon: ReactNode; label: string; onClick: () => void; badge?: ReactNode; danger?: boolean }) {
 	return (
-		<button type="button" onClick={onClick} className={item}>
+		<button type="button" onClick={onClick} className={cn(item, danger && "text-danger [&_svg]:text-danger")}>
 			{icon}
 			<span className="flex-1">{label}</span>
 			{badge}

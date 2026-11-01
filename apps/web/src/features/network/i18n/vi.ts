@@ -138,6 +138,7 @@ const vi: Catalog = {
 	"Could not revoke the peer": "Không thể thu hồi máy từ xa",
 	"Could not start the tunnel": "Không thể khởi động tunnel",
 	"Could not stop the tunnel": "Không thể dừng tunnel",
+	"Could not check the hostname": "Không thể kiểm tra hostname",
 	"Choose access": "Chọn quyền",
 	"Share": "Chia sẻ",
 	"Waiting": "Chờ",

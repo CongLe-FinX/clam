@@ -16,6 +16,7 @@
 		"src/features/workspaces",
 		"src/features/shared",
 		"src/features/browser",
+		"src/features/preview",
 		"src/features/network",
 		"src/features/context",
 		"src/features/handoff",

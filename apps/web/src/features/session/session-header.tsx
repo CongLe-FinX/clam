@@ -1,13 +1,15 @@
 import type { AgentSession, Project, SharedSession, Workspace } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, ArrowRightLeft, ChevronRight, FolderOpen, MessagesSquare, PanelBottom, PanelLeft, PanelRight, Square, Terminal, UserPlus, WifiOff } from "lucide-react";
+import { ArrowLeft, ArrowRightLeft, ChevronRight, FolderTree, MessagesSquare, PanelBottom, PanelLeft, PanelRight, Square, Terminal, UserPlus, WifiOff } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
 import { RUNTIME_STATE_LABEL, runtimeDot, SessionKindBadge } from "@/components/session-status";
+import { ChatHeaderMenu } from "@/features/chats/chat-menus";
 import { driverOf, NODE_STATUS_LABEL, nodeDot } from "@/features/shared/format";
 import { t, tr } from "@/i18n";
 import { errorText } from "@/lib/api";
 import { useWsStatus } from "@/lib/ws";
+import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { StatusDot } from "@/ui/status-dot";
@@ -83,9 +85,14 @@ export interface HeaderPanels {
 	showLeft: boolean;
 	showRight: boolean;
 	showLog: boolean;
+	/** The Files drawer is open. */
+	showFiles: boolean;
+	/** Files the agent changed in this session (badge). */
+	filesCount: number;
 	onToggleLeft: () => void;
 	onToggleRight: () => void;
 	onToggleLog: () => void;
+	onToggleFiles: () => void;
 }
 
 export function SessionHeader({
@@ -126,9 +133,21 @@ export function SessionHeader({
 	const dot = runtime ? runtimeDot(runtime.state) : liveStatus === "error" ? "crashed" : "starting";
 	const driver = shared ? driverOf(shared) : undefined;
 	const teamUnread = shared?.unreadMessages ?? 0;
+	const openDialog = useUi((s) => s.openDialog);
 	/** Only the driving session (or one not shared yet) can bring more agents in. */
 	const isChat = project?.origin === "chat";
 	const canAdd = !readOnly && session.kind === "local" && (!shared || shared.localRole === "driver");
+
+	const filesToggle = (
+		<PanelToggle label={panels.filesCount > 0 ? t("Files, {count} changed", { count: panels.filesCount }) : t("Files")} shortcut="F" pressed={panels.showFiles} onClick={panels.onToggleFiles} className="relative">
+			<FolderTree />
+			{panels.filesCount > 0 ? (
+				<span aria-hidden className="tabular absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-none text-background">
+					{panels.filesCount > 99 ? "99+" : panels.filesCount}
+				</span>
+			) : null}
+		</PanelToggle>
+	);
 
 	return (
 		<header className="flex h-[calc(3rem+env(safe-area-inset-top))] shrink-0 items-center gap-1.5 border-b bg-surface-1/80 px-2 pt-safe backdrop-blur coarse:h-[calc(3.5rem+env(safe-area-inset-top))] sm:px-3">
@@ -146,7 +165,7 @@ export function SessionHeader({
 				</Button>
 			</Tip>
 			{!compact ? (
-				<PanelToggle label={t("Threads and files")} shortcut="[" pressed={panels.showLeft} onClick={panels.onToggleLeft}>
+				<PanelToggle label={t("Threads")} shortcut="[" pressed={panels.showLeft} onClick={panels.onToggleLeft}>
 					<PanelLeft />
 				</PanelToggle>
 			) : null}
@@ -253,10 +272,11 @@ export function SessionHeader({
 			) : null}
 
 			{compact ? (
-				<PanelToggle label={isChat ? t("Files") : t("Threads")} pressed={panels.showLeft} onClick={panels.onToggleLeft}>
-					{isChat ? <FolderOpen /> : <MessagesSquare />}
+				<PanelToggle label={t("Threads")} pressed={panels.showLeft} onClick={panels.onToggleLeft}>
+					<MessagesSquare />
 				</PanelToggle>
 			) : null}
+			{compact ? filesToggle : null}
 			{compact ? (
 				<SessionMenu
 					projectId={session.projectId}
@@ -269,16 +289,19 @@ export function SessionHeader({
 					onOpenTeam={onOpenTeam}
 					onToggleLog={panels.onToggleLog}
 					onToggleRight={panels.onToggleRight}
+					onDelete={isChat ? () => openDialog({ kind: "delete-chat", sessionId: session.id }) : undefined}
 				/>
 			) : null}
 			{compact ? null : (
 				<>
+					{filesToggle}
 					<PanelToggle label={t("Runtime log")} shortcut="\\" pressed={panels.showLog} onClick={panels.onToggleLog}>
 						<PanelBottom />
 					</PanelToggle>
 					<PanelToggle label={t("Context")} shortcut="]" pressed={panels.showRight} onClick={panels.onToggleRight}>
 						<PanelRight />
 					</PanelToggle>
+					{isChat ? <ChatHeaderMenu sessionId={session.id} /> : null}
 				</>
 			)}
 		</header>

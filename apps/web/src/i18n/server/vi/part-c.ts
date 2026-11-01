@@ -5,6 +5,7 @@ const vi: Catalog = {
 	"Choose a tunnel mode (quick or named) before starting the tunnel": "Hãy chọn chế độ tunnel (quick hoặc named) trước khi khởi động tunnel",
 	"cloudflared is not installed. Install it (macOS: brew install cloudflared) and try again.": "Chưa cài cloudflared. Hãy cài đặt (macOS: brew install cloudflared) rồi thử lại.",
 	"The named tunnel needs both its token and its public hostname": "Tunnel có tên cần cả token và hostname công khai",
+	"This machine only answers for {hostnames}. Set the hostname in Settings → Cloudflare Tunnel (named mode) or start the tunnel.": "Máy này chỉ phản hồi cho {hostnames}. Hãy đặt hostname trong Cài đặt → Cloudflare Tunnel (chế độ named) hoặc khởi động tunnel.",
 	"The .git directory is not available through the file routes": "Không thể truy cập thư mục .git qua các route tệp",
 	"Project directory no longer exists on this node": "Thư mục dự án không còn tồn tại trên node này",
 	"Path resolves outside the project root": "Đường dẫn trỏ ra ngoài thư mục gốc của dự án",

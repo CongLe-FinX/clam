@@ -1,4 +1,4 @@
-import type { Workspace } from "@clam/contracts";
+import type { AgentSession, Workspace } from "@clam/contracts";
 import { Link, useParams } from "@tanstack/react-router";
 import {
 	Activity,
@@ -30,8 +30,9 @@ import {
 	Users,
 	type LucideIcon,
 } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { ChatContextMenu, ChatRowMenu } from "@/features/chats/chat-actions";
 import { useChats } from "@/features/chats/hooks";
 import { useActiveHandoffCount } from "@/features/handoff/api";
 import { warmHandlers } from "@/features/session/preload";
@@ -199,6 +200,37 @@ function NewChatButton({ rail }: { rail: boolean }) {
 	);
 }
 
+/** One chat of the sidebar: link, a "⋯" menu on hover/focus (always on touch) and a right-click menu, both with Delete. */
+function ChatNavItem({ session: s, current, qc }: { session: AgentSession; current: boolean; qc: QueryClient }) {
+	const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
+	return (
+		<div className="group/row relative" onContextMenu={(e) => {
+			e.preventDefault();
+			setMenuAt({ x: e.clientX, y: e.clientY });
+		}}>
+			<Link
+				to="/sessions/$sessionId"
+				params={{ sessionId: s.id }}
+				{...warmHandlers(qc, s.id, s.status)}
+				preload="intent"
+				aria-current={current ? "page" : undefined}
+				className={cn(rowClass, "group-hover/row:pr-8 group-focus-within/row:pr-8 coarse:pr-10", current && "bg-surface-3 text-foreground")}
+			>
+				<MessagesSquare />
+				<span className="min-w-0 flex-1 truncate">{s.title || t("Untitled chat")}</span>
+				{s.pendingRequests > 0 ? (
+					<span role="img" aria-label={t("Waiting for your answer")} title={t("Waiting for your answer")} className="relative grid size-2 shrink-0 place-items-center">
+						<span aria-hidden className="absolute inline-flex size-full animate-[clam-pulse-ring_1.6s_ease-out_infinite] rounded-full bg-warning" />
+						<span aria-hidden className="relative size-2 rounded-full bg-warning" />
+					</span>
+				) : null}
+			</Link>
+			<ChatRowMenu session={s} className="absolute right-0.5 top-1/2 -translate-y-1/2" />
+			{menuAt ? <ChatContextMenu session={s} point={menuAt} onClose={() => setMenuAt(null)} /> : null}
+		</div>
+	);
+}
+
 const CHATS_SHOWN = 6;
 
 /** Recent chats (sessions without a repository) under their own heading, not mixed into the project tree. */
@@ -221,24 +253,7 @@ function ChatsSection() {
 			<div className="flex flex-col gap-px">
 				{isPending ? <Skeleton className="mx-1 my-1 h-6" /> : null}
 				{shown.map((s) => (
-					<Link
-						key={s.id}
-						to="/sessions/$sessionId"
-						params={{ sessionId: s.id }}
-						{...warmHandlers(qc, s.id, s.status)}
-						preload="intent"
-						aria-current={params.sessionId === s.id ? "page" : undefined}
-						className={cn(rowClass, params.sessionId === s.id && "bg-surface-3 text-foreground")}
-					>
-						<MessagesSquare />
-						<span className="min-w-0 flex-1 truncate">{s.title || t("Untitled chat")}</span>
-						{s.pendingRequests > 0 ? (
-							<span role="img" aria-label={t("Waiting for your answer")} title={t("Waiting for your answer")} className="relative grid size-2 shrink-0 place-items-center">
-								<span aria-hidden className="absolute inline-flex size-full animate-[clam-pulse-ring_1.6s_ease-out_infinite] rounded-full bg-warning" />
-								<span aria-hidden className="relative size-2 rounded-full bg-warning" />
-							</span>
-						) : null}
-					</Link>
+					<ChatNavItem key={s.id} session={s} current={params.sessionId === s.id} qc={qc} />
 				))}
 				{!isPending && chats.length === 0 ? <span className="px-2 py-1 text-2xs text-subtle">{t("No chats yet — start one above")}</span> : null}
 			</div>

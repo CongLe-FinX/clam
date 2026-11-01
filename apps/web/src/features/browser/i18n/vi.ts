@@ -63,6 +63,8 @@ const vi: Catalog = {
 	"Stream statistics": "Thống kê luồng",
 	"Saved on this machine. Tap Save to get a copy on this device.": "Đã lưu trên máy này. Chạm Lưu để lấy bản sao về thiết bị này.",
 	"New tab": "Tab mới",
+	"No tabs open": "Không có tab nào đang mở",
+	"Opening a tab…": "Đang mở tab…",
 	"Close {title}": "Đóng {title}",
 	"Browser tabs": "Tab trình duyệt",
 	"Nothing downloaded yet.": "Chưa có tệp nào được tải xuống.",
@@ -119,5 +121,6 @@ const vi: Catalog = {
 	"Browser unavailable": "Trình duyệt không khả dụng",
 	"The browser on this machine is not running or could not start.": "Trình duyệt trên máy này chưa chạy hoặc không khởi động được.",
 	"This tab no longer exists.": "Tab này không còn tồn tại.",
+	"Open in my browser": "Mở trong trình duyệt của tôi",
 };
 export default vi;

@@ -4,16 +4,23 @@ import type { Checkpoint, Handoff, HandoffDetail, SharedSession } from "@clam/co
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { writeNodeSettings } from "../src/services/settings.ts";
 import { api, type FullHarness } from "./full-harness.ts";
+import { installFakeNpm, type FakeNpm } from "./fake-npm.ts";
 import { eventually } from "./net-helpers.ts";
 import { isolateGitConfig, promptAndWait, startSharedPair, transcriptTexts, waitForShared, type GitConfigIsolation, type SharedPair } from "./shared-fixtures.ts";
 
 /** M7: an M5 takeover is also a `kind: session` handoff (target on the new driver, source on the former one) and runs dependency setup before the continuation note. */
 
 let gitConfig: GitConfigIsolation;
+// The dependency step runs `npm install`: the offline stand-in keeps a loaded machine from timing these tests out on npm's start-up.
+let fakeNpm: FakeNpm;
 beforeAll(() => {
 	gitConfig = isolateGitConfig();
+	fakeNpm = installFakeNpm();
 });
-afterAll(() => gitConfig.restore());
+afterAll(() => {
+	gitConfig.restore();
+	fakeNpm.restore();
+});
 
 let pair: SharedPair;
 afterEach(async () => {

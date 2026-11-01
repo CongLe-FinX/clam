@@ -16,6 +16,7 @@ export const routes = {
 	tunnelConfig: "/tunnel/config", // PUT UpdateTunnelConfigBody → TunnelState
 	tunnelStart: "/tunnel/start", // POST → TunnelState
 	tunnelStop: "/tunnel/stop", // POST → TunnelState
+	tunnelProbe: "/tunnel/probe", // POST → TunnelState (named mode: check now whether another cloudflared already serves the hostname)
 
 	// Owner access to this node's UI through its domain. Login/status answer without a session; everything else needs one remotely.
 	access: "/access", // GET AccessStatus · PATCH UpdateAccessBody → AccessStatus (enabling: loopback only; remote sessions may only switch off)
@@ -42,6 +43,12 @@ export const routes = {
 	browserDownloads: "/browser/downloads", // GET BrowserDownload[]
 	browserDownload: (name: string) => `/browser/downloads/${encodeURIComponent(name)}`, // GET the file (attachment)
 	browserUpload: (uploadId: string) => `/browser/uploads/${uploadId}`, // PUT raw bytes, ?name=<file name> (repeat for several files) → 204; then send `file-chooser-done` on the tab's socket
+
+	// Preview: this machine's localhost:<port> in the owner's own browser via ONE preview hostname (see preview.ts). Needs a named tunnel + one explicit public hostname in Cloudflare.
+	preview: "/preview", // GET PreviewStatus
+	previewConfig: "/preview/config", // PUT UpdatePreviewConfigBody → PreviewStatus (loopback UI only: it changes how this node is exposed)
+	previewCheck: "/preview/check", // POST → PreviewCheckResult (probes https://<preview host>/__clam_preview/health: must answer from THIS node)
+	previewTicket: "/preview/ticket", // POST PreviewTicketBody → PreviewTicket (remote session + Preview switched on; one-time, ≤60 s; 403 `preview_disabled` | `port_not_allowed`)
 
 	// Shared sessions (driver/participants, mirror, checkpoints, takeover)
 	sharedSessions: "/shared", // GET SharedSession[]
