@@ -171,8 +171,8 @@ function normalizeLimit(l: Obj): QuotaLimit {
 }
 
 /**
- * `omp usage --json --redact` → QuotaReport. Identifiers arrive already masked by `--redact`
- * (e.g. `sh*a@*`); callers must always pass that flag.
+ * `omp usage --json` → QuotaReport. `account` is the provider account's email (else its account/project id or org name),
+ * unmasked so the owner can tell several accounts of one provider apart.
  */
 export function normalizeUsage(raw: unknown, meta: { fetchedAt: string; stale?: boolean }): QuotaReport {
 	if (!isObj(raw) || !Array.isArray(raw.reports)) throw new UsageError("bad_output", "omp usage --json: unexpected output shape");

@@ -299,15 +299,17 @@ function UsageCard({ className }: { className?: string }) {
 							const frac = l && l.used !== null && l.limit ? (l.used / l.limit) * 100 : null;
 							return (
 								<li key={`${p.provider}-${p.account ?? ""}-${idx}`} className="flex flex-col gap-1">
-									<div className="flex items-center justify-between gap-2 text-[13px]">
-										<span className="flex min-w-0 items-baseline gap-1.5 truncate">
-											<span className="font-medium">{p.provider}</span>
-											{p.account ? <span className="truncate font-mono text-2xs text-subtle">{p.account}</span> : null}
-										</span>
+									<div className="flex items-baseline justify-between gap-2 text-[13px]">
+										<span className="min-w-0 truncate font-medium">{p.provider}</span>
 										<span className="shrink-0 font-mono text-2xs text-subtle">
 											{p.availability === "available" && l ? (frac !== null ? t("{percent} · {window}", { percent: formatPercent(frac / 100), window: windowText(l) ?? limitLabel(l) }) : limitLabel(l)) : p.availability === "error" ? t("Error") : t("Unavailable")}
 										</span>
 									</div>
+									{p.account ? (
+										<span className="break-all font-mono text-2xs text-subtle" title={p.account}>
+											{p.account}
+										</span>
+									) : null}
 									{frac !== null ? <Progress value={frac} tone={frac > 90 ? "danger" : frac > 70 ? "warning" : "accent"} /> : null}
 								</li>
 							);

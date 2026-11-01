@@ -76,8 +76,9 @@ export function createUsageService(opts: UsageServiceOptions): UsageService {
 			return res.success ? res.data : null;
 		},
 		fetch: async () => {
-			// `--redact` masks emails/account ids at the source, so identifiers never reach this process unmasked.
-			const raw = await runOmpJson(binary(), [...base(), "usage", "--json", "--redact"], USAGE_TIMEOUT_MS);
+			// Full account identifiers (email / account id): the owner needs to tell accounts apart. The quota report stays on this
+			// machine (local API and the owner's remote UI only; it is never sent to peers).
+			const raw = await runOmpJson(binary(), [...base(), "usage", "--json"], USAGE_TIMEOUT_MS);
 			return normalizeUsage(raw, { fetchedAt: new Date().toISOString() });
 		},
 		onError: (err) => opts.onError?.("usage", err),

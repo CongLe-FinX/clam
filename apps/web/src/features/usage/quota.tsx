@@ -74,7 +74,11 @@ function ProviderCard({ q, now }: { q: ProviderQuota; now: number }) {
 			<CardHeader className="flex-row items-center justify-between gap-3 space-y-0">
 				<div className="min-w-0">
 					<CardTitle className="truncate text-sm">{q.provider}</CardTitle>
-					{q.account && <div className="truncate font-mono text-xs text-muted-foreground">{q.account}</div>}
+					{q.account && (
+						<div className="break-all font-mono text-xs text-muted-foreground" title={q.account}>
+							{q.account}
+						</div>
+					)}
 				</div>
 				<span className="shrink-0 text-xs text-muted-foreground">{t("Updated {time}", { time: fmtAgo(q.fetchedAt, now) })}</span>
 			</CardHeader>

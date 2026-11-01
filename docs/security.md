@@ -233,7 +233,7 @@ Enforcement:
 
 | Secret | Owner | Where it lives | Never |
 | --- | --- | --- | --- |
-| LLM provider credentials | OMP | OMP's own store (`agent.db`/broker) | read/written/copied by CL; shown in UI (`omp usage --redact`) |
+| LLM provider credentials | OMP | OMP's own store (`agent.db`/broker) | read/written/copied by CL. The quota view shows each account's email / account id in full (`omp usage --json`) so the owner can tell accounts apart; that report stays on the machine (local UI and the owner's remote UI) and is never sent to peers |
 | GitHub tokens | CL (per node) | `@clam/secret-store`; handed to `git` only through the askpass broker (one-time nonce over a `0700` Unix socket, [github-integration.md §8](./github-integration.md#8-git-authentication-for-operations)) | in SQLite, logs, API responses, git remote URLs, `.git/config`, child process args/env, files |
 | Node private key | CL | `<dataDir>/identity/ed25519.key` (PEM, `0600`) in M1 | leaves the node; in backups of the DB (it is not in SQLite) |
 | Invitation codes | CL | shown once; only `code_hash` in SQLite; the HKDF-derived code key lives in the secret store until the joiner's hello is verified (then deleted) | stored in SQLite, logged, put in events |
