@@ -6,7 +6,8 @@ import { SessionList, SessionSkeletonRows, useDebounced } from "@/features/proje
 import { api, errorMessage } from "@/lib/api";
 import { qk, useProjects, useSessions } from "@/lib/queries";
 import { useUi } from "@/lib/store";
-import { cn, formatCompact, formatCost } from "@/lib/utils";
+import { t, msg, tr, type Msg } from "@/i18n";
+import { cn, formatCompact, formatCost, formatNumber } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { PageHeader } from "@/ui/page";
@@ -14,13 +15,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/ui/switch";
 
 type StatusFilter = "all" | SessionStatus;
-const CHIPS: Array<{ id: StatusFilter; label: string }> = [
-	{ id: "all", label: "All" },
-	{ id: "running", label: "Running" },
-	{ id: "idle", label: "Idle" },
-	{ id: "error", label: "Error" },
-	{ id: "stopped", label: "Stopped" },
-];
+const CHIPS = [
+	{ id: "all", label: msg("All") },
+	{ id: "running", label: msg("Running") },
+	{ id: "idle", label: msg("Idle") },
+	{ id: "error", label: msg("Error") },
+	{ id: "stopped", label: msg("Stopped") },
+] as const satisfies ReadonlyArray<{ id: StatusFilter; label: Msg }>;
 
 export default function NodeSessionsPage() {
 	const openDialog = useUi((s) => s.openDialog);
@@ -81,20 +82,20 @@ export default function NodeSessionsPage() {
 	return (
 		<div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 px-4 pt-5 sm:px-6 lg:px-8 lg:pt-7">
 			<PageHeader
-				title="Agent Sessions"
-				description="Every session on this machine, across all projects."
+				title={t("Agent Sessions")}
+				description={t("Every session on this machine, across all projects.")}
 				actions={
 					<Button variant="primary" onClick={() => openDialog({ kind: "create-session" })}>
-						<Plus /> New session
+						<Plus /> {t("New session")}
 					</Button>
 				}
 			/>
 
 			<dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border shadow-[inset_0_0_0_1px_var(--border)] sm:grid-cols-4">
-				<Stat label="Sessions" value={loading ? null : String(visible.length)} />
-				<Stat label="Running" value={loading ? null : String(summary.running)} accent={summary.running > 0} />
-				<Stat label="Tokens" value={loading ? null : summary.tokens === null ? "—" : formatCompact(summary.tokens)} />
-				<Stat label="Cost" value={loading ? null : formatCost(summary.cost)} />
+				<Stat label={t("Sessions")} value={loading ? null : formatNumber(visible.length)} />
+				<Stat label={t("Running")} value={loading ? null : formatNumber(summary.running)} accent={summary.running > 0} />
+				<Stat label={t("Tokens")} value={loading ? null : summary.tokens === null ? "—" : formatCompact(summary.tokens)} />
+				<Stat label={t("Cost")} value={loading ? null : formatCost(summary.cost)} />
 			</dl>
 
 			<div className="flex flex-col gap-2.5">
@@ -104,17 +105,17 @@ export default function NodeSessionsPage() {
 						<input
 							value={search}
 							onChange={(e) => setSearch(e.target.value)}
-							placeholder="Search title, project or model"
-							aria-label="Search sessions"
+							placeholder={t("Search title, project or model")}
+							aria-label={t("Search sessions")}
 							className="h-8 w-full rounded-lg bg-surface-1 pl-8 pr-3 text-[13px] shadow-[inset_0_0_0_1px_var(--border-strong)] outline-none placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1px_var(--accent),0_0_0_3px_var(--accent-soft)] coarse:h-11"
 						/>
 					</div>
 					<Select value={projectId} onValueChange={setProjectId}>
-						<SelectTrigger aria-label="Filter by project" className="w-44">
+						<SelectTrigger aria-label={t("Filter by project")} className="w-44">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="all">All projects</SelectItem>
+							<SelectItem value="all">{t("All projects")}</SelectItem>
 							{(projects.data ?? []).map((p) => (
 								<SelectItem key={p.id} value={p.id}>
 									{p.name}
@@ -123,11 +124,11 @@ export default function NodeSessionsPage() {
 						</SelectContent>
 					</Select>
 					<label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground coarse:min-h-11">
-						<Switch checked={showArchived} onCheckedChange={setShowArchived} aria-label="Show archived sessions" />
-						Show archived
+						<Switch checked={showArchived} onCheckedChange={setShowArchived} aria-label={t("Show archived sessions")} />
+						{t("Show archived")}
 					</label>
 				</div>
-				<div role="group" aria-label="Filter by status" className="scrollbar-none flex gap-1 overflow-x-auto">
+				<div role="group" aria-label={t("Filter by status")} className="scrollbar-none flex gap-1 overflow-x-auto">
 					{CHIPS.map((c) => (
 						<button
 							key={c.id}
@@ -139,8 +140,8 @@ export default function NodeSessionsPage() {
 								status === c.id ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
 							)}
 						>
-							{c.label}
-							<span className="tabular text-2xs text-subtle">{loading ? "" : counts[c.id]}</span>
+							{tr(c.label)}
+							<span className="tabular text-2xs text-subtle">{loading ? "" : formatNumber(counts[c.id])}</span>
 						</button>
 					))}
 				</div>
@@ -152,7 +153,7 @@ export default function NodeSessionsPage() {
 				) : error ? (
 					<EmptyState
 						icon={MessageSquare}
-						title="Could not load sessions"
+						title={t("Could not load sessions")}
 						description={errorMessage(error)}
 						action={
 							<Button
@@ -163,7 +164,7 @@ export default function NodeSessionsPage() {
 									if (showArchived) void archived.refetch();
 								}}
 							>
-								<RefreshCw /> Retry
+								<RefreshCw /> {t("Retry")}
 							</Button>
 						}
 					/>
@@ -174,8 +175,8 @@ export default function NodeSessionsPage() {
 						empty={
 							<EmptyState
 								icon={MessageSquare}
-								title={filtered ? "No matching sessions" : "No sessions yet"}
-								description={filtered ? "Adjust the search or filters to see more." : "Create a session in one of your projects to get an agent working."}
+								title={filtered ? t("No matching sessions") : t("No sessions yet")}
+								description={filtered ? t("Adjust the search or filters to see more.") : t("Create a session in one of your projects to get an agent working.")}
 								action={
 									filtered ? (
 										<Button
@@ -187,11 +188,11 @@ export default function NodeSessionsPage() {
 												setProjectId("all");
 											}}
 										>
-											Clear filters
+											{t("Clear filters")}
 										</Button>
 									) : (
 										<Button variant="primary" size="sm" onClick={() => openDialog({ kind: "create-session" })}>
-											<Plus /> New session
+											<Plus /> {t("New session")}
 										</Button>
 									)
 								}

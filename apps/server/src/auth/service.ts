@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { ELEVATION_MINUTES, type AccessStatus, type UpdateAccessBody } from "@clam/contracts";
+import { ELEVATION_MINUTES, type AccessStatus, type UpdateAccessBody, i18nMsg } from "@clam/contracts";
 import { settings } from "@clam/database";
 import { eq } from "drizzle-orm";
 import type { z } from "zod";
@@ -58,7 +58,7 @@ interface TrackedSocket {
 	tool: MachineTool | undefined;
 }
 
-const rateLimited = (retryAfterSeconds: number): ApiError => new ApiError(429, "rate_limited", "Too many sign-in attempts. Try again later.", { retryAfterSeconds });
+const rateLimited = (retryAfterSeconds: number): ApiError => new ApiError(429, "rate_limited", i18nMsg("Too many sign-in attempts. Try again later."), { retryAfterSeconds });
 
 /**
  * Owner access to this node's web UI through its own domain: the password (scrypt, `settings`), the stateless
@@ -218,7 +218,7 @@ export class AccessService {
 			remoteBrowserEnabled: body.remoteBrowserEnabled ?? current.remoteBrowserEnabled,
 		};
 		if ((next.remoteUiEnabled || next.remoteTerminalEnabled || next.remoteBrowserEnabled) && !this.passwordSet()) {
-			throw new ApiError(409, "password_required", "Set an owner password before enabling remote access to this machine");
+			throw new ApiError(409, "password_required", i18nMsg("Set an owner password before enabling remote access to this machine"));
 		}
 		this.writeRow(KEY_CONFIG, JSON.stringify(next));
 		for (const [field, label] of [["remoteUiEnabled", "ui"], ["remoteTerminalEnabled", "terminal"], ["remoteBrowserEnabled", "browser"]] as const) {
@@ -261,11 +261,17 @@ export class AccessService {
 		const config = this.config();
 		const enabled = tool === "terminal" ? config.remoteTerminalEnabled : config.remoteBrowserEnabled;
 		if (!config.remoteUiEnabled || !enabled) {
-			throw new ApiError(403, "tool_disabled", `The ${tool === "terminal" ? "Terminal" : "Browser"} is switched off for remote sign-ins on this machine. Turn it on from the machine's local UI (Settings → Security).`);
+			throw new ApiError(
+				403,
+				"tool_disabled",
+				tool === "terminal"
+					? i18nMsg("The Terminal is switched off for remote sign-ins on this machine. Turn it on from the machine's local UI (Settings → Security).")
+					: i18nMsg("The Browser is switched off for remote sign-ins on this machine. Turn it on from the machine's local UI (Settings → Security)."),
+			);
 		}
-		if (!access.session) throw new ApiError(401, "auth_required", "Sign in to continue");
+		if (!access.session) throw new ApiError(401, "auth_required", i18nMsg("Sign in to continue"));
 		if (options.stepUp && this.elevatedUntil(access.session) === null) {
-			throw new ApiError(403, "step_up_required", "Re-enter the owner password to use the Terminal through the domain", { elevationMinutes: ELEVATION_MINUTES });
+			throw new ApiError(403, "step_up_required", i18nMsg("Re-enter the owner password to use the Terminal through the domain"), { elevationMinutes: ELEVATION_MINUTES });
 		}
 	}
 

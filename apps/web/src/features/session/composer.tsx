@@ -3,7 +3,8 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { toast } from "sonner";
 import { UploadDock, useProjectUploads } from "@/features/projects/uploads.tsx";
 import { useIsMobile } from "@/hooks/use-breakpoint";
-import { errorMessage } from "@/lib/api";
+import { T, t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { filesFromClipboard, hasFiles } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -39,17 +40,17 @@ function useBlockedReason(stream: SessionStream): { reason: string | null; resta
 	const live = useStreamMeta(stream, (m) => m.live);
 	const status = useStreamMeta(stream, (m) => m.liveStatus);
 	if (!live) {
-		if (status === "error") return { reason: "Runtime unavailable — see the banner above", restartable: false, loading: false };
-		return { reason: "Starting runtime…", restartable: false, loading: true };
+		if (status === "error") return { reason: t("Runtime unavailable — see the banner above"), restartable: false, loading: false };
+		return { reason: t("Starting runtime…"), restartable: false, loading: true };
 	}
 	switch (live.runtime.state) {
 		case "crashed":
-			return { reason: "The runtime crashed", restartable: true, loading: false };
+			return { reason: t("The runtime crashed"), restartable: true, loading: false };
 		case "stopped":
-			return { reason: "The runtime is stopped", restartable: true, loading: false };
+			return { reason: t("The runtime is stopped"), restartable: true, loading: false };
 		case "starting":
 		case "restarting":
-			return { reason: "Runtime is starting…", restartable: false, loading: true };
+			return { reason: t("Runtime is starting…"), restartable: false, loading: true };
 		default:
 			return { reason: null, restartable: false, loading: false };
 	}
@@ -85,14 +86,14 @@ export function Composer({
 	const queued = useStreamMeta(stream, (m) => m.live?.queued);
 	const blocked = useBlockedReason(stream);
 	const trimmed = value.trim();
-	const placeholder = blocked.reason ?? (busy ? (mode === "steer" ? "Steer the agent…" : "Queue a follow-up…") : "Message the agent…");
+	const placeholder = blocked.reason ?? (busy ? (mode === "steer" ? t("Steer the agent…") : t("Queue a follow-up…")) : t("Message the agent…"));
 
 	// Draft persistence (debounced; flushed on unmount).
 	const latest = useRef(value);
 	latest.current = value;
 	useEffect(() => {
-		const t = setTimeout(() => writeDraft(sessionId, value), 250);
-		return () => clearTimeout(t);
+		const timer = setTimeout(() => writeDraft(sessionId, value), 250);
+		return () => clearTimeout(timer);
 	}, [value, sessionId]);
 	useEffect(() => () => writeDraft(sessionId, latest.current), [sessionId]);
 
@@ -147,13 +148,13 @@ export function Composer({
 			await stream.sendPrompt(text, mode);
 		} catch (e) {
 			setValue((cur) => (cur.trim() ? `${text}\n${cur}` : text));
-			toast.error(`Message not sent: ${errorMessage(e)}`);
+			toast.error(t("Message not sent: {error}", { error: errorText(e) }));
 			ref.current?.focus();
 		}
 	}, [value, blocked.reason, sessionId, stream, mode]);
 
 	const abort = useCallback(() => {
-		stream.abort().catch((e) => toast.error(`Could not stop the agent: ${errorMessage(e)}`));
+		stream.abort().catch((e) => toast.error(t("Could not stop the agent: {error}", { error: errorText(e) })));
 	}, [stream]);
 
 	// Esc stops the running turn from anywhere on the page (unless a dialog/popover owns Esc).
@@ -176,7 +177,7 @@ export function Composer({
 		try {
 			await stream.restartRuntime();
 		} catch (e) {
-			toast.error(`Could not restart the runtime: ${errorMessage(e)}`);
+			toast.error(t("Could not restart the runtime: {error}", { error: errorText(e) }));
 		} finally {
 			setRestarting(false);
 		}
@@ -189,12 +190,12 @@ export function Composer({
 		<div className={cn("shrink-0 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-1 sm:px-4", keyboardOpen ? "pb-2" : "pb-3 pb-safe", className)}>
 			<div className="mx-auto w-full max-w-[60rem]">
 				{steering.length + followUps.length > 0 ? (
-					<ul aria-label="Queued messages" className="scrollbar-none mb-2 flex gap-1.5 overflow-x-auto">
+					<ul aria-label={t("Queued messages")} className="scrollbar-none mb-2 flex gap-1.5 overflow-x-auto">
 						{steering.map((q, i) => (
 							// biome-ignore lint/suspicious/noArrayIndexKey: queue strings are not unique ids
 							<li key={`s${i}`} title={q} className="flex max-w-[16rem] shrink-0 items-center gap-1.5 rounded-full bg-accent-soft px-2.5 py-1 text-2xs text-accent">
 								<CornerDownRight className="size-3 shrink-0" aria-hidden />
-								<span className="sr-only">Steering:</span>
+								<span className="sr-only">{t("Steering:")}</span>
 								<span className="truncate">{q}</span>
 							</li>
 						))}
@@ -202,7 +203,7 @@ export function Composer({
 							// biome-ignore lint/suspicious/noArrayIndexKey: queue strings are not unique ids
 							<li key={`f${i}`} title={q} className="flex max-w-[16rem] shrink-0 items-center gap-1.5 rounded-full bg-surface-3 px-2.5 py-1 text-2xs text-muted-foreground">
 								<Clock className="size-3 shrink-0" aria-hidden />
-								<span className="sr-only">Queued follow-up:</span>
+								<span className="sr-only">{t("Queued follow-up:")}</span>
 								<span className="truncate">{q}</span>
 							</li>
 						))}
@@ -215,7 +216,7 @@ export function Composer({
 						<span className="min-w-0 flex-1 truncate">{blocked.reason}</span>
 						{blocked.restartable ? (
 							<Button size="sm" variant="outline" loading={restarting} onClick={() => void restart()}>
-								<RotateCw /> Restart
+								<RotateCw /> {t("Restart")}
 							</Button>
 						) : null}
 					</div>
@@ -271,7 +272,7 @@ export function Composer({
 							}
 						}}
 						placeholder={placeholder}
-						aria-label="Message"
+						aria-label={t("Message")}
 						enterKeyHint={touch ? "enter" : "send"}
 						autoCapitalize="sentences"
 						className="scrollbar-thin block max-h-32 min-h-11 w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-base leading-relaxed outline-none [field-sizing:content] placeholder:text-subtle md:max-h-[12.5rem] md:text-sm"
@@ -279,7 +280,7 @@ export function Composer({
 					<UploadDock uploads={uploads} />
 					{dragging ? (
 						<div aria-hidden className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl bg-accent-soft text-xs font-medium text-accent">
-							Drop to add to the project folder
+							{t("Drop to add to the project folder")}
 						</div>
 					) : null}
 					<div className="flex items-center gap-1.5 px-2 pb-2">
@@ -294,17 +295,17 @@ export function Composer({
 									e.target.value = "";
 								}}
 							/>
-							<Tip label="Attach files to the project folder">
-								<Button size="icon" variant="ghost" aria-label="Attach files" onClick={() => fileInput.current?.click()} className="rounded-xl">
+							<Tip label={t("Attach files to the project folder")}>
+								<Button size="icon" variant="ghost" aria-label={t("Attach files")} onClick={() => fileInput.current?.click()} className="rounded-xl">
 									<Paperclip />
 								</Button>
 							</Tip>
 							{busy ? (
-								<div role="radiogroup" aria-label="Delivery while the agent is working" className="flex shrink-0 rounded-lg bg-surface-2 p-0.5 shadow-[inset_0_0_0_1px_var(--border)]">
+								<div role="radiogroup" aria-label={t("Delivery while the agent is working")} className="flex shrink-0 rounded-lg bg-surface-2 p-0.5 shadow-[inset_0_0_0_1px_var(--border)]">
 									{(
 										[
-											["steer", "Steer", "Redirect the agent after its current step"],
-											["followUp", "Queue", "Send after the agent finishes this turn"],
+											["steer", t("Steer"), t("Redirect the agent after its current step")],
+											["followUp", t("Queue"), t("Send after the agent finishes this turn")],
 										] as const
 									).map(([id, label, tip]) => (
 										<Tip key={id} label={tip}>
@@ -331,20 +332,22 @@ export function Composer({
 							</div>
 							{touch ? null : (
 								<span className="hidden truncate text-2xs text-subtle md:inline">
-									<Kbd>↵</Kbd> send · <Kbd>⇧↵</Kbd> newline{busy ? " · " : ""}
-									{busy ? <Kbd>Esc</Kbd> : null}
-									{busy ? " stop" : ""}
+									{busy ? (
+										<T text="<k1>↵</k1> send · <k2>⇧↵</k2> newline · <k3>Esc</k3> stop" tags={{ k1: <Kbd />, k2: <Kbd />, k3: <Kbd /> }} />
+									) : (
+										<T text="<k1>↵</k1> send · <k2>⇧↵</k2> newline" tags={{ k1: <Kbd />, k2: <Kbd /> }} />
+									)}
 								</span>
 							)}
 						</div>
 						{busy ? (
-							<Tip label={aborting ? "Stopping…" : "Stop the agent"} shortcut="Esc">
-								<Button size="icon" variant="outline" aria-label="Stop the agent" onClick={abort} disabled={aborting} className="rounded-xl">
+							<Tip label={aborting ? t("Stopping…") : t("Stop the agent")} shortcut="Esc">
+								<Button size="icon" variant="outline" aria-label={t("Stop the agent")} onClick={abort} disabled={aborting} className="rounded-xl">
 									{aborting ? <Loader2 className="animate-spin" /> : <Square className="fill-current" />}
 								</Button>
 							</Tip>
 						) : null}
-						<Button size="icon" variant={trimmed && blocked.reason === null ? "primary" : "secondary"} aria-label={busy ? (mode === "steer" ? "Send steering message" : "Queue follow-up") : "Send message"} disabled={!trimmed || blocked.reason !== null} onClick={() => void submit()} className="rounded-xl">
+						<Button size="icon" variant={trimmed && blocked.reason === null ? "primary" : "secondary"} aria-label={busy ? (mode === "steer" ? t("Send steering message") : t("Queue follow-up")) : t("Send message")} disabled={!trimmed || blocked.reason !== null} onClick={() => void submit()} className="rounded-xl">
 							<ArrowUp />
 						</Button>
 					</div>

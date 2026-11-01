@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDate } from "./common.ts";
+import { I18nText, IsoDate } from "./common.ts";
 
 /**
  * M7 — Handoff protocol (docs/handoff-protocol.md), with dependency setup and crash-safe recovery.
@@ -126,6 +126,8 @@ export const HandoffStep = z.object({
 	name: z.string(),
 	state: z.enum(["pending", "running", "done", "failed", "skipped"]),
 	detail: z.string().nullable(),
+	/** Structured twin of `detail` for localisation when the detail is our own text; absent otherwise. */
+	i18n: I18nText.optional(),
 	at: IsoDate.nullable(),
 });
 export type HandoffStep = z.infer<typeof HandoffStep>;
@@ -136,6 +138,8 @@ export const HandoffEvent = z.object({
 	nodeId: z.string(),
 	state: HandoffState,
 	summary: z.string(),
+	/** Structured twin of `summary` for localisation; `summary` stays the English rendering. */
+	i18n: I18nText.optional(),
 });
 export type HandoffEvent = z.infer<typeof HandoffEvent>;
 
@@ -163,7 +167,7 @@ export const Handoff = z.object({
 	/** Secret-scanned summary of the conversation (OMP `handoff`), shown to both sides. */
 	conversationSummary: z.string().nullable(),
 	includeTranscript: z.boolean(),
-	failure: z.object({ code: HandoffFailureCode, detail: z.string(), step: z.number().int().nullable() }).nullable(),
+	failure: z.object({ code: HandoffFailureCode, detail: z.string(), i18n: I18nText.optional(), step: z.number().int().nullable() }).nullable(),
 	/** What the user can do now (e.g. retry, extend, reclaim, cancel, approve_setup). */
 	actions: z.array(z.enum(["accept", "reject", "cancel", "retry", "extend", "reclaim", "approve_setup", "deny_setup"])),
 	expiresAt: IsoDate.nullable(),

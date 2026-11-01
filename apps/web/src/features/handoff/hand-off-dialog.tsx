@@ -2,7 +2,9 @@ import type { Task } from "@clam/contracts";
 import { Info, Plus, TriangleAlert, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PeerStatusBadge } from "@/features/network/components";
-import { ApiError, errorMessage } from "@/lib/api";
+import { t, tr } from "@/i18n";
+import { PEER_STATUS_LABEL } from "@/features/network/format";
+import { ApiError, errorText } from "@/lib/api";
 import { useDirectory, usePeers } from "@/lib/queries";
 import { Button } from "@/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
@@ -95,10 +97,11 @@ export default function HandOffDialog({ task, onClose }: { task: Task; onClose: 
 		<Dialog open onOpenChange={(o) => !o && !create.isPending && onClose()}>
 			<DialogContent sheetOnMobile className="max-w-xl">
 				<DialogHeader>
-					<DialogTitle>Hand off “{task.title}”</DialogTitle>
+					<DialogTitle>{t("Hand off “{title}”", { title: task.title })}</DialogTitle>
 					<DialogDescription>
-						Another machine takes over this task. It restores the files and context, sets up dependencies (you and the target review the commands), validates, and starts a new agent session. This machine keeps the task until the target
-						confirms it is ready.
+						{t(
+							"Another machine takes over this task. It restores the files and context, sets up dependencies (you and the target review the commands), validates, and starts a new agent session. This machine keeps the task until the target confirms it is ready.",
+						)}
 					</DialogDescription>
 				</DialogHeader>
 				<form
@@ -111,23 +114,23 @@ export default function HandOffDialog({ task, onClose }: { task: Task; onClose: 
 					{noNodes ? (
 						<div role="status" className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-[13px] text-muted-foreground">
 							<Info className="mt-0.5 size-4 shrink-0" aria-hidden />
-							<span>No machine is paired with this one yet. Pair a machine in Agent Network first.</span>
+							<span>{t("No machine is paired with this one yet. Pair a machine in Agent Network first.")}</span>
 						</div>
 					) : null}
 					<div className="grid gap-3 sm:grid-cols-2">
-						<Field label="Target machine">
+						<Field label={t("Target machine")}>
 							{(id) => (
 								<Select value={peerId} onValueChange={setPeerId} disabled={noNodes}>
 									<SelectTrigger id={id}>
-										<SelectValue placeholder="Choose a machine" />
+										<SelectValue placeholder={t("Choose a machine")} />
 									</SelectTrigger>
 									<SelectContent>
 										{candidates.map((p) => (
 											<SelectItem key={p.id} value={p.id} disabled={!capable(p)}>
 												<span className="inline-flex items-center gap-2">
-													<StatusDot status={p.status === "online" ? "online" : p.status === "degraded" ? "degraded" : "offline"} label={p.status} />
+													<StatusDot status={p.status === "online" ? "online" : p.status === "degraded" ? "degraded" : "offline"} label={tr(PEER_STATUS_LABEL[p.status])} />
 													{p.name}
-													{!capable(p) ? <span className="text-2xs text-subtle">can’t receive handoffs</span> : null}
+													{!capable(p) ? <span className="text-2xs text-subtle">{t("can’t receive handoffs")}</span> : null}
 												</span>
 											</SelectItem>
 										))}
@@ -135,18 +138,18 @@ export default function HandOffDialog({ task, onClose }: { task: Task; onClose: 
 								</Select>
 							)}
 						</Field>
-						<Field label="Agent" hint="Leave on “any” to let the machine pick.">
+						<Field label={t("Agent")} hint={t("Leave on “any” to let the machine pick.")}>
 							{(id) => (
 								<Select value={agentKey} onValueChange={setAgentKey} disabled={!peer}>
 									<SelectTrigger id={id}>
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
-										<SelectItem value={ANY}>Any available agent</SelectItem>
+										<SelectItem value={ANY}>{t("Any available agent")}</SelectItem>
 										{agents.map((a) => (
 											<SelectItem key={a.agentId} value={a.agentId}>
 												<span className="inline-flex items-center gap-2">
-													<StatusDot status={a.status} label={a.status} />
+													<StatusDot status={a.status} />
 													{a.name}
 												</span>
 											</SelectItem>
@@ -159,39 +162,39 @@ export default function HandOffDialog({ task, onClose }: { task: Task; onClose: 
 					{peer && peer.status !== "online" ? (
 						<p role="status" className="flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
 							<PeerStatusBadge status={peer.status} />
-							{peer.name} is not reachable right now. The offer is delivered when it is online.
+							{t("{name} is not reachable right now. The offer is delivered when it is online.", { name: peer.name })}
 						</p>
 					) : null}
 					{cannotReceive ? (
 						<p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
-							{peer?.name} has not allowed this machine to hand work over. Ask its owner to grant “handoff.receive”.
+							{t("{name} has not allowed this machine to hand work over. Ask its owner to grant “handoff.receive”.", { name: peer?.name ?? "" })}
 						</p>
 					) : null}
 
 					<div className="flex flex-col gap-3.5 rounded-xl bg-surface-2 p-3.5">
 						<ToggleRow
 							id="handoff-stop"
-							label="Stop the running turn first"
+							label={t("Stop the running turn first")}
 							checked={stopRunning}
 							onChange={setStopRunning}
 							hint={
 								busy
-									? "The agent is in the middle of a turn. Turn this on to abort it and hand off what exists so far, or wait until the turn settles."
-									: "If the agent is mid-turn the handoff is refused. Turn this on to abort that turn (work already written to files is kept)."
+									? t("The agent is in the middle of a turn. Turn this on to abort it and hand off what exists so far, or wait until the turn settles.")
+									: t("If the agent is mid-turn the handoff is refused. Turn this on to abort that turn (work already written to files is kept).")
 							}
 							tone={busy ? "warning" : undefined}
 						/>
 						<ToggleRow
 							id="handoff-transcript"
-							label="Include the conversation transcript"
+							label={t("Include the conversation transcript")}
 							checked={includeTranscript}
 							onChange={setIncludeTranscript}
 							tone="warning"
-							hint={includeTranscript ? "The full transcript, including tool output, is sent to the target. It may contain file contents or secrets printed by commands." : "Off: only a secret-scanned summary travels."}
+							hint={includeTranscript ? t("The full transcript, including tool output, is sent to the target. It may contain file contents or secrets printed by commands.") : t("Off: only a secret-scanned summary travels.")}
 						/>
 					</div>
 
-					<Field label="Extra setup commands" hint="Optional. The target shows each one and asks before running it.">
+					<Field label={t("Extra setup commands")} hint={t("Optional. The target shows each one and asks before running it.")}>
 						{(id) => (
 							<div className="flex flex-col gap-2">
 								{commands.length > 0 ? (
@@ -199,7 +202,7 @@ export default function HandOffDialog({ task, onClose }: { task: Task; onClose: 
 										{commands.map((c) => (
 											<li key={c} className="flex items-center gap-2 rounded-lg bg-surface-2 py-1 pl-2.5 pr-1">
 												<code className="min-w-0 flex-1 break-all font-mono text-xs">{c}</code>
-												<Button type="button" size="icon-sm" variant="ghost" aria-label={`Remove ${c}`} onClick={() => setCommands(commands.filter((x) => x !== c))}>
+												<Button type="button" size="icon-sm" variant="ghost" aria-label={t("Remove {command}", { command: c })} onClick={() => setCommands(commands.filter((x) => x !== c))}>
 													<X />
 												</Button>
 											</li>
@@ -222,28 +225,28 @@ export default function HandOffDialog({ task, onClose }: { task: Task; onClose: 
 										}}
 									/>
 									<Button type="button" variant="outline" onClick={addCommand} disabled={draft.trim() === "" || commands.length >= MAX_COMMANDS}>
-										<Plus /> Add
+										<Plus /> {t("Add")}
 									</Button>
 								</div>
 							</div>
 						)}
 					</Field>
-					<Field label="Check command" hint="Optional. Runs on the target to prove the workspace works before it takes over.">
+					<Field label={t("Check command")} hint={t("Optional. Runs on the target to prove the workspace works before it takes over.")}>
 						{(id) => <Input id={id} value={checkCommand} maxLength={MAX_LEN} placeholder="pnpm test" className="font-mono" onChange={(e) => setCheckCommand(e.target.value)} />}
 					</Field>
 
 					{create.isError ? (
 						<p role="alert" className="flex items-start gap-2 break-words rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
 							<TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-							{errorMessage(create.error)}
+							{errorText(create.error)}
 						</p>
 					) : null}
 					<DialogFooter className="sticky bottom-0 bg-overlay pt-2">
 						<Button type="button" variant="ghost" onClick={onClose} disabled={create.isPending}>
-							Cancel
+							{t("Cancel")}
 						</Button>
 						<Button type="submit" variant="primary" disabled={!ready} loading={create.isPending}>
-							Hand off
+							{t("Hand off")}
 						</Button>
 					</DialogFooter>
 				</form>

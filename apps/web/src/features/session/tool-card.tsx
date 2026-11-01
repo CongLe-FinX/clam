@@ -2,7 +2,8 @@ import { Check, ChevronRight, CircleSlash, Loader2, PanelRight, X } from "lucide
 import { memo, useEffect, useMemo, useState } from "react";
 import { CodeBlock } from "@/components/code-block";
 import { isMeshTool, meshSummary } from "@/features/tasks/mesh-tools";
-import { cn, formatDuration } from "@/lib/utils";
+import { msg, t, tr, type Msg } from "@/i18n";
+import { cn, formatDuration, formatNumber } from "@/lib/utils";
 import { Tip } from "@/ui/tooltip";
 import { isBusy, type SessionStream, type ToolRec, useStreamMeta, useToolRec } from "./stream-store.ts";
 import { prettyJson, summarizeArgs, toolIcon } from "./tool-meta.tsx";
@@ -24,8 +25,8 @@ export function useNow(active: boolean, intervalMs = 500): number {
 	useEffect(() => {
 		if (!active) return;
 		setNow(Date.now());
-		const t = setInterval(() => setNow(Date.now()), intervalMs);
-		return () => clearInterval(t);
+		const timer = setInterval(() => setNow(Date.now()), intervalMs);
+		return () => clearInterval(timer);
 	}, [active, intervalMs]);
 	return now;
 }
@@ -43,14 +44,14 @@ function shownStatus(block: ToolBlock, rec: ToolRec | undefined, busy: boolean):
 	return busy ? "queued" : "none";
 }
 
-const statusLabel: Record<Shown, string> = {
-	preparing: "Preparing",
-	queued: "Queued",
-	running: "Running",
-	ok: "Done",
-	error: "Failed",
-	interrupted: "Interrupted",
-	none: "No result",
+const statusLabel: Record<Shown, Msg> = {
+	preparing: msg("Preparing"),
+	queued: msg("Queued"),
+	running: msg("Running"),
+	ok: msg("Done"),
+	error: msg("Failed"),
+	interrupted: msg("Interrupted"),
+	none: msg("No result"),
 };
 
 export function StatusGlyph({ status, className }: { status: Shown; className?: string }) {
@@ -58,15 +59,15 @@ export function StatusGlyph({ status, className }: { status: Shown; className?: 
 	switch (status) {
 		case "running":
 		case "preparing":
-			return <Loader2 className={cn(cls, "animate-spin text-accent")} aria-label={statusLabel[status]} />;
+			return <Loader2 className={cn(cls, "animate-spin text-accent")} aria-label={tr(statusLabel[status])} />;
 		case "ok":
-			return <Check className={cn(cls, "text-success")} aria-label="Done" />;
+			return <Check className={cn(cls, "text-success")} aria-label={t("Done")} />;
 		case "error":
-			return <X className={cn(cls, "text-danger")} aria-label="Failed" />;
+			return <X className={cn(cls, "text-danger")} aria-label={t("Failed")} />;
 		case "interrupted":
-			return <CircleSlash className={cn(cls, "text-warning")} aria-label="Interrupted" />;
+			return <CircleSlash className={cn(cls, "text-warning")} aria-label={t("Interrupted")} />;
 		default:
-			return <span className={cn(cls, "grid place-items-center")} aria-label={statusLabel[status]}><span className="size-1.5 rounded-full bg-subtle" /></span>;
+			return <span className={cn(cls, "grid place-items-center")} aria-label={tr(statusLabel[status])}><span className="size-1.5 rounded-full bg-subtle" /></span>;
 	}
 }
 
@@ -80,10 +81,10 @@ export function ResultView({ text, className }: { text: string; className?: stri
 			<CodeBlock code={shown} lang="text" maxHeight={full ? 560 : 280} />
 			{hidden > 0 ? (
 				<button type="button" onClick={() => setFull(true)} className="self-start rounded-md px-1.5 py-0.5 text-2xs font-medium text-accent outline-none hover:bg-accent-soft coarse:py-2">
-					Show {hidden.toLocaleString("en-US")} more characters
+					{t("Show {count} more characters", { count: formatNumber(hidden) })}
 				</button>
 			) : null}
-			{text.length > RESULT_MAX_CHARS ? <span className="text-2xs text-subtle">Output truncated to {RESULT_MAX_CHARS.toLocaleString("en-US")} characters.</span> : null}
+			{text.length > RESULT_MAX_CHARS ? <span className="text-2xs text-subtle">{t("Output truncated to {count} characters.", { count: formatNumber(RESULT_MAX_CHARS) })}</span> : null}
 		</div>
 	);
 }
@@ -102,12 +103,12 @@ export function ToolDetails({ name, args, rec }: { name: string; args: unknown; 
 	return (
 		<div className="flex flex-col gap-2.5">
 			<div className="flex flex-col gap-1">
-				<span className="text-2xs font-medium uppercase tracking-wider text-subtle">{command !== null ? "Command" : "Arguments"}</span>
-				{command !== null ? <CodeBlock code={command} lang="bash" maxHeight={220} /> : json ? <CodeBlock code={json} lang="json" maxHeight={260} /> : <span className="text-xs text-subtle">No arguments</span>}
+				<span className="text-2xs font-medium uppercase tracking-wider text-subtle">{command !== null ? t("Command") : t("Arguments")}</span>
+				{command !== null ? <CodeBlock code={command} lang="bash" maxHeight={220} /> : json ? <CodeBlock code={json} lang="json" maxHeight={260} /> : <span className="text-xs text-subtle">{t("No arguments")}</span>}
 			</div>
 			<div className="flex flex-col gap-1">
-				<span className="text-2xs font-medium uppercase tracking-wider text-subtle">{rec?.status === "running" ? "Output (live)" : "Result"}</span>
-				{result ? <ResultView text={result} /> : <span className="text-xs text-subtle">{rec?.status === "running" ? "Waiting for output…" : "No output recorded"}</span>}
+				<span className="text-2xs font-medium uppercase tracking-wider text-subtle">{rec?.status === "running" ? t("Output (live)") : t("Result")}</span>
+				{result ? <ResultView text={result} /> : <span className="text-xs text-subtle">{rec?.status === "running" ? t("Waiting for output…") : t("No output recorded")}</span>}
 			</div>
 		</div>
 	);
@@ -122,11 +123,11 @@ export const ToolCard = memo(function ToolCard({ stream, block }: { stream: Sess
 	const running = status === "running";
 	const now = useNow(running);
 	const duration = toolDuration(rec, now);
-	const name = block.name || rec?.name || "tool";
+	const name = block.name || rec?.name || t("tool");
 	const args = rec?.args ?? block.arguments;
 	const Icon = toolIcon(name);
 	const preparing = status === "preparing";
-	const intent = preparing ? "Preparing tool call…" : (block.intent ?? rec?.intent);
+	const intent = preparing ? t("Preparing tool call…") : (block.intent ?? rec?.intent);
 	const summary = preparing ? "" : summarizeArgs(args);
 	const mesh = preparing || !isMeshTool(name) ? null : meshSummary(name, args, rec);
 	const bodyId = `tool-${block.id}`;
@@ -156,10 +157,10 @@ export const ToolCard = memo(function ToolCard({ stream, block }: { stream: Sess
 					{duration !== null ? <span className="tabular shrink-0 font-mono text-2xs text-subtle">{formatDuration(duration)}</span> : null}
 					<StatusGlyph status={status} />
 				</button>
-				<Tip label="Inspect in side panel">
+				<Tip label={t("Inspect in side panel")}>
 					<button
 						type="button"
-						aria-label="Inspect tool call"
+						aria-label={t("Inspect tool call")}
 						onClick={() => stream.selectTool(block.id)}
 						className="grid size-7 shrink-0 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground coarse:size-11"
 					>

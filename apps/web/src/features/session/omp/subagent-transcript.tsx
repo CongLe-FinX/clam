@@ -3,7 +3,8 @@ import { routes } from "@clam/contracts";
 import { Brain, Check, ChevronRight, Loader2, X } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LazyMarkdown } from "@/components/lazy-markdown";
-import { api, errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { api, errorText } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
@@ -26,7 +27,7 @@ interface Transcript {
  * store's per-subagent version) and, as a safety net while it runs, every few seconds; a final fetch follows its end.
  */
 function useTranscript(store: OmpStore, s: SubagentRec): Transcript & { reload: () => void } {
-	const [t, setT] = useState<Transcript>({ messages: [], nextByte: 0, status: "loading", error: null });
+	const [data, setData] = useState<Transcript>({ messages: [], nextByte: 0, status: "loading", error: null });
 	const version = useSubagentVersion(store, s.id);
 	const live = isLive(s);
 	const nextByte = useRef(0);
@@ -44,14 +45,14 @@ function useTranscript(store: OmpStore, s: SubagentRec): Transcript & { reload: 
 			const page = await api.get<SubagentMessagesPage>(routes.sessionSubagentMessages(store.sessionId, s.id), { fromByte: nextByte.current });
 			if (!alive.current) return;
 			nextByte.current = page.nextByte;
-			setT((prev) => {
+			setData((prev) => {
 				const base = page.reset ? [] : prev.messages;
 				const known = new Set(base.map((m) => m.id));
 				const fresh = page.messages.filter((m) => !known.has(m.id));
 				return { messages: fresh.length > 0 || page.reset ? [...base, ...fresh] : prev.messages, nextByte: page.nextByte, status: "ready", error: null };
 			});
 		} catch (e) {
-			if (alive.current) setT((prev) => ({ ...prev, status: prev.messages.length > 0 ? "ready" : "error", error: errorMessage(e) }));
+			if (alive.current) setData((prev) => ({ ...prev, status: prev.messages.length > 0 ? "ready" : "error", error: errorText(e) }));
 		} finally {
 			inflight.current = false;
 			if (again.current && alive.current) {
@@ -81,10 +82,10 @@ function useTranscript(store: OmpStore, s: SubagentRec): Transcript & { reload: 
 	}, [live, fetchMore]);
 
 	return {
-		...t,
+		...data,
 		reload: () => {
 			nextByte.current = 0;
-			setT({ messages: [], nextByte: 0, status: "loading", error: null });
+			setData({ messages: [], nextByte: 0, status: "loading", error: null });
 			void fetchMore();
 		},
 	};
@@ -117,13 +118,13 @@ function ToolRow({ run }: { run: ToolRun }) {
 				<Icon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
 				<span className="shrink-0 font-mono text-xs font-medium">{run.name}</span>
 				<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{summary}</span>
-				{pending ? <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" aria-label="Running" /> : run.error ? <X className="size-3.5 shrink-0 text-danger" aria-label="Failed" /> : <Check className="size-3.5 shrink-0 text-success" aria-label="Done" />}
+				{pending ? <Loader2 className="size-3.5 shrink-0 animate-spin text-accent" aria-label={t("Running")} /> : run.error ? <X className="size-3.5 shrink-0 text-danger" aria-label={t("Failed")} /> : <Check className="size-3.5 shrink-0 text-success" aria-label={t("Done")} />}
 			</button>
 			{open ? (
 				<div className="animate-fade-in flex flex-col gap-2 border-t p-2.5">
 					<pre className="scrollbar-thin max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-2xs leading-4 text-muted-foreground">{prettyJson(run.args)}</pre>
 					{run.result !== undefined ? (
-						<pre className="scrollbar-thin max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-2 p-2 font-mono text-2xs leading-4">{run.result.length > RESULT_CAP ? `${run.result.slice(0, RESULT_CAP)}…` : run.result || "(no output)"}</pre>
+						<pre className="scrollbar-thin max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-surface-2 p-2 font-mono text-2xs leading-4">{run.result.length > RESULT_CAP ? `${run.result.slice(0, RESULT_CAP)}…` : run.result || t("(no output)")}</pre>
 					) : null}
 				</div>
 			) : null}
@@ -137,7 +138,7 @@ function Thought({ text }: { text: string }) {
 		<div className="flex flex-col gap-1">
 			<button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-fit items-center gap-1.5 rounded-md py-0.5 pr-2 text-xs text-muted-foreground outline-none hover:text-foreground coarse:py-2">
 				<ChevronRight className={cn("size-3 transition-transform duration-150", open && "rotate-90")} aria-hidden />
-				<Brain className="size-3.5" aria-hidden /> Thought
+				<Brain className="size-3.5" aria-hidden /> {t("Thought")}
 			</button>
 			{open ? <div className="animate-fade-in ml-1.5 whitespace-pre-wrap border-l pl-3 text-[13px] leading-relaxed text-muted-foreground">{text}</div> : null}
 		</div>
@@ -166,11 +167,11 @@ function Assignment({ text }: { text: string }) {
 	const long = text.length > 220 || text.split("\n").length > 4;
 	return (
 		<div className="rounded-xl bg-surface-2 px-3 py-2.5 shadow-[inset_0_0_0_1px_var(--border)]">
-			<div className="mb-1 text-2xs font-medium uppercase tracking-wider text-subtle">Assignment</div>
+			<div className="mb-1 text-2xs font-medium uppercase tracking-wider text-subtle">{t("Assignment")}</div>
 			<p className={cn("whitespace-pre-wrap break-words text-[13px] leading-relaxed text-muted-foreground", !open && long && "line-clamp-4")}>{text}</p>
 			{long ? (
 				<button type="button" onClick={() => setOpen((v) => !v)} className="mt-1 text-xs font-medium text-accent outline-none hover:underline focus-visible:underline">
-					{open ? "Show less" : "Show more"}
+					{open ? t("Show less") : t("Show more")}
 				</button>
 			) : null}
 		</div>
@@ -179,11 +180,11 @@ function Assignment({ text }: { text: string }) {
 
 /** Subagent transcript body: assignment, messages, tool calls with their results, steering messages. Follows new output while at the bottom. */
 export default function SubagentTranscript({ store, s }: { store: OmpStore; s: SubagentRec }) {
-	const t = useTranscript(store, s);
+	const log = useTranscript(store, s);
 	const scroller = useRef<HTMLDivElement>(null);
 	const stick = useRef(true);
-	const results = useMemo(() => new Map(t.messages.filter((m) => m.role === "toolResult" && m.toolCallId).map((m) => [m.toolCallId as string, m])), [t.messages]);
-	const items = useMemo(() => t.messages.filter((m) => m.role === "user" || (m.role === "assistant" && m.content.length > 0)), [t.messages]);
+	const results = useMemo(() => new Map(log.messages.filter((m) => m.role === "toolResult" && m.toolCallId).map((m) => [m.toolCallId as string, m])), [log.messages]);
+	const items = useMemo(() => log.messages.filter((m) => m.role === "user" || (m.role === "assistant" && m.content.length > 0)), [log.messages]);
 	const firstUser = items.findIndex((m) => m.role === "user");
 
 	// Follow the end while the reader is there; reading older output is never interrupted.
@@ -202,21 +203,21 @@ export default function SubagentTranscript({ store, s }: { store: OmpStore; s: S
 			}}
 			className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3"
 		>
-			{t.status === "loading" ? (
-				<div className="flex flex-col gap-3" aria-busy="true" aria-label="Loading transcript">
+			{log.status === "loading" ? (
+				<div className="flex flex-col gap-3" aria-busy="true" aria-label={t("Loading transcript")}>
 					<Skeleton className="h-16 w-full rounded-xl" />
 					<Skeleton className="h-4 w-4/5" />
 					<Skeleton className="h-9 w-full rounded-lg" />
 				</div>
-			) : t.status === "error" ? (
+			) : log.status === "error" ? (
 				<div className="flex flex-col items-start gap-2 rounded-xl bg-danger/8 p-3 text-xs text-danger" role="alert">
-					<span>Could not load the transcript. {t.error}</span>
-					<Button size="sm" variant="outline" onClick={t.reload}>
-						Retry
+					<span>{t("Could not load the transcript. {error}", { error: log.error ?? "" })}</span>
+					<Button size="sm" variant="outline" onClick={log.reload}>
+						{t("Retry")}
 					</Button>
 				</div>
 			) : items.length === 0 ? (
-				<p className="py-8 text-center text-xs text-muted-foreground">Nothing written yet. {isLive(s) ? "It will appear as the subagent works." : ""}</p>
+				<p className="py-8 text-center text-xs text-muted-foreground">{isLive(s) ? t("Nothing written yet. It will appear as the subagent works.") : t("Nothing written yet.")}</p>
 			) : (
 				<div className="flex flex-col gap-4">
 					{items.map((m, i) =>
@@ -225,7 +226,7 @@ export default function SubagentTranscript({ store, s }: { store: OmpStore; s: S
 								<Assignment key={m.id} text={textOf(m.content)} />
 							) : (
 								<div key={m.id} className="animate-slide-up flex flex-col items-end gap-0.5">
-									<span className="text-2xs font-medium text-subtle">You</span>
+									<span className="text-2xs font-medium text-subtle">{t("You")}</span>
 									<p className="max-w-[88%] whitespace-pre-wrap break-words rounded-2xl rounded-tr-md bg-accent-soft px-3 py-2 text-[13px] leading-relaxed">{textOf(m.content)}</p>
 								</div>
 							)

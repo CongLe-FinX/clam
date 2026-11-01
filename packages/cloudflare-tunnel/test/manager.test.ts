@@ -211,7 +211,7 @@ describe("failure handling", () => {
 	it("enters error when the binary is missing", async () => {
 		const m = make({ binary: join(root, "missing-cloudflared") });
 		const s = await m.start({ mode: "quick" });
-		expect(s).toMatchObject({ state: "error", mode: "quick", lastError: "cloudflared executable not found" });
+		expect(s).toMatchObject({ state: "error", mode: "quick", lastError: "cloudflared executable not found", lastErrorI18n: { key: "cloudflared executable not found" } });
 	});
 
 	it("restarts after a crash with exponential backoff", async () => {

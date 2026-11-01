@@ -2,12 +2,13 @@ import type { PeerStatus } from "@clam/contracts";
 import { Check, Copy } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn, formatDuration } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { StatusDot } from "@/ui/status-dot";
 import { Tip } from "@/ui/tooltip";
 import { PEER_DOT, PEER_STATUS_LABEL, PEER_STATUS_VARIANT } from "./format";
+import { t, tr } from "@/i18n";
 
 export async function copyText(text: string): Promise<boolean> {
 	try {
@@ -35,16 +36,16 @@ export function useCopy(): { copied: boolean; copy: (text: string, what?: string
 	const [copied, setCopied] = useState(false);
 	useEffect(() => {
 		if (!copied) return;
-		const t = setTimeout(() => setCopied(false), 1500);
-		return () => clearTimeout(t);
+		const timer = setTimeout(() => setCopied(false), 1500);
+		return () => clearTimeout(timer);
 	}, [copied]);
 	return {
 		copied,
 		copy: async (text, what) => {
 			if (await copyText(text)) {
 				setCopied(true);
-				if (what) toast.success(`${what} copied`);
-			} else toast.error("Could not access the clipboard — select the text and copy it manually");
+				if (what) toast.success(t("{what} copied", { what }));
+			} else toast.error(t("Could not access the clipboard — select the text and copy it manually"));
 		},
 	};
 }
@@ -53,7 +54,7 @@ export function useCopy(): { copied: boolean; copy: (text: string, what?: string
 export function CopyIconButton({ value, label, className }: { value: string; label: string; className?: string }) {
 	const { copied, copy } = useCopy();
 	return (
-		<Tip label={copied ? "Copied" : label}>
+		<Tip label={copied ? t("Copied") : label}>
 			<Button variant="ghost" size="icon-sm" aria-label={label} className={className} onClick={() => void copy(value)}>
 				{copied ? <Check className="text-success" /> : <Copy />}
 			</Button>
@@ -83,9 +84,9 @@ export function CopyBlock({
 		<div className={cn("flex flex-col gap-2 rounded-xl bg-surface-2 p-3.5 shadow-[inset_0_0_0_1px_var(--border-strong)]", className)}>
 			<div className="flex items-center justify-between gap-2">
 				<span className="text-2xs font-semibold uppercase tracking-wider text-subtle">{label}</span>
-				<Button size="sm" variant="outline" onClick={() => void copy(value)} aria-label={`Copy ${label.toLowerCase()}`}>
+				<Button size="sm" variant="outline" onClick={() => void copy(value)} aria-label={t("Copy {label}", { label: label.toLowerCase() })}>
 					{copied ? <Check className="text-success" /> : <Copy />}
-					{copied ? "Copied" : "Copy"}
+					{copied ? t("Copied") : t("Copy")}
 				</Button>
 			</div>
 			<p
@@ -105,8 +106,8 @@ export function CopyBlock({
 export function PeerStatusBadge({ status, className }: { status: PeerStatus; className?: string }) {
 	return (
 		<Badge variant={PEER_STATUS_VARIANT[status]} className={cn("gap-1.5", className)}>
-			<StatusDot status={PEER_DOT[status]} label={PEER_STATUS_LABEL[status]} className="size-1.5 [&>span]:size-1.5" />
-			{PEER_STATUS_LABEL[status]}
+			<StatusDot status={PEER_DOT[status]} label={tr(PEER_STATUS_LABEL[status])} className="size-1.5 [&>span]:size-1.5" />
+			{tr(PEER_STATUS_LABEL[status])}
 		</Badge>
 	);
 }
@@ -122,10 +123,9 @@ export function Countdown({ until, onExpire }: { until: string; onExpire?: () =>
 			onExpire?.();
 			return;
 		}
-		const t = setInterval(() => setNow(Date.now()), 1000);
-		return () => clearInterval(t);
+		const timer = setInterval(() => setNow(Date.now()), 1000);
+		return () => clearInterval(timer);
 	}, [expired, onExpire]);
-	if (expired) return <span className="text-danger">expired</span>;
-	const secs = Math.max(0, Math.floor(left / 1000));
-	return <span className="tabular">{Math.floor(secs / 60)}m {String(secs % 60).padStart(2, "0")}s</span>;
+	if (expired) return <span className="text-danger">{t("expired")}</span>;
+	return <span className="tabular">{formatDuration(Math.max(0, Math.floor(left / 1000)) * 1000)}</span>;
 }

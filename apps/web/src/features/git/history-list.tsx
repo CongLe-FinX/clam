@@ -3,7 +3,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Bot, GitBranch, RefreshCw, Tag } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 import { CopyButton } from "@/components/code-block";
-import { errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { cn, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
@@ -38,7 +39,7 @@ function CommitRow({ commit, active, onSelect }: { commit: GitCommit; active: bo
 					<span className="shrink-0 truncate">{commit.authorName}</span>
 					<span className="shrink-0">· {relativeTime(commit.authoredAt)}</span>
 					{agent ? (
-						<Badge variant="accent" className="shrink-0" title={`Agent: ${agent}`}>
+						<Badge variant="accent" className="shrink-0" title={t("Agent: {name}", { name: agent })}>
 							<Bot aria-hidden />
 							<span className="max-w-[10rem] truncate">{agent}</span>
 						</Badge>
@@ -51,7 +52,7 @@ function CommitRow({ commit, active, onSelect }: { commit: GitCommit; active: bo
 					{commit.refs.map(refBadge)}
 				</span>
 			</button>
-			<CopyButton text={commit.sha} label="Copy full SHA" className="self-center opacity-0 focus-visible:opacity-100 group-hover/commit:opacity-100 coarse:opacity-100" />
+			<CopyButton text={commit.sha} label={t("Copy full SHA")} className="self-center opacity-0 focus-visible:opacity-100 group-hover/commit:opacity-100 coarse:opacity-100" />
 		</div>
 	);
 }
@@ -87,17 +88,17 @@ export function HistoryList({ projectId, selectedSha, onSelect, className }: { p
 		return (
 			<EmptyState
 				icon={GitBranch}
-				title="Could not load history"
-				description={errorMessage(q.error)}
+				title={t("Could not load history")}
+				description={errorText(q.error)}
 				action={
 					<Button size="sm" variant="outline" onClick={() => void q.refetch()}>
-						<RefreshCw /> Retry
+						<RefreshCw /> {t("Retry")}
 					</Button>
 				}
 			/>
 		);
 	}
-	if (commits.length === 0) return <EmptyState icon={GitBranch} title="No commits yet" description="Commits on this branch appear here." className="py-10" />;
+	if (commits.length === 0) return <EmptyState icon={GitBranch} title={t("No commits yet")} description={t("Commits on this branch appear here.")} className="py-10" />;
 
 	return (
 		<div ref={ref} className={cn("scrollbar-thin min-h-0 overflow-y-auto overscroll-contain [overflow-anchor:none]", className)}>
@@ -112,7 +113,7 @@ export function HistoryList({ projectId, selectedSha, onSelect, className }: { p
 					);
 				})}
 			</div>
-			{isFetchingNextPage ? <div className="p-2 text-center text-2xs text-subtle">Loading more…</div> : null}
+			{isFetchingNextPage ? <div className="p-2 text-center text-2xs text-subtle">{t("Loading more…")}</div> : null}
 		</div>
 	);
 }

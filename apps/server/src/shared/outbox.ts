@@ -1,3 +1,4 @@
+import { i18nMsg } from "@clam/contracts";
 import type { OutboxHandler } from "../tasks/outbox.ts";
 import type { OutboxRow } from "../tasks/store.ts";
 import type { SharedHub } from "./hub.ts";
@@ -45,7 +46,7 @@ export function sharedOutboxHandlers(hub: SharedHub): Record<SharedOutboxKind, O
 				const participant = store.participant(sharedId, item.peerId);
 				if (!participant || participant.state !== "invited") return;
 				store.updateParticipant(sharedId, item.peerId, { state: "declined" });
-				hub.discussion.note(sharedId, `The invitation to ${participant.nodeName} could not be delivered: ${reason}`);
+				hub.discussion.note(sharedId, i18nMsg("The invitation to {name} could not be delivered: {reason}", { name: participant.nodeName, reason }));
 				hub.changed(sharedId);
 			},
 		},

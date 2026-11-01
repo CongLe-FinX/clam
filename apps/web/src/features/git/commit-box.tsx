@@ -3,8 +3,9 @@ import { type UseMutationResult, useQueryClient } from "@tanstack/react-query";
 import { Bot, ChevronDown, GitCommitHorizontal, Pencil, UploadCloud, UserRound } from "lucide-react";
 import { type Ref, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { errorMessage } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { msg, t, tr } from "@/i18n";
+import { errorText } from "@/lib/api";
+import { cn, formatNumber } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
@@ -19,7 +20,7 @@ import { commitStaged } from "./ops.ts";
 import { useGitUi } from "./store.ts";
 
 const ATTRIBUTE_KEY = "clam.git.attribute";
-const SOURCE_LABEL = { account: "GitHub account", project: "this project", "git-config": "git config" } as const;
+const SOURCE_LABEL = { account: msg("GitHub account"), project: msg("this project"), "git-config": msg("git config") } as const;
 
 function useAttributePref(): [boolean, (v: boolean) => void] {
 	const [on, setOn] = useState(() => {
@@ -59,10 +60,10 @@ export function IdentityLine({ projectId }: { projectId: string }) {
 	if (q.error || !q.data) {
 		return (
 			<p className="text-2xs text-warning" role="status">
-				No commit identity yet — set one before committing.{" "}
+				{t("No commit identity yet — set one before committing.")}{" "}
 				<IdentityEditor open={open} onOpenChange={setOpen} name={name} email={email} setName={setName} setEmail={setEmail} save={save} source={null}>
 					<button type="button" className="underline underline-offset-2">
-						Set identity
+						{t("Set identity")}
 					</button>
 				</IdentityEditor>
 			</p>
@@ -72,14 +73,14 @@ export function IdentityLine({ projectId }: { projectId: string }) {
 	return (
 		<div className="flex min-w-0 items-center gap-1.5 text-2xs text-muted-foreground">
 			<UserRound aria-hidden className="size-3.5 shrink-0 text-subtle" />
-			<span className="min-w-0 truncate" title={`${id.name} <${id.email}> · from ${SOURCE_LABEL[id.source]}`}>
+			<span className="min-w-0 truncate" title={t("{name} <{email}> · from {source}", { name: id.name, email: id.email, source: tr(SOURCE_LABEL[id.source]) })}>
 				<span className="font-medium text-foreground">{id.name}</span> &lt;{id.email}&gt;
 			</span>
 			<Badge variant="outline" className="shrink-0">
-				{SOURCE_LABEL[id.source]}
+				{tr(SOURCE_LABEL[id.source])}
 			</Badge>
 			<IdentityEditor open={open} onOpenChange={setOpen} name={name} email={email} setName={setName} setEmail={setEmail} save={save} source={id.source}>
-				<button type="button" aria-label="Edit commit identity" className="grid size-6 shrink-0 place-items-center rounded-md text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-9">
+				<button type="button" aria-label={t("Edit commit identity")} className="grid size-6 shrink-0 place-items-center rounded-md text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-9">
 					<Pencil className="size-3" />
 				</button>
 			</IdentityEditor>
@@ -112,7 +113,7 @@ function IdentityEditor({
 		save.mutate(body, {
 			onSuccess: () => {
 				onOpenChange(false);
-				toast.success(body ? "Commit identity saved for this project" : "Using the default identity again");
+				toast.success(body ? t("Commit identity saved for this project") : t("Using the default identity again"));
 			},
 		});
 	return (
@@ -127,26 +128,26 @@ function IdentityEditor({
 					}}
 				>
 					<div>
-						<h4 className="text-[13px] font-medium">Commit identity</h4>
-						<p className="text-2xs text-subtle">Author name and email for commits made in this project.</p>
+						<h4 className="text-[13px] font-medium">{t("Commit identity")}</h4>
+						<p className="text-2xs text-subtle">{t("Author name and email for commits made in this project.")}</p>
 					</div>
-					<Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" aria-label="Author name" autoFocus />
-					<Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" type="email" aria-label="Author email" />
+					<Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("Name")} aria-label={t("Author name")} autoFocus />
+					<Input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="email@example.com" type="email" aria-label={t("Author email")} />
 					{save.error ? (
 						<p role="alert" className="text-xs text-danger">
-							{errorMessage(save.error)}
+							{errorText(save.error)}
 						</p>
 					) : null}
 					<div className="flex items-center justify-between gap-2">
 						{source === "project" ? (
 							<Button variant="ghost" size="sm" type="button" loading={save.isPending} onClick={() => submit(null)}>
-								Use default
+								{t("Use default")}
 							</Button>
 						) : (
 							<span />
 						)}
 						<Button variant="primary" size="sm" type="submit" loading={save.isPending} disabled={!name.trim() || !email.trim()}>
-							Save
+							{t("Save")}
 						</Button>
 					</div>
 				</form>
@@ -179,13 +180,13 @@ export function CommitBox({
 	const conflicted = status.files.some((f) => f.kind === "conflicted");
 	const trimmed = message.trim();
 	const blocker = conflicted
-		? "Resolve conflicted files first"
+		? t("Resolve conflicted files first")
 		: status.operation
-			? `A ${status.operation} is in progress`
+			? t("A {operation} is in progress", { operation: status.operation })
 			: staged === 0
-				? "Stage changes to commit them"
+				? t("Stage changes to commit them")
 				: !trimmed
-					? "Write a commit message"
+					? t("Write a commit message")
 					: null;
 	const canPush = status.branch !== null && !status.detached;
 	const attributed = Boolean(sessionId) && attribute;
@@ -211,37 +212,37 @@ export function CommitBox({
 					}
 				}}
 				rows={expanded ? 3 : 1}
-				placeholder={staged ? `Message (commits ${staged} staged ${staged === 1 ? "file" : "files"})` : "Message — stage changes first"}
-				aria-label="Commit message"
+				placeholder={staged ? t("Message (commits {count, plural, one {# staged file} other {# staged files}})", { count: staged }) : t("Message — stage changes first")}
+				aria-label={t("Commit message")}
 				className={cn("min-h-0 resize-none py-1.5 text-[13px] transition-[height]", !expanded && "h-9")}
 			/>
 			{sessionId ? (
 				<label className="flex cursor-pointer items-center gap-2 text-2xs text-muted-foreground">
-					<Switch checked={attribute} onCheckedChange={setAttribute} aria-label="Attribute commit to this agent session" className="scale-90" />
+					<Switch checked={attribute} onCheckedChange={setAttribute} aria-label={t("Attribute commit to this agent session")} className="scale-90" />
 					<Bot aria-hidden className="size-3.5 text-subtle" />
-					<span>Add an agent attribution trailer</span>
+					<span>{t("Add an agent attribution trailer")}</span>
 				</label>
 			) : null}
 			<div className="flex items-center gap-1.5">
 				<div className="flex min-w-0 flex-1">
-					<Button variant="primary" className="min-w-0 flex-1 rounded-r-none" disabled={Boolean(blocker)} loading={busy} onClick={() => submit(false)} title={blocker ?? "Commit staged changes"}>
-						<GitCommitHorizontal /> <span className="truncate">Commit{staged ? ` (${staged})` : ""}</span>
+					<Button variant="primary" className="min-w-0 flex-1 rounded-r-none" disabled={Boolean(blocker)} loading={busy} onClick={() => submit(false)} title={blocker ?? t("Commit staged changes")}>
+						<GitCommitHorizontal /> <span className="truncate">{staged ? t("Commit ({count})", { count: formatNumber(staged) }) : t("Commit")}</span>
 					</Button>
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
-							<Button variant="primary" size="icon" className="rounded-l-none border-l border-accent-foreground/20" aria-label="More commit actions" disabled={Boolean(blocker) || !canPush}>
+							<Button variant="primary" size="icon" className="rounded-l-none border-l border-accent-foreground/20" aria-label={t("More commit actions")} disabled={Boolean(blocker) || !canPush}>
 								<ChevronDown />
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end">
 							<DropdownMenuItem onSelect={() => submit(true)}>
-								<UploadCloud /> Commit &amp; Push
+								<UploadCloud /> {t("Commit & Push")}
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
 				</div>
 				<Button variant="outline" disabled={Boolean(blocker) || !canPush || busy} onClick={() => submit(true)} className={cn("shrink-0", compact ? "hidden" : "inline-flex")}>
-					<UploadCloud /> Commit &amp; Push
+					<UploadCloud /> {t("Commit & Push")}
 				</Button>
 			</div>
 			<div className="flex min-w-0 items-center justify-between gap-2">

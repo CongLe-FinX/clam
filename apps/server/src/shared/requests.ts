@@ -1,6 +1,6 @@
 import { NetworkError, type wire } from "@clam/agent-network";
 import { AgentRuntimeError } from "@clam/agent-runtime";
-import type { PendingUiRequest, SessionEvent, SessionLiveState, UiRequestAnswerer, UiRequestResolution } from "@clam/contracts";
+import { type I18nMessage, i18nMsg, type PendingUiRequest, type SessionEvent, type SessionLiveState, type UiRequestAnswerer, type UiRequestResolution } from "@clam/contracts";
 import { ApiError } from "../http/errors.ts";
 import { errorText } from "../network/util.ts";
 import type { UiResponseInput } from "../services/session-service.ts";
@@ -14,18 +14,22 @@ type Requests = NonNullable<SessionLiveState["requests"]>;
 
 const claimKey = (sessionId: string, requestId: string): string => `${sessionId}\n${requestId}`;
 
-/** What a request is called in the group chat line. */
-function kindOf(method: string | undefined): string {
-	if (method === "ask") return "question";
-	if (method === undefined) return "request";
-	return "approval request";
+/** The group chat line that says who answered a request of the agent (`agent` is null when the agent has no name here). */
+function answeredLine(machine: string, agent: string | null, method: string | undefined): I18nMessage {
+	if (method === "ask") return agent === null ? i18nMsg("{machine} answered The agent's question", { machine }) : i18nMsg("{machine} answered {agent}'s question", { machine, agent });
+	if (method === undefined) return agent === null ? i18nMsg("{machine} answered The agent's request", { machine }) : i18nMsg("{machine} answered {agent}'s request", { machine, agent });
+	return agent === null ? i18nMsg("{machine} answered The agent's approval request", { machine }) : i18nMsg("{machine} answered {agent}'s approval request", { machine, agent });
 }
 
 /** The refusal for a request that is not pending: somebody answered first (say who), or it is long gone. */
 function closedError(requestId: string, done: UiRequestResolution | undefined): ApiError {
-	if (!done) return new ApiError(409, "request_closed", "The agent is no longer waiting for this answer", { requestId });
-	const by = done.answeredBy ? ` by someone on ${done.answeredBy.machine}` : "";
-	const message = done.outcome === "answered" ? `This was already answered${by}` : `This request is closed (${done.outcome.replace("_", " ")})`;
+	if (!done) return new ApiError(409, "request_closed", i18nMsg("The agent is no longer waiting for this answer"), { requestId });
+	const message =
+		done.outcome === "answered"
+			? done.answeredBy
+				? i18nMsg("This was already answered by someone on {machine}", { machine: done.answeredBy.machine })
+				: i18nMsg("This was already answered")
+			: i18nMsg("This request is closed ({outcome})", { outcome: done.outcome.replace("_", " ") });
 	return new ApiError(409, "already_answered", message, { requestId, outcome: done.outcome, answeredBy: done.answeredBy ?? null });
 }
 
@@ -99,8 +103,8 @@ export class RequestService implements RequestApi {
 		// The runtime's own event (already published) does not say who answered; the viewers of this machine learn it from a second one.
 		if (answeredBy) this.ctx.bus.publish(`session:${sessionId}`, { type: "ui_request_resolved", requestId: event.requestId, outcome, ...(event.answers ? { answers: event.answers } : {}), answeredBy } satisfies SessionEvent);
 		if (answeredBy && (outcome === "answered" || claim)) {
-			const agent = this.hub.store.participant(shared.id, this.ctx.identity.nodeId)?.agentName ?? "The agent";
-			this.hub.discussion.note(shared.id, `${answeredBy.machine} answered ${agent}'s ${kindOf(method)}`);
+			const agent = this.hub.store.participant(shared.id, this.ctx.identity.nodeId)?.agentName ?? null;
+			this.hub.discussion.note(shared.id, answeredLine(answeredBy.machine, agent, method));
 		}
 	}
 
@@ -114,13 +118,13 @@ export class RequestService implements RequestApi {
 		const shared = this.hub.store.find(sharedId);
 		const participant = shared ? this.hub.store.participant(sharedId, peerId) : undefined;
 		if (!shared || shared.state !== "active" || !participant || participant.state !== "active") throw ApiError.notFound("Shared session");
-		if (request.epoch < shared.epoch) throw new ApiError(409, "stale_epoch", `The answer carries epoch ${request.epoch}; the shared session is at epoch ${shared.epoch}: the question belongs to an agent session that no longer drives`, { currentEpoch: shared.epoch, driverNodeId: shared.driverNodeId });
+		if (request.epoch < shared.epoch) throw new ApiError(409, "stale_epoch", i18nMsg("The answer carries epoch {epoch}; the shared session is at epoch {current}: the question belongs to an agent session that no longer drives", { epoch: request.epoch, current: shared.epoch }), { currentEpoch: shared.epoch, driverNodeId: shared.driverNodeId });
 		if (request.epoch > shared.epoch) {
 			void this.hub.epochs.reconcilePeer(peerId);
-			throw new ApiError(409, "epoch_unknown", `The answer carries epoch ${request.epoch}; this node is still at epoch ${shared.epoch} and is asking who drives now`, { currentEpoch: shared.epoch });
+			throw new ApiError(409, "epoch_unknown", i18nMsg("The answer carries epoch {epoch}; this node is still at epoch {current} and is asking who drives now", { epoch: request.epoch, current: shared.epoch }), { currentEpoch: shared.epoch });
 		}
 		const sessionId = shared.localSessionId;
-		if (shared.localRole !== "driver" || !sessionId) throw ApiError.conflict("This node does not drive the shared session; it cannot take answers for its agent");
+		if (shared.localRole !== "driver" || !sessionId) throw ApiError.conflict(i18nMsg("This node does not drive the shared session; it cannot take answers for its agent"));
 		const pending = this.ctx.runtime.get(sessionId)?.pendingUiRequests().some((r) => r.requestId === request.requestId);
 		if (!pending) throw closedError(request.requestId, this.resolved.get(sessionId)?.find((r) => r.requestId === request.requestId));
 
@@ -149,7 +153,7 @@ export class RequestService implements RequestApi {
 			throw closedError(input.requestId, known);
 		}
 		const driver = this.ctx.network.peers.row(shared.driverNodeId);
-		if (!driver || (driver.status !== "online" && driver.status !== "degraded")) throw new ApiError(503, "driver_unreachable", `${shared.driverNodeName} (the driver) is offline: the answer cannot reach the agent. Try again when it is back.`);
+		if (!driver || (driver.status !== "online" && driver.status !== "degraded")) throw new ApiError(503, "driver_unreachable", i18nMsg("{name} (the driver) is offline: the answer cannot reach the agent. Try again when it is back.", { name: shared.driverNodeName }));
 		const body: wire.SharedAnswerRequest = input.answers !== undefined ? { epoch: shared.epoch, requestId: input.requestId, answers: input.answers } : { epoch: shared.epoch, requestId: input.requestId, value: input.value ?? null };
 		try {
 			await this.ctx.network.client.request(driver.url, { method: "POST", path: `/shared/${shared.id}/answer`, body, signal: AbortSignal.timeout(ANSWER_TIMEOUT_MS) });
@@ -157,15 +161,15 @@ export class RequestService implements RequestApi {
 			if (!(error instanceof NetworkError)) throw error;
 			if (error.code === "stale_epoch" || error.code === "epoch_unknown") {
 				void this.hub.epochs.reconcilePeer(driver.id);
-				throw new ApiError(409, "stale_epoch", "The driver of this shared session changed: this question is not waiting for an answer any more.", error.details);
+				throw new ApiError(409, "stale_epoch", i18nMsg("The driver of this shared session changed: this question is not waiting for an answer any more."), error.details);
 			}
 			if (error.status !== null && error.status >= 400 && error.status < 500) {
 				// An old node does not know the route (the router's own 404 names it); a 404 from a node that does is "you are not a participant".
-				if (error.status === 404 && error.message.startsWith("Route ")) throw new ApiError(409, "unsupported_driver", `${shared.driverNodeName} cannot take answers from other machines (it runs an older version). Answer on that machine.`);
+				if (error.status === 404 && error.message.startsWith("Route ")) throw new ApiError(409, "unsupported_driver", i18nMsg("{name} cannot take answers from other machines (it runs an older version). Answer on that machine.", { name: shared.driverNodeName }));
 				throw new ApiError(error.status, error.code, error.message, error.details);
 			}
 			this.hub.log.warn({ err: errorText(error), sharedId: shared.id }, "an answer could not be delivered to the driver");
-			throw new ApiError(503, "driver_unreachable", `${shared.driverNodeName} (the driver) could not be reached: ${error.message}`);
+			throw new ApiError(503, "driver_unreachable", i18nMsg("{name} (the driver) could not be reached: {error}", { name: shared.driverNodeName, error: error.message }));
 		}
 	}
 }

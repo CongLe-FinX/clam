@@ -2,7 +2,8 @@ import type { GitBranch, GitStatus } from "@clam/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Check, ChevronDown, Cloud, GitBranch as BranchIcon, Plus } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { errorMessage } from "@/lib/api";
+import { T, t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { cn, relativeTime } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
 import { Skeleton } from "@/ui/skeleton";
@@ -18,7 +19,7 @@ export function BranchSwitcher({ projectId, status, open, onOpenChange, disabled
 		if (!open) setQuery("");
 	}, [open]);
 
-	const label = status.branch ?? (status.headSha ? `detached @ ${status.headSha.slice(0, 7)}` : "no branch");
+	const label = status.branch ?? (status.headSha ? t("detached @ {sha}", { sha: status.headSha.slice(0, 7) }) : t("no branch"));
 	const needle = query.trim().toLowerCase();
 
 	const { local, remote, exact } = useMemo(() => {
@@ -48,7 +49,7 @@ export function BranchSwitcher({ projectId, status, open, onOpenChange, disabled
 				<button
 					type="button"
 					disabled={disabled}
-					aria-label={`Branch: ${label}. Switch branch`}
+					aria-label={t("Branch: {label}. Switch branch", { label })}
 					className="group inline-flex h-8 max-w-[14rem] min-w-0 items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 text-[13px] font-medium outline-none transition-colors hover:bg-surface-3 focus-visible:shadow-[0_0_0_2px_var(--accent)] disabled:opacity-60 coarse:h-11"
 				>
 					<BranchIcon aria-hidden className="size-3.5 shrink-0 text-accent" />
@@ -64,8 +65,8 @@ export function BranchSwitcher({ projectId, status, open, onOpenChange, disabled
 					onKeyDown={(e) => {
 						if (e.key === "Enter" && canCreate && local.length + remote.length === 0) create();
 					}}
-					placeholder="Find or create a branch…"
-					aria-label="Find or create a branch"
+					placeholder={t("Find or create a branch…")}
+					aria-label={t("Find or create a branch")}
 					spellCheck={false}
 					autoCapitalize="off"
 					className="h-8 w-full rounded-lg bg-surface-2 px-2.5 font-mono text-xs outline-none placeholder:font-sans placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1px_var(--accent)] coarse:h-11"
@@ -78,7 +79,7 @@ export function BranchSwitcher({ projectId, status, open, onOpenChange, disabled
 							<Skeleton className="h-8" />
 						</div>
 					) : branches.error ? (
-						<p className="px-2 py-3 text-xs text-danger">{errorMessage(branches.error)}</p>
+						<p className="px-2 py-3 text-xs text-danger">{errorText(branches.error)}</p>
 					) : (
 						<>
 							{canCreate ? (
@@ -89,18 +90,21 @@ export function BranchSwitcher({ projectId, status, open, onOpenChange, disabled
 								>
 									<Plus className="size-4 shrink-0" />
 									<span className="min-w-0 truncate">
-										Create <span className="font-mono font-medium">{query.trim()}</span>
-										<span className="text-accent/70"> from {status.branch ?? "HEAD"}</span>
+										<T
+											text="Create <b>{name}</b><f> from {from}</f>"
+											params={{ name: query.trim(), from: status.branch ?? "HEAD" }}
+											tags={{ b: <span className="font-mono font-medium" />, f: <span className="text-accent/70" /> }}
+										/>
 									</span>
 								</button>
 							) : null}
-							<BranchGroup title="Local" items={local} onPick={pick} />
-							<BranchGroup title="Remote" items={remote} onPick={pick} remote />
-							{local.length + remote.length === 0 && !canCreate ? <p className="px-2 py-4 text-center text-xs text-subtle">No matching branches.</p> : null}
+							<BranchGroup title={t("Local")} items={local} onPick={pick} />
+							<BranchGroup title={t("Remote")} items={remote} onPick={pick} remote />
+							{local.length + remote.length === 0 && !canCreate ? <p className="px-2 py-4 text-center text-xs text-subtle">{t("No matching branches.")}</p> : null}
 						</>
 					)}
 				</div>
-				<p className="px-1 text-2xs text-subtle">Switching never discards changes: it is refused if your uncommitted work would be overwritten.</p>
+				<p className="px-1 text-2xs text-subtle">{t("Switching never discards changes: it is refused if your uncommitted work would be overwritten.")}</p>
 			</PopoverContent>
 		</Popover>
 	);

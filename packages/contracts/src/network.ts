@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDate } from "./common.ts";
+import { I18nText, IsoDate } from "./common.ts";
 
 /**
  * Local UI contracts for M3 (pairing, peers, agent directory, Cloudflare Tunnel).
@@ -174,6 +174,8 @@ export const TunnelState = z.object({
 	/** Active edge connections reported by cloudflared. */
 	connections: z.number().int(),
 	lastError: z.string().nullable(),
+	/** Structured twin of `lastError` for localisation; absent when the error is cloudflared's own output. */
+	lastErrorI18n: I18nText.nullable().optional(),
 	startedAt: IsoDate.nullable(),
 	/** The loopback listener that serves ONLY `/api/v1` and that the tunnel points at. */
 	networkListener: z.object({ host: z.string(), port: z.number().int() }),

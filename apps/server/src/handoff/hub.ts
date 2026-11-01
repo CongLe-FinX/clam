@@ -1,5 +1,6 @@
 import type { wire } from "@clam/agent-network";
-import type { CreateTaskHandoffBody, DecideHandoffBody, ExtendHandoffBody, Handoff, HandoffFailureCode, HandoffState, SetupDecisionBody } from "@clam/contracts";
+import { plainMsg } from "@clam/contracts";
+import type { CreateTaskHandoffBody, DecideHandoffBody, ExtendHandoffBody, Handoff, HandoffFailureCode, HandoffState, I18nMessage, SetupDecisionBody } from "@clam/contracts";
 import type { HandoffManifest, SetupReport } from "@clam/handoff-engine";
 import type { FastifyBaseLogger } from "fastify";
 import type { z } from "zod";
@@ -59,7 +60,7 @@ export interface HandoffTransitionOptions extends TransitionOptions {
 	/** Tell the other node about this state with a `POST /handoffs/:id/state` (default: yes for the states in `NOTIFIED_STATES`). `false` = never. */
 	notify?: boolean;
 	/** Failure columns written with a `failed` / `rejected` / `prepare_failed` state. */
-	failure?: { code: HandoffFailureCode; detail: string; step?: number | null };
+	failure?: { code: HandoffFailureCode; detail: I18nMessage; step?: number | null };
 	/** Sent as `deadlineAt` of the notice (source `extended`). */
 	deadlineAt?: string;
 }
@@ -103,12 +104,16 @@ export const RETRYABLE_TARGET_FAILURES: readonly HandoffFailureCode[] = ["deps_f
 
 /** A step of the target failed: carries what the state machine records (`failed(code)`, the step number, a user-readable detail). */
 export class HandoffStepError extends Error {
+	/** The user-readable failure detail with its localisable twin (a plain string becomes a plain message). */
+	readonly detail: I18nMessage;
 	constructor(
 		readonly code: HandoffFailureCode,
-		message: string,
+		detail: string | I18nMessage,
 		readonly step: number | null = null,
 	) {
-		super(message);
+		const message = typeof detail === "string" ? plainMsg(detail) : detail;
+		super(message.text);
+		this.detail = message;
 		this.name = "HandoffStepError";
 	}
 }
@@ -235,11 +240,11 @@ export interface HandoffHub {
 	/** Walk `transitionPath(role, current, target)`, persisting every hop (recovery: e.g. `ack_timeout → awaiting_ack → acked`). */
 	advance(id: string, target: HandoffState, options: HandoffTransitionOptions): HandoffRow;
 	/** Append a timeline note without a state change and publish it. */
-	note(id: string, summary: string): void;
+	note(id: string, summary: I18nMessage): void;
 	/** Queue a signed peer call through the durable outbox (ordered per `(handoff, peer)`). No-op after a simulated crash. */
 	enqueue(row: HandoffRow, item: HandoffOutboxItem): void;
 	/** Persist the state of one step and publish the row (`handoffs` + `handoff:<id>`): the progress is live without waiting for the next transition. */
-	setStep(id: string, n: number, state: StepState, detail?: string | null): void;
+	setStep(id: string, n: number, state: StepState, detail?: string | I18nMessage | null): void;
 	/** Publish the row (`handoffs` + `handoff:<id>`). */
 	changed(id: string): void;
 	/** Throw if `peerId` is not an active peer that granted/holds `handoff.receive` (both directions) — shared by wire handlers and flows. */

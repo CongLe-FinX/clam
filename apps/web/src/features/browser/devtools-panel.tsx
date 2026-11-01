@@ -1,7 +1,8 @@
 import type { BrowserConsoleEntry } from "@clam/contracts";
 import { Trash2, X } from "lucide-react";
+import { t } from "@/i18n";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, formatTime } from "@/lib/utils";
 import { Button } from "@/ui/button";
 
 type Pane = "console" | "network";
@@ -16,7 +17,7 @@ const LEVEL_CLASS: Record<BrowserConsoleEntry["level"], string> = {
 const SHOWN = 400;
 
 function time(ts: number): string {
-	return new Date(ts).toLocaleTimeString("en-GB", { hour12: false });
+	return formatTime(ts, { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 }
 
 function Entry({ entry }: { entry: BrowserConsoleEntry }) {
@@ -70,22 +71,22 @@ export function DevtoolsPanel({ entries, onClear, onClose, className }: { entrie
 	);
 
 	return (
-		<section aria-label="Page console" className={cn("flex min-h-0 flex-col bg-surface-1", className)}>
+		<section aria-label={t("Page console")} className={cn("flex min-h-0 flex-col bg-surface-1", className)}>
 			<header className="flex shrink-0 items-center gap-1 border-b px-2 py-1">
 				<div role="tablist" className="flex items-center gap-0.5">
-					{tab("console", "Console", consoleEntries.length, errors > 0)}
-					{tab("network", "Network errors", networkEntries.length, true)}
+					{tab("console", t("Console"), consoleEntries.length, errors > 0)}
+					{tab("network", t("Network errors"), networkEntries.length, true)}
 				</div>
 				<span className="flex-1" />
-				<Button variant="ghost" size="icon-sm" aria-label="Clear console" onClick={onClear} disabled={entries.length === 0}>
+				<Button variant="ghost" size="icon-sm" aria-label={t("Clear console")} onClick={onClear} disabled={entries.length === 0}>
 					<Trash2 />
 				</Button>
-				<Button variant="ghost" size="icon-sm" aria-label="Close console" onClick={onClose}>
+				<Button variant="ghost" size="icon-sm" aria-label={t("Close console")} onClick={onClose}>
 					<X />
 				</Button>
 			</header>
 			{shown.length === 0 ? (
-				<p className="px-3 py-6 text-center text-xs text-subtle">{pane === "console" ? "Nothing logged yet." : "No failed requests."}</p>
+				<p className="px-3 py-6 text-center text-xs text-subtle">{pane === "console" ? t("Nothing logged yet.") : t("No failed requests.")}</p>
 			) : (
 				<ul
 					ref={listRef}

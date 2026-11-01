@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
-import { TERMINAL_CLOSE, TERMINAL_LIMITS, type CreateTerminalBody, type TerminalInfo, type TerminalServerMessage, type TerminalSession } from "@clam/contracts";
+import { TERMINAL_CLOSE, TERMINAL_LIMITS, type CreateTerminalBody, type TerminalInfo, type TerminalServerMessage, type TerminalSession, i18nMsg } from "@clam/contracts";
 import { projects } from "@clam/database";
 import { eq } from "drizzle-orm";
 import type { IPty } from "node-pty";
@@ -170,20 +170,20 @@ export class TerminalService {
 	// ---------------------------------------------------------------------------------------------- lifecycle
 
 	async create(body: CreateTerminalBody & { cols: number; rows: number }): Promise<TerminalSession> {
-		if (this.stopped) throw ApiError.unavailable("The server is shutting down");
+		if (this.stopped) throw ApiError.unavailable(i18nMsg("The server is shutting down"));
 		const info = shellInfo();
 		const shell = body.shell ?? info.defaultShell;
-		if (!info.shells.includes(shell)) throw ApiError.badRequest(`"${shell}" is not an installed shell on this machine`, { shells: info.shells });
+		if (!info.shells.includes(shell)) throw ApiError.badRequest(i18nMsg('"{shell}" is not an installed shell on this machine', { shell }), { shells: info.shells });
 		let cwd = info.home;
 		let projectId: string | null = null;
 		if (body.projectId) {
 			const project = this.ctx.db.select().from(projects).where(eq(projects.id, body.projectId)).get();
 			if (!project) throw ApiError.notFound("Project");
-			if (!dirExists(project.path)) throw new ApiError(409, "project_folder_missing", "That project's folder no longer exists on this machine");
+			if (!dirExists(project.path)) throw new ApiError(409, "project_folder_missing", i18nMsg("That project's folder no longer exists on this machine"));
 			cwd = project.path;
 			projectId = project.id;
 		}
-		if (!dirExists(cwd)) throw new ApiError(409, "cwd_missing", `The folder ${cwd} does not exist`);
+		if (!dirExists(cwd)) throw new ApiError(409, "cwd_missing", i18nMsg("The folder {path} does not exist", { path: cwd }));
 		this.makeRoom();
 
 		ensureSpawnHelperExecutable();
@@ -192,12 +192,12 @@ export class TerminalService {
 			const nodePty = await this.loadPty();
 			pty = nodePty.spawn(shell, ["-l"], { name: "xterm-256color", cols: body.cols, rows: body.rows, cwd, env: shellEnv(shell, cwd), encoding: null });
 		} catch (error) {
-			throw ApiError.unavailable(`Could not start ${shellName(shell)}: ${error instanceof Error ? error.message : String(error)}`);
+			throw ApiError.unavailable(i18nMsg("Could not start {shell}: {error}", { shell: shellName(shell), error: error instanceof Error ? error.message : String(error) }));
 		}
 		// `create` awaited the engine: re-check the limit now that other creations may have landed in between.
 		if (this.stopped || this.terminals.size >= this.maxSessions) {
 			pty.kill("SIGKILL");
-			throw this.stopped ? ApiError.unavailable("The server is shutting down") : new ApiError(409, "terminal_limit", `At most ${this.maxSessions} terminals can be open on this machine`);
+			throw this.stopped ? ApiError.unavailable(i18nMsg("The server is shutting down")) : new ApiError(409, "terminal_limit", i18nMsg("At most {count} terminals can be open on this machine", { count: this.maxSessions }));
 		}
 
 		const terminal = new Terminal(newId("term"), body.title ?? shellName(shell), shell, cwd, projectId, body.cols, body.rows, pty, this.scrollbackBytes);
@@ -216,7 +216,7 @@ export class TerminalService {
 			if (this.terminals.size < this.maxSessions) return;
 			this.remove(old, TERMINAL_CLOSE.removed, "terminal replaced");
 		}
-		if (this.terminals.size >= this.maxSessions) throw new ApiError(409, "terminal_limit", `At most ${this.maxSessions} terminals can be open on this machine`);
+		if (this.terminals.size >= this.maxSessions) throw new ApiError(409, "terminal_limit", i18nMsg("At most {count} terminals can be open on this machine", { count: this.maxSessions }));
 	}
 
 	rename(id: string, title: string): TerminalSession {

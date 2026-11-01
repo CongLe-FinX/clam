@@ -330,16 +330,16 @@ describe("0004_tasks", () => {
 			"deliver_as", "input_files", "constraints", "sender_node_id", "sender_node_name", "sender_agent_id", "sender_agent_name", "sender_session_id",
 			"executor_node_id", "executor_node_name", "executor_agent_id", "executor_agent_name", "executor_session_id", "reason", "result", "cost",
 			"retry_of", "correlation_id", "last_event_seq", "exec_state", "notified_status", "created_at", "updated_at", "started_at", "finished_at",
-			"fenced", "highest_seen_epoch",
+			"fenced", "highest_seen_epoch", "reason_i18n",
 		]);
-		expect(columns(db, "task_events")).toEqual(["task_id", "seq", "type", "summary", "payload", "created_at"]);
+		expect(columns(db, "task_events")).toEqual(["task_id", "seq", "type", "summary", "payload", "created_at", "i18n"]);
 		expect(columns(db, "task_messages")).toEqual([
 			"id", "task_id", "author_kind", "author_node_id", "author_node_name", "author_agent_id", "author_agent_name", "kind", "text", "created_at",
 			"delivery", "injected_session_id", "read_at", "received_at",
 		]);
 		expect(columns(db, "outbox")).toEqual([
 			"id", "peer_id", "task_id", "kind", "ref_id", "method", "path", "body", "idempotency_key", "correlation_id", "attempts", "next_attempt_at",
-			"state", "last_error", "last_status", "created_at", "sent_at",
+			"state", "last_error", "last_status", "created_at", "sent_at", "last_error_i18n",
 		]);
 		expect(columns(db, "idempotency_records")).toEqual(["peer_id", "key", "method", "path", "request_hash", "status", "response_body", "created_at", "expires_at"]);
 		expect(columns(db, "artifacts")).toEqual(["id", "task_id", "name", "media_type", "size", "sha256", "storage_path", "created_at"]);
@@ -426,7 +426,7 @@ describe("0005_shared", () => {
 		]);
 		expect(columns(db, "shared_messages")).toEqual([
 			"id", "shared_session_id", "author_kind", "author_node_id", "author_node_name", "author_agent_id", "author_agent_name", "kind", "to", "text", "epoch",
-			"created_at", "hlc", "origin_seq", "delivery", "injected_session_id", "read_at", "received_at",
+			"created_at", "hlc", "origin_seq", "delivery", "injected_session_id", "read_at", "received_at", "i18n",
 		]);
 		expect(columns(db, "shared_checkpoints")).toEqual([
 			"shared_session_id", "seq", "epoch", "node_id", "branch", "commit", "pushed", "files", "files_path", "snapshot_sha256", "snapshot_size", "snapshot_messages",
@@ -671,13 +671,13 @@ describe("0009_handoff", () => {
 			"id", "kind", "role", "state", "peer_id", "subject_id", "title", "workspace_id", "project_id", "source_node_id", "source_node_name", "source_agent_id",
 			"source_agent_name", "source_session_id", "target_node_id", "target_node_name", "target_agent_id", "target_agent_name", "target_session_id", "from_epoch",
 			"to_epoch", "vcs", "include_transcript", "manifest", "manifest_sha256", "conversation_summary", "environment", "setup_fingerprint", "failure_code",
-			"failure_detail", "failure_step", "expires_at", "deadline_at", "ack_at", "fencing_token", "correlation_id", "meta", "created_at", "updated_at",
+			"failure_detail", "failure_step", "expires_at", "deadline_at", "ack_at", "fencing_token", "correlation_id", "meta", "created_at", "updated_at", "failure_i18n",
 		]);
-		expect(columns(db, "handoff_steps")).toEqual(["handoff_id", "n", "name", "state", "detail", "at"]);
-		expect(columns(db, "handoff_events")).toEqual(["handoff_id", "seq", "at", "node_id", "state", "summary"]);
+		expect(columns(db, "handoff_steps")).toEqual(["handoff_id", "n", "name", "state", "detail", "at", "detail_i18n"]);
+		expect(columns(db, "handoff_events")).toEqual(["handoff_id", "seq", "at", "node_id", "state", "summary", "i18n"]);
 		expect(columns(db, "handoff_setup")).toEqual(["id", "handoff_id", "ord", "command", "cwd", "purpose", "state", "exit_code", "output_tail", "started_at", "finished_at"]);
 		expect(columns(db, "handoff_artifacts")).toEqual(["handoff_id", "artifact_id", "name", "kind", "sha256", "size", "path", "created_at"]);
-		expect(columns(db, "tasks").slice(-2)).toEqual(["fenced", "highest_seen_epoch"]);
+		expect(columns(db, "tasks").slice(-3, -1)).toEqual(["fenced", "highest_seen_epoch"]);
 
 		const raw = db.$client;
 		const insert = (r: ReturnType<typeof handoffRow>) =>

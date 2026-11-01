@@ -1,3 +1,4 @@
+import { plainMsg } from "@clam/contracts";
 import { peers } from "@clam/database";
 import { makeFencingToken } from "@clam/handoff-engine";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -193,7 +194,7 @@ describe("target recovery (docs/handoff-protocol.md §6.2)", () => {
 		const h = await node();
 		spies(h);
 		const row = seed(h, { role: "target", state: "validated" });
-		h.ctx.handoffs.store.appendEvent(row.id, { state: "reclaimed", summary: "The source reclaimed the task", nodeId: row.sourceNodeId });
+		h.ctx.handoffs.store.appendEvent(row.id, { state: "reclaimed", summary: plainMsg("The source reclaimed the task"), nodeId: row.sourceNodeId });
 		await h.ctx.handoffs.recovery.recover();
 		expect(h.ctx.handoffs.store.get(row.id).failureCode).toBe("superseded");
 	});

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { NodeSettings } from "@clam/contracts";
+import { type NodeSettings, i18nMsg, plainMsg } from "@clam/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import workspaceRoutes from "../src/api/workspaces.ts";
 import nodeRoutes from "../src/api/node.ts";
@@ -166,7 +166,7 @@ describe("macOS LaunchAgent", () => {
 	it("writes the plist only (no launchctl), reports the truth, and removes it again", async () => {
 		const { run, calls } = scriptedRun();
 		const autostart = manager("darwin", run);
-		expect(await autostart.status()).toEqual({ enabled: false, detail: "No LaunchAgent installed." });
+		expect(await autostart.status()).toEqual({ enabled: false, detail: "No LaunchAgent installed.", i18n: { key: "No LaunchAgent installed." } });
 
 		const enabled = await autostart.enable();
 		expect(enabled.enabled).toBe(true);
@@ -333,7 +333,7 @@ describe("Windows scheduled task", () => {
 describe("unsupported platforms", () => {
 	it("reports off and refuses to enable", async () => {
 		const autostart = manager("freebsd", scriptedRun().run);
-		expect(await autostart.status()).toEqual({ enabled: false, detail: "Autostart is not supported on freebsd." });
+		expect(await autostart.status()).toEqual({ enabled: false, detail: "Autostart is not supported on freebsd.", i18n: { key: "Autostart is not supported on {platform}.", params: { platform: "freebsd" } } });
 		await expect(autostart.enable()).rejects.toMatchObject({ code: "unsupported" });
 		expect((await autostart.disable()).enabled).toBe(false);
 	});
@@ -380,6 +380,16 @@ describe("PATCH/GET /settings autostart", () => {
 		expect(state.enabled).toBe(false);
 	});
 
+	it("carries the localisation twin of the autostart detail", async () => {
+		const autostart: AutostartManager = {
+			status: async () => ({ enabled: false, detail: "No LaunchAgent installed.", i18n: { key: "No LaunchAgent installed." } }),
+			enable: async () => autostart.status(),
+			disable: async () => autostart.status(),
+		};
+		harness = await createTestHarness({ plugins: [nodeRoutes], ctx: { autostart } });
+		expect((await settings(harness, "GET")).body).toMatchObject({ autoStartDetail: "No LaunchAgent installed.", autoStartI18n: { key: "No LaunchAgent installed." } });
+	});
+
 	it("GET reflects the OS, not the stored value (entry removed outside the app)", async () => {
 		const { autostart, state } = fake();
 		harness = await createTestHarness({ plugins: [nodeRoutes], ctx: { autostart } });
@@ -392,11 +402,11 @@ describe("PATCH/GET /settings autostart", () => {
 
 	it("answers 409 not_built (and applies nothing else) when the server is not built", async () => {
 		const { autostart, state } = fake();
-		state.error = new AutostartError("not_built", "The built server was not found at /x/dist/main.js. Build the server first: pnpm build");
+		state.error = new AutostartError("not_built", i18nMsg("The built server was not found at {entry}. Build the server first: pnpm build", { entry: "/x/dist/main.js" }));
 		harness = await createTestHarness({ plugins: [nodeRoutes], ctx: { autostart } });
 		const res = await settings(harness, "PATCH", { autoStart: true, nodeName: "Renamed", maxConcurrentRuntimes: 2 });
 		expect(res.status).toBe(409);
-		expect(res.body.error).toMatchObject({ code: "autostart_not_built", message: expect.stringContaining("pnpm build") });
+		expect(res.body.error).toMatchObject({ code: "autostart_not_built", message: expect.stringContaining("pnpm build"), i18n: { key: "The built server was not found at {entry}. Build the server first: pnpm build", params: { entry: "/x/dist/main.js" } } });
 		const after = (await settings(harness, "GET")).body;
 		expect(after).toMatchObject({ autoStart: false, maxConcurrentRuntimes: 4 });
 		expect(after.nodeName).not.toBe("Renamed");
@@ -405,13 +415,13 @@ describe("PATCH/GET /settings autostart", () => {
 	it("maps unsupported and failed to typed errors; does not touch the OS when autoStart is not in the patch", async () => {
 		const { autostart, state } = fake();
 		harness = await createTestHarness({ plugins: [nodeRoutes], ctx: { autostart } });
-		state.error = new AutostartError("unsupported", "no systemd");
+		state.error = new AutostartError("unsupported", plainMsg("no systemd"));
 		expect((await settings(harness, "PATCH", { autoStart: true })).status).toBe(409);
-		state.error = new AutostartError("failed", "access denied");
+		state.error = new AutostartError("failed", plainMsg("access denied"));
 		const failed = await settings(harness, "PATCH", { autoStart: true });
 		expect(failed.status).toBe(502);
 		expect(failed.body.error?.code).toBe("autostart_failed");
-		state.error = new AutostartError("failed", "must not be reached");
+		state.error = new AutostartError("failed", plainMsg("must not be reached"));
 		const other = await settings(harness, "PATCH", { nodeName: "Studio" });
 		expect(other.status).toBe(200);
 		expect(other.body.nodeName).toBe("Studio");

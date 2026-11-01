@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && node scripts/check-budget.mjs",
+    "build": "node scripts/check-i18n.mjs && vite build && node scripts/check-budget.mjs",
+    "i18n:check": "node scripts/check-i18n.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json",
     "analyze": "ANALYZE=1 vite build"

@@ -2,7 +2,8 @@ import type { Handoff } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowRightLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
-import { errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { cn, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
@@ -60,48 +61,48 @@ export default function HandoffCenterPage() {
 	return (
 		<PageContainer>
 			<PageHeader
-				title="Handoffs"
-				description="Move an in-flight task to another machine. The target restores the files and context, sets up dependencies, validates, and only then takes over."
+				title={t("Handoffs")}
+				description={t("Move an in-flight task to another machine. The target restores the files and context, sets up dependencies, validates, and only then takes over.")}
 				actions={
-					<Button variant="outline" size="sm" onClick={() => void q.refetch()} loading={q.isFetching && !q.isPending} aria-label="Refresh handoffs">
-						<RefreshCw /> Refresh
+					<Button variant="outline" size="sm" onClick={() => void q.refetch()} loading={q.isFetching && !q.isPending} aria-label={t("Refresh handoffs")}>
+						<RefreshCw /> {t("Refresh")}
 					</Button>
 				}
 			/>
 			<div className="flex flex-wrap items-center gap-2">
 				<Segmented
-					label="Active or history"
+					label={t("Active or history")}
 					value={scope}
 					onChange={setScope}
 					options={[
-						{ id: "active", label: "Active", count: activeCount },
-						{ id: "history", label: "History" },
+						{ id: "active", label: t("Active"), count: activeCount },
+						{ id: "history", label: t("History") },
 					]}
 				/>
 				<Segmented
-					label="Direction"
+					label={t("Direction")}
 					value={role}
 					onChange={setRole}
 					options={[
-						{ id: "all", label: "All" },
-						{ id: "target", label: "Incoming" },
-						{ id: "source", label: "Outgoing" },
+						{ id: "all", label: t("All") },
+						{ id: "target", label: t("Incoming") },
+						{ id: "source", label: t("Outgoing") },
 					]}
 				/>
 				<Segmented
-					label="Kind"
+					label={t("Kind")}
 					value={kind}
 					onChange={setKind}
 					options={[
-						{ id: "all", label: "Any kind" },
-						{ id: "task", label: "Tasks" },
-						{ id: "session", label: "Sessions" },
+						{ id: "all", label: t("Any kind") },
+						{ id: "task", label: t("Tasks") },
+						{ id: "session", label: t("Sessions") },
 					]}
 				/>
 			</div>
 
 			{q.isPending ? (
-				<div className="flex flex-col gap-2" aria-busy aria-label="Loading handoffs">
+				<div className="flex flex-col gap-2" aria-busy aria-label={t("Loading handoffs")}>
 					<Skeleton className="h-20" />
 					<Skeleton className="h-20" />
 					<Skeleton className="h-20" />
@@ -109,22 +110,22 @@ export default function HandoffCenterPage() {
 			) : q.isError ? (
 				<EmptyState
 					icon={ArrowRightLeft}
-					title="Could not load handoffs"
-					description={errorMessage(q.error)}
+					title={t("Could not load handoffs")}
+					description={errorText(q.error)}
 					action={
 						<Button variant="outline" onClick={() => void q.refetch()}>
-							<RefreshCw /> Retry
+							<RefreshCw /> {t("Retry")}
 						</Button>
 					}
 				/>
 			) : rows.length === 0 ? (
 				<EmptyState
 					icon={ArrowRightLeft}
-					title={scope === "active" ? "No handoffs in progress" : "No handoff history"}
+					title={scope === "active" ? t("No handoffs in progress") : t("No handoff history")}
 					description={
 						scope === "active"
-							? "Open a running task and choose “Hand off…” to move it to another machine. Handoffs offered to this machine show up here too."
-							: "Finished, cancelled and failed handoffs appear here."
+							? t("Open a running task and choose “Hand off…” to move it to another machine. Handoffs offered to this machine show up here too.")
+							: t("Finished, cancelled and failed handoffs appear here.")
 					}
 				/>
 			) : (
@@ -158,9 +159,9 @@ function Row({ h, now }: { h: Handoff; now: number }) {
 				<div className="flex flex-wrap items-center gap-1.5">
 					<StateChip state={h.state} />
 					<RoleChip role={h.role} />
-					<Badge variant="outline">{h.kind === "task" ? "Task" : "Session"}</Badge>
+					<Badge variant="outline">{h.kind === "task" ? t("Task") : t("Session")}</Badge>
 					<FailureBadge h={h} />
-					{needsDecision ? <Badge variant="accent">Needs your decision</Badge> : needsApproval ? <Badge variant="accent">Setup needs approval</Badge> : null}
+					{needsDecision ? <Badge variant="accent">{t("Needs your decision")}</Badge> : needsApproval ? <Badge variant="accent">{t("Setup needs approval")}</Badge> : null}
 				</div>
 				<div className="truncate text-sm font-medium">{h.title}</div>
 				<NodeFlow h={h} />

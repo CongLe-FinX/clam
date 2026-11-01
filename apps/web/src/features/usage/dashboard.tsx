@@ -10,14 +10,15 @@ import {
 	type RecordedUsage,
 	type UsageRow,
 } from "@clam/contracts";
+import { t, msg, tr, type Msg } from "@/i18n";
 import { api, errorMessage } from "@/lib/api";
 import { qk } from "@/lib/queries";
-import { cn } from "@/lib/utils";
+import { cn, formatCost, formatDate, formatNumber, formatPercent } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
 import { Skeleton } from "@/ui/skeleton";
 import { BarList, TrendChart, type BarItem } from "./charts";
-import { fmtAgo, fmtCost, fmtInt, fmtPercent, fmtTokens, fmtDate, useNow } from "./format";
+import { fmtAgo, fmtTokens, useNow } from "./format";
 import { useMeshUsage, useQuotaReport, useRecordedUsage, useRefreshUsage } from "./hooks";
 import { QuotaCards } from "./quota";
 import { SourceBadge } from "./source-badge";
@@ -54,7 +55,7 @@ function ErrorBox({ error, onRetry }: { error: unknown; onRetry: () => void }) {
 		<div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
 			<span className="min-w-0 break-words">{errorMessage(error)}</span>
 			<Button size="sm" variant="outline" onClick={onRetry}>
-				Retry
+				{t("Retry")}
 			</Button>
 		</div>
 	);
@@ -63,10 +64,10 @@ function ErrorBox({ error, onRetry }: { error: unknown; onRetry: () => void }) {
 function Kpi({ label, value, sub, source }: { label: string; value: string; sub?: string; source: DataSource }) {
 	return (
 		<div className="min-w-0 rounded-lg border border-border bg-surface-1 p-3.5">
-			<div className="truncate text-xs text-muted-foreground">{label}</div>
+			<div className="truncate text-xs text-muted-foreground" title={label}>{label}</div>
 			<div className="mt-1 truncate font-mono text-xl font-semibold tabular-nums tracking-tight">{value}</div>
 			<div className="mt-1 flex items-center justify-between gap-2">
-				<span className="truncate text-[11px] text-muted-foreground">{sub ?? "\u00a0"}</span>
+				<span className="truncate text-[11px] text-muted-foreground" title={sub}>{sub ?? "\u00a0"}</span>
 				<span
 					className={cn(
 						"size-1.5 shrink-0 rounded-full",
@@ -83,18 +84,27 @@ function Kpis({ data }: { data: RecordedUsage }) {
 	const o = data.overall;
 	return (
 		<div className="space-y-2">
-		<p className="text-xs text-muted-foreground">Last 24 hours — the window OMP reports. Longer history is shown in the daily trend.</p>
+		<p className="text-xs text-muted-foreground">{t("Last 24 hours — the window OMP reports. Longer history is shown in the daily trend.")}</p>
 		<div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-			<Kpi label="Input tokens" value={fmtTokens(o.tokens.input)} sub={fmtInt(o.tokens.input)} source="omp-recorded" />
-			<Kpi label="Output tokens" value={fmtTokens(o.tokens.output)} sub={fmtInt(o.tokens.output)} source="omp-recorded" />
+			<Kpi label={t("Input tokens")} value={fmtTokens(o.tokens.input)} sub={formatNumber(o.tokens.input)} source="omp-recorded" />
+			<Kpi label={t("Output tokens")} value={fmtTokens(o.tokens.output)} sub={formatNumber(o.tokens.output)} source="omp-recorded" />
 			<Kpi
-				label="Cached tokens"
+				label={t("Cached tokens")}
 				value={fmtTokens(o.tokens.cacheRead)}
-				sub={o.cacheRate != null ? `${fmtPercent(o.cacheRate)} cache hit rate` : undefined}
+				sub={o.cacheRate != null ? t("{rate} cache hit rate", { rate: formatPercent(o.cacheRate) }) : undefined}
 				source="omp-recorded"
 			/>
-			<Kpi label="Total tokens" value={fmtTokens(o.tokens.total)} sub={`${fmtInt(o.requests)} requests${o.failedRequests ? ` · ${o.failedRequests} failed` : ""}`} source="omp-recorded" />
-			<Kpi label="Cost" value={fmtCost(o.cost)} sub="OMP price table · last 24 h" source="omp-recorded" />
+			<Kpi
+				label={t("Total tokens")}
+				value={fmtTokens(o.tokens.total)}
+				sub={
+					o.failedRequests
+						? t("{count, plural, one {# request} other {# requests}} · {failed} failed", { count: o.requests, failed: o.failedRequests })
+						: t("{count, plural, one {# request} other {# requests}}", { count: o.requests })
+				}
+				source="omp-recorded"
+			/>
+			<Kpi label={t("Cost")} value={formatCost(o.cost)} sub={t("OMP price table · last 24 h")} source="omp-recorded" />
 		</div>
 		</div>
 	);
@@ -121,14 +131,14 @@ function sortValue(r: UsageRow, k: SortKey): number | string {
 	}
 }
 
-const COLUMNS: { key: SortKey; label: string; align?: "right" }[] = [
-	{ key: "label", label: "Model" },
-	{ key: "requests", label: "Requests", align: "right" },
-	{ key: "input", label: "Input", align: "right" },
-	{ key: "output", label: "Output", align: "right" },
-	{ key: "cached", label: "Cached", align: "right" },
-	{ key: "total", label: "Total", align: "right" },
-	{ key: "cost", label: "Cost", align: "right" },
+const COLUMNS: { key: SortKey; label: Msg; align?: "right" }[] = [
+	{ key: "label", label: msg("Model") },
+	{ key: "requests", label: msg("Requests"), align: "right" },
+	{ key: "input", label: msg("Input"), align: "right" },
+	{ key: "output", label: msg("Output"), align: "right" },
+	{ key: "cached", label: msg("Cached"), align: "right" },
+	{ key: "total", label: msg("Total"), align: "right" },
+	{ key: "cost", label: msg("Cost"), align: "right" },
 ];
 
 function ModelTable({ rows }: { rows: UsageRow[] }) {
@@ -142,7 +152,7 @@ function ModelTable({ rows }: { rows: UsageRow[] }) {
 			}),
 		[rows, sort],
 	);
-	if (rows.length === 0) return <div className="py-6 text-center text-sm text-muted-foreground">No model usage recorded yet.</div>;
+	if (rows.length === 0) return <div className="py-6 text-center text-sm text-muted-foreground">{t("No model usage recorded yet.")}</div>;
 	return (
 		<>
 			{/* Desktop table */}
@@ -157,7 +167,7 @@ function ModelTable({ rows }: { rows: UsageRow[] }) {
 										className={cn("inline-flex items-center gap-1 rounded hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent", c.align === "right" && "flex-row-reverse")}
 										onClick={() => setSort((s) => (s.key === c.key ? { key: c.key, dir: (s.dir * -1) as 1 | -1 } : { key: c.key, dir: c.key === "label" ? 1 : -1 }))}
 									>
-										{c.label}
+										{tr(c.label)}
 										{sort.key === c.key && (sort.dir === 1 ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}
 									</button>
 								</th>
@@ -171,12 +181,12 @@ function ModelTable({ rows }: { rows: UsageRow[] }) {
 									<div className="truncate font-mono text-xs" title={r.key}>{r.model ?? r.key}</div>
 									{r.provider && <div className="text-[11px] text-muted-foreground">{r.provider}</div>}
 								</td>
-								<td className="px-2 py-2 text-right font-mono text-xs tabular-nums">{fmtInt(r.requests)}</td>
+								<td className="px-2 py-2 text-right font-mono text-xs tabular-nums">{formatNumber(r.requests)}</td>
 								<td className="px-2 py-2 text-right font-mono text-xs tabular-nums">{fmtTokens(r.tokens.input)}</td>
 								<td className="px-2 py-2 text-right font-mono text-xs tabular-nums">{fmtTokens(r.tokens.output)}</td>
 								<td className="px-2 py-2 text-right font-mono text-xs tabular-nums">{fmtTokens(r.tokens.cacheRead)}</td>
 								<td className="px-2 py-2 text-right font-mono text-xs tabular-nums">{fmtTokens(r.tokens.total)}</td>
-								<td className="px-2 py-2 text-right font-mono text-xs tabular-nums">{fmtCost(r.cost)}</td>
+								<td className="px-2 py-2 text-right font-mono text-xs tabular-nums">{formatCost(r.cost)}</td>
 							</tr>
 						))}
 					</tbody>
@@ -191,17 +201,17 @@ function ModelTable({ rows }: { rows: UsageRow[] }) {
 								<div className="truncate font-mono text-xs">{r.model ?? r.key}</div>
 								{r.provider && <div className="text-[11px] text-muted-foreground">{r.provider}</div>}
 							</div>
-							<div className="shrink-0 font-mono text-sm tabular-nums">{fmtCost(r.cost)}</div>
+							<div className="shrink-0 font-mono text-sm tabular-nums">{formatCost(r.cost)}</div>
 						</div>
 						<dl className="mt-2 grid grid-cols-4 gap-2 text-[11px]">
 							{[
-								["Req", fmtInt(r.requests)],
-								["In", fmtTokens(r.tokens.input)],
-								["Out", fmtTokens(r.tokens.output)],
-								["Cached", fmtTokens(r.tokens.cacheRead)],
-							].map(([k, v]) => (
-								<div key={k}>
-									<dt className="text-muted-foreground">{k}</dt>
+								[msg("Req"), formatNumber(r.requests)] as const,
+								[msg("In"), fmtTokens(r.tokens.input)] as const,
+								[msg("Out"), fmtTokens(r.tokens.output)] as const,
+								[msg("Cached"), fmtTokens(r.tokens.cacheRead)] as const,
+							].map(([k, v], i) => (
+								<div key={i}>
+									<dt className="text-muted-foreground">{tr(k)}</dt>
 									<dd className="font-mono tabular-nums">{v}</dd>
 								</div>
 							))}
@@ -233,7 +243,7 @@ function costByProject(byFolder: UsageRow[], projects: Project[]): BarItem[] {
 		const id = hit ? hit.p.id : f.key;
 		const cur = acc.get(id) ?? {
 			label: hit ? hit.p.name : f.key,
-			detail: hit ? hit.p.path : "not matched to a project",
+			detail: hit ? hit.p.path : t("not matched to a project"),
 			cost: 0,
 			tokens: 0,
 			requests: 0,
@@ -252,8 +262,8 @@ function costByProject(byFolder: UsageRow[], projects: Project[]): BarItem[] {
 			label: v.label,
 			sublabel: v.detail,
 			value: v.cost,
-			display: fmtCost(v.cost),
-			detail: `${v.matched ? "≈ " : ""}${v.detail} · ${fmtTokens(v.tokens)} tokens · ${fmtInt(v.requests)} requests`,
+			display: formatCost(v.cost),
+			detail: t("{detail} · {tokens} tokens · {count, plural, one {# request} other {# requests}}", { detail: `${v.matched ? "≈ " : ""}${v.detail}`, tokens: fmtTokens(v.tokens), count: v.requests }),
 		}));
 }
 
@@ -265,8 +275,8 @@ function meshItems(rows: MeshUsageRow[]): BarItem[] {
 			key: r.key,
 			label: r.label,
 			value: r.cost,
-			display: fmtCost(r.cost),
-			detail: `${fmtTokens(r.tokens.total)} tokens · ${r.sessions} session${r.sessions === 1 ? "" : "s"}`,
+			display: formatCost(r.cost),
+			detail: t("{tokens} tokens · {count, plural, one {# session} other {# sessions}}", { tokens: fmtTokens(r.tokens.total), count: r.sessions }),
 		}));
 }
 
@@ -278,21 +288,21 @@ function ProjectsAndAgents({ recorded, mesh, projects }: { recorded: RecordedUsa
 	const proj = useMemo(() => costByProject(recorded.byFolder, projects), [recorded.byFolder, projects]);
 	return (
 		<div className="grid gap-3 lg:grid-cols-2">
-			<Section title="Cost by project" description="OMP working folders (last 24 h) matched to CL Agent Mesh projects." source="omp-recorded">
-				<BarList items={proj} empty="No folder-level usage recorded." />
+			<Section title={t("Cost by project")} description={t("OMP working folders (last 24 h) matched to CL Agent Mesh projects.")} source="omp-recorded">
+				<BarList items={proj} empty={t("No folder-level usage recorded.")} />
 				{mesh && mesh.byProject.length > 0 && (
 					<div className="mt-5 border-t border-border pt-4">
 						<div className="mb-3 flex items-center justify-between gap-2">
-							<span className="text-xs font-medium text-muted-foreground">Mesh sessions</span>
+							<span className="text-xs font-medium text-muted-foreground">{t("Mesh sessions")}</span>
 							<SourceBadge source={meshSource(mesh.byProject)} />
 						</div>
 						<BarList items={meshItems(mesh.byProject)} />
 					</div>
 				)}
 			</Section>
-			<Section title="Cost by agent" description="Roll-up of CL Agent Mesh agent sessions on this machine, from per-session OMP statistics." source={mesh ? meshSource(mesh.byAgent) : "clam-estimated"}>
+			<Section title={t("Cost by agent")} description={t("Roll-up of CL Agent Mesh agent sessions on this machine, from per-session OMP statistics.")} source={mesh ? meshSource(mesh.byAgent) : "clam-estimated"}>
 				{mesh ? (
-					<BarList items={meshItems(mesh.byAgent)} empty="No agent sessions have recorded usage yet." />
+					<BarList items={meshItems(mesh.byAgent)} empty={t("No agent sessions have recorded usage yet.")} />
 				) : (
 					<Skeleton className="h-24 w-full" />
 				)}
@@ -309,16 +319,16 @@ function RefreshBar({ recordedAt, stale, refreshing, onRefresh }: { recordedAt?:
 				{stale || refreshing ? (
 					<span className="inline-flex items-center gap-1.5 text-warning">
 						<span className="size-1.5 animate-pulse rounded-full bg-warning" />
-						Refreshing…
+						{t("Refreshing…")}
 					</span>
 				) : (
-					<span>Up to date</span>
+					<span>{t("Up to date")}</span>
 				)}
-				{recordedAt && <span>· OMP stats updated {fmtAgo(recordedAt, now)}</span>}
+				{recordedAt && <span>{t("· OMP stats updated {time}", { time: fmtAgo(recordedAt, now) })}</span>}
 			</div>
 			<Button size="sm" variant="outline" onClick={onRefresh} disabled={refreshing}>
 				<RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-				Refresh
+				{t("Refresh")}
 			</Button>
 		</div>
 	);
@@ -343,8 +353,8 @@ export function UsageDashboard() {
 					key: p.key,
 					label: p.key,
 					value: p.tokens.total,
-					display: `${fmtTokens(p.tokens.total)} · ${fmtCost(p.cost)}`,
-					detail: `${fmtTokens(p.tokens.input)} in · ${fmtTokens(p.tokens.output)} out · ${fmtTokens(p.tokens.cacheRead)} cached`,
+					display: `${fmtTokens(p.tokens.total)} · ${formatCost(p.cost)}`,
+					detail: t("{input} in · {output} out · {cached} cached", { input: fmtTokens(p.tokens.input), output: fmtTokens(p.tokens.output), cached: fmtTokens(p.tokens.cacheRead) }),
 				})),
 		[r?.byProvider],
 	);
@@ -372,14 +382,14 @@ export function UsageDashboard() {
 					<>
 						<Kpis data={r} />
 						<div className="grid gap-3 xl:grid-cols-[2fr_1fr]">
-							<Section title="Daily trend" description={r.coverageStart != null ? `Total tokens per day (bars) and cost (line). History since ${fmtDate(r.coverageStart)} — OMP itself only reports the last 24 h, so CL Agent Mesh accumulates daily buckets locally.` : "Total tokens per day (bars) and cost (line)."} source="omp-recorded">
+							<Section title={t("Daily trend")} description={r.coverageStart != null ? t("Total tokens per day (bars) and cost (line). History since {date} — OMP itself only reports the last 24 h, so CL Agent Mesh accumulates daily buckets locally.", { date: formatDate(r.coverageStart) }) : t("Total tokens per day (bars) and cost (line).")} source="omp-recorded">
 								<TrendChart points={r.daily} />
 							</Section>
-							<Section title="By provider" description="Tokens and cost per provider, last 24 h." source="omp-recorded">
-								<BarList items={byProvider} empty="No provider usage recorded yet." />
+							<Section title={t("By provider")} description={t("Tokens and cost per provider, last 24 h.")} source="omp-recorded">
+								<BarList items={byProvider} empty={t("No provider usage recorded yet.")} />
 							</Section>
 						</div>
-						<Section title="By model" description="Last 24 h. Click a column to sort." source="omp-recorded">
+						<Section title={t("By model")} description={t("Last 24 h. Click a column to sort.")} source="omp-recorded">
 							<ModelTable rows={r.byModel} />
 						</Section>
 						<ProjectsAndAgents recorded={r} mesh={mesh.data} projects={projects.data ?? []} />
@@ -390,8 +400,8 @@ export function UsageDashboard() {
 			<div className="pt-2">
 				<div className="mb-3 flex flex-wrap items-center justify-between gap-2">
 					<div>
-						<h2 className="text-sm font-semibold">Provider quota</h2>
-						<p className="text-xs text-muted-foreground">Limits and remaining allowance as reported by each provider. Never estimated.</p>
+						<h2 className="text-sm font-semibold">{t("Provider quota")}</h2>
+						<p className="text-xs text-muted-foreground">{t("Limits and remaining allowance as reported by each provider. Never estimated.")}</p>
 					</div>
 					<SourceBadge source="provider-reported" />
 				</div>

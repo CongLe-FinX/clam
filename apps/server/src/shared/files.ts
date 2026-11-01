@@ -1,6 +1,6 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { BundleManifest, type FilesApplyResult, type FilesPreview } from "@clam/contracts";
+import { BundleManifest, type FilesApplyResult, type FilesPreview, i18nMsg } from "@clam/contracts";
 import { projects, type SharedRescueFiles } from "@clam/database";
 import { applyBundle, createBundle, previewBundle, readBundleManifest } from "@clam/workspace-files";
 import { eq } from "drizzle-orm";
@@ -43,7 +43,7 @@ export class SharedFilesService implements FilesModeApi {
 
 	private project(shared: SharedRow): { id: string; name: string; path: string } {
 		const row = shared.localProjectId ? this.hub.ctx.db.select().from(projects).where(eq(projects.id, shared.localProjectId)).get() : undefined;
-		if (!row) throw new ApiError(409, "no_local_clone", "No local folder is linked to this shared session on this node");
+		if (!row) throw new ApiError(409, "no_local_clone", i18nMsg("No local folder is linked to this shared session on this node"));
 		return row;
 	}
 
@@ -108,14 +108,19 @@ export class SharedFilesService implements FilesModeApi {
 				await this.writeSynced(sharedId, manifest);
 				this.store.patchMeta(sharedId, { appliedFilesSeq: seq });
 				const kept = result.skipped.filter((s) => s.reason === "conflict").map((s) => s.path);
+				const keptList = kept.slice(0, 5).join(", ");
+				const node = this.hub.nodeName();
+				const count = result.written.length;
 				this.hub.discussion.note(
 					sharedId,
-					`${this.hub.nodeName()} received the working folder from ${shared.driverNodeName}: ${result.written.length} file(s) placed in ${project.name}${kept.length > 0 ? `; ${kept.length} existing file(s) with other content were kept (${kept.slice(0, 5).join(", ")})` : ""}.`,
+					kept.length > 0
+						? i18nMsg("{node} received the working folder from {driver}: {count} file(s) placed in {project}; {kept} existing file(s) with other content were kept ({paths}).", { node, driver: shared.driverNodeName, count, project: project.name, kept: kept.length, paths: keptList })
+						: i18nMsg("{node} received the working folder from {driver}: {count} file(s) placed in {project}.", { node, driver: shared.driverNodeName, count, project: project.name }),
 					{ local: true },
 				);
 			} catch (error) {
 				this.hub.log.warn({ err: errorText(error), sharedId, seq }, "placing the first folder bundle failed");
-				this.hub.discussion.note(sharedId, `The working folder from ${shared.driverNodeName} could not be placed in ${project.name}: ${errorText(error, 200)}`, { local: true });
+				this.hub.discussion.note(sharedId, i18nMsg("The working folder from {driver} could not be placed in {project}: {error}", { driver: shared.driverNodeName, project: project.name, error: errorText(error, 200) }), { local: true });
 			}
 		});
 	}
@@ -123,7 +128,7 @@ export class SharedFilesService implements FilesModeApi {
 	// ------------------------------------------------------------------ takeover: restore the folder from a checkpoint
 
 	async restore(shared: SharedRow, held: CheckpointRow, options: { force: boolean; reason: "takeover" | "transfer" }): ReturnType<FilesModeApi["restore"]> {
-		if (!held.filesPath || !held.files) throw new ApiError(409, "no_files", "No folder bundle has been received for this checkpoint; wait for the driver's next checkpoint.");
+		if (!held.filesPath || !held.files) throw new ApiError(409, "no_files", i18nMsg("No folder bundle has been received for this checkpoint; wait for the driver's next checkpoint."));
 		const project = this.project(shared);
 		const archive = this.files.absolute(held.filesPath);
 		const base = await this.readSynced(shared.id);
@@ -133,7 +138,7 @@ export class SharedFilesService implements FilesModeApi {
 			throw new ApiError(
 				409,
 				"files_conflict",
-				`${conflicts.length} file(s) in ${project.name} were changed here since the last checkpoint and differ from it (${conflicts.slice(0, 5).join(", ")}${conflicts.length > 5 ? ", …" : ""}). Continuing replaces them with the checkpoint's version; the local versions are saved as a rescue bundle first. Confirm to continue.`,
+				i18nMsg("{count} file(s) in {project} were changed here since the last checkpoint and differ from it ({paths}). Continuing replaces them with the checkpoint's version; the local versions are saved as a rescue bundle first. Confirm to continue.", { count: conflicts.length, project: project.name, paths: `${conflicts.slice(0, 5).join(", ")}${conflicts.length > 5 ? ", …" : ""}` }),
 				{ paths: conflicts },
 			);
 		}
@@ -181,20 +186,20 @@ export class SharedFilesService implements FilesModeApi {
 			if (saved) {
 				this.hub.discussion.note(
 					shared.id,
-					`${this.hub.nodeName()} had ${saved.fileCount} file(s) that are not in the shared folder (new or changed after the last checkpoint); they were saved as a rescue bundle: ${saved.paths.slice(0, 8).join(", ")}${saved.fileCount > 8 ? ", …" : ""}.`,
+					i18nMsg("{node} had {count} file(s) that are not in the shared folder (new or changed after the last checkpoint); they were saved as a rescue bundle: {paths}.", { node: this.hub.nodeName(), count: saved.fileCount, paths: `${saved.paths.slice(0, 8).join(", ")}${saved.fileCount > 8 ? ", …" : ""}` }),
 				);
 			}
 			return saved;
 		} catch (error) {
 			this.hub.log.warn({ err: errorText(error), sharedId: shared.id }, "rescuing the files of the former driver failed; nothing was discarded");
-			this.hub.discussion.note(shared.id, `Saving the former driver's files as a rescue bundle failed: ${errorText(error, 200)}. The folder was not touched.`);
+			this.hub.discussion.note(shared.id, i18nMsg("Saving the former driver's files as a rescue bundle failed: {error}. The folder was not touched.", { error: errorText(error, 200) }));
 			return null;
 		}
 	}
 
 	private rescueArchive(sharedId: string): string {
 		const shared = this.store.get(sharedId);
-		if (!shared.rescueFiles) throw new ApiError(409, "no_rescue_files", "This node has no rescue bundle for the shared session");
+		if (!shared.rescueFiles) throw new ApiError(409, "no_rescue_files", i18nMsg("This node has no rescue bundle for the shared session"));
 		return this.files.absolute(shared.rescueFiles.path);
 	}
 

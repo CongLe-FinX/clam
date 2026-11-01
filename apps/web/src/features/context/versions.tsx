@@ -2,9 +2,10 @@ import type { Context, ContextAuthor, ContextVersion } from "@clam/contracts";
 import { History, RefreshCw } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 import { LazyMarkdown } from "@/components/lazy-markdown";
-import { errorMessage } from "@/lib/api";
+import { errorText } from "@/lib/api";
+import { msg, T, t, tr, type Msg } from "@/i18n";
 import { type DiffOp, diffStats, lineDiff } from "@/lib/line-diff";
-import { cn, relativeTime } from "@/lib/utils";
+import { cn, formatNumber, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
@@ -17,7 +18,7 @@ export function authorLabel(a: ContextAuthor): string {
 	if (a.kind === "system") return `system@${a.nodeName}`;
 	return a.nodeName;
 }
-export const authorKindLabel = (a: ContextAuthor): string => (a.kind === "agent" ? "agent" : a.kind === "system" ? "system" : "human");
+export const authorKindLabel = (a: ContextAuthor): string => (a.kind === "agent" ? t("agent") : a.kind === "system" ? t("system") : t("human"));
 
 export const shortSha = (sha: string): string => sha.slice(0, 7);
 
@@ -63,18 +64,18 @@ export function DiffStat({ ops, className }: { ops: DiffOp[]; className?: string
 }
 
 /** Unified line diff with old/new gutters. Never uses innerHTML. */
-export const DiffView = memo(function DiffView({ ops, context = 3, className, label = "Changes" }: { ops: DiffOp[]; context?: number; className?: string; label?: string }) {
+export const DiffView = memo(function DiffView({ ops, context = 3, className, label }: { ops: DiffOp[]; context?: number; className?: string; label?: string }) {
 	const rows = useMemo(() => buildRows(ops, context), [ops, context]);
 	const changed = ops.some((o) => o.kind !== "same");
 	if (!changed) {
-		return <p className={cn("rounded-lg bg-surface-2 px-3 py-3 text-xs text-muted-foreground", className)}>No differences.</p>;
+		return <p className={cn("rounded-lg bg-surface-2 px-3 py-3 text-xs text-muted-foreground", className)}>{t("No differences.")}</p>;
 	}
 	return (
-		<div role="group" aria-label={label} className={cn("scrollbar-thin max-h-96 overflow-y-auto rounded-lg bg-surface-1 font-mono text-xs leading-5 shadow-[inset_0_0_0_1px_var(--border)]", className)}>
+		<div role="group" aria-label={label ?? t("Changes")} className={cn("scrollbar-thin max-h-96 overflow-y-auto rounded-lg bg-surface-1 font-mono text-xs leading-5 shadow-[inset_0_0_0_1px_var(--border)]", className)}>
 			{rows.map((r, i) =>
 				r.kind === "skip" ? (
 					<div key={`s${i}`} className="bg-surface-2 px-3 py-0.5 text-center text-2xs text-subtle">
-						⋯ {r.count} unchanged {r.count === 1 ? "line" : "lines"} ⋯
+						{t("⋯ {count, plural, one {# unchanged line} other {# unchanged lines}} ⋯", { count: r.count })}
 					</div>
 				) : (
 					<div
@@ -91,7 +92,7 @@ export const DiffView = memo(function DiffView({ ops, context = 3, className, la
 							{r.kind === "add" ? "+" : r.kind === "del" ? "−" : ""}
 						</span>
 						<span className="whitespace-pre-wrap break-words pr-2">
-							{r.kind === "add" || r.kind === "del" ? <span className="sr-only">{r.kind === "add" ? "Added: " : "Removed: "}</span> : null}
+							{r.kind === "add" || r.kind === "del" ? <span className="sr-only">{r.kind === "add" ? t("Added:") : t("Removed:")} </span> : null}
 							{r.text || " "}
 						</span>
 					</div>
@@ -102,10 +103,10 @@ export const DiffView = memo(function DiffView({ ops, context = 3, className, la
 });
 
 type Mode = "prev" | "current" | "text";
-const MODES: Array<{ id: Mode; label: string }> = [
-	{ id: "prev", label: "Vs previous" },
-	{ id: "current", label: "Vs current" },
-	{ id: "text", label: "Full text" },
+const MODES: Array<{ id: Mode; label: Msg }> = [
+	{ id: "prev", label: msg("Vs previous") },
+	{ id: "current", label: msg("Vs current") },
+	{ id: "text", label: msg("Full text") },
 ];
 
 function VersionDetail({ selected, previous, current }: { selected: ContextVersion; previous: ContextVersion | null; current: Pick<Context, "version" | "title" | "body"> }) {
@@ -124,12 +125,12 @@ function VersionDetail({ selected, previous, current }: { selected: ContextVersi
 				<h3 className="min-w-0 truncate text-sm font-medium">
 					v{selected.version} · {selected.title}
 				</h3>
-				{isCurrent ? <Badge variant="success">Current</Badge> : null}
+				{isCurrent ? <Badge variant="success">{t("Current")}</Badge> : null}
 				<span className="text-xs text-subtle">
 					{authorLabel(selected.author)} · {relativeTime(selected.createdAt)} · <span className="font-mono">{shortSha(selected.sha256)}</span>
 				</span>
 			</div>
-			<div role="group" aria-label="Compare" className="flex w-full rounded-lg bg-surface-2 p-0.5 sm:w-fit">
+			<div role="group" aria-label={t("Compare")} className="flex w-full rounded-lg bg-surface-2 p-0.5 sm:w-fit">
 				{MODES.map((m) => (
 					<button
 						key={m.id}
@@ -141,26 +142,26 @@ function VersionDetail({ selected, previous, current }: { selected: ContextVersi
 							mode === m.id ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:text-foreground",
 						)}
 					>
-						{m.label}
+						{tr(m.label)}
 					</button>
 				))}
 			</div>
 			{mode === "text" ? (
 				<div className="min-w-0 rounded-lg bg-surface-1 p-4 shadow-[inset_0_0_0_1px_var(--border)]">
-					{selected.body.trim() ? <LazyMarkdown text={selected.body} /> : <p className="text-xs text-subtle">Empty body.</p>}
+					{selected.body.trim() ? <LazyMarkdown text={selected.body} /> : <p className="text-xs text-subtle">{t("Empty body.")}</p>}
 				</div>
 			) : (
 				<>
 					{titleFrom !== undefined && titleTo !== undefined && titleFrom !== titleTo ? (
 						<p className="text-xs text-muted-foreground">
-							Title: <span className="text-danger line-through">{titleFrom}</span> → <span className="text-success">{titleTo}</span>
+							<T text="Title: <del>{from}</del> → <ins>{to}</ins>" params={{ from: titleFrom, to: titleTo }} tags={{ del: <span className="text-danger line-through" />, ins: <span className="text-success" /> }} />
 						</p>
 					) : null}
 					<div className="flex items-center gap-2 text-xs text-muted-foreground">
 						<DiffStat ops={ops} />
-						<span>{mode === "prev" ? (previous ? `v${previous.version} → v${selected.version}` : "Initial version") : `v${selected.version} → current (v${current.version})`}</span>
+						<span>{mode === "prev" ? (previous ? `v${previous.version} → v${selected.version}` : t("Initial version")) : t("v{from} → current (v{to})", { from: selected.version, to: current.version })}</span>
 					</div>
-					<DiffView ops={ops} label={mode === "prev" ? "Changes vs previous version" : "Changes vs current version"} />
+					<DiffView ops={ops} label={mode === "prev" ? t("Changes vs previous version") : t("Changes vs current version")} />
 				</>
 			)}
 		</div>
@@ -191,21 +192,21 @@ export function VersionsPanel({ context }: { context: Pick<Context, "id" | "vers
 		return (
 			<EmptyState
 				icon={History}
-				title="Could not load the history"
-				description={errorMessage(q.error)}
+				title={t("Could not load the history")}
+				description={errorText(q.error)}
 				action={
 					<Button size="sm" variant="outline" onClick={() => void q.refetch()}>
-						<RefreshCw /> Retry
+						<RefreshCw /> {t("Retry")}
 					</Button>
 				}
 			/>
 		);
 	}
-	if (!selected) return <EmptyState icon={History} title="No versions yet" description="Every save creates an immutable version you can compare here." />;
+	if (!selected) return <EmptyState icon={History} title={t("No versions yet")} description={t("Every save creates an immutable version you can compare here.")} />;
 
 	return (
 		<div className="grid min-w-0 gap-4 md:grid-cols-[14rem_minmax(0,1fr)]">
-			<ul aria-label="Versions" className="scrollbar-thin flex max-h-56 min-w-0 flex-col gap-0.5 overflow-y-auto md:max-h-[28rem]">
+			<ul aria-label={t("Versions")} className="scrollbar-thin flex max-h-56 min-w-0 flex-col gap-0.5 overflow-y-auto md:max-h-[28rem]">
 				{versions.map((v) => (
 					<li key={v.version}>
 						<button
@@ -219,7 +220,7 @@ export function VersionsPanel({ context }: { context: Pick<Context, "id" | "vers
 						>
 							<span className="flex items-center gap-2 text-[13px] font-medium">
 								v{v.version}
-								{v.version === context.version ? <Badge variant="success">Current</Badge> : null}
+								{v.version === context.version ? <Badge variant="success">{t("Current")}</Badge> : null}
 								<span className="ml-auto font-mono text-2xs font-normal text-subtle">{shortSha(v.sha256)}</span>
 							</span>
 							<span className="truncate text-2xs text-subtle">

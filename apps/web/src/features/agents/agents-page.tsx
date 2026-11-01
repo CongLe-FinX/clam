@@ -6,6 +6,7 @@ import { type KeyboardEvent, useRef, useState } from "react";
 import { toast } from "sonner";
 import { api, errorMessage } from "@/lib/api";
 import { qk, useAgents, useWorkspace } from "@/lib/queries";
+import { t, msg, tr } from "@/i18n";
 import { cn, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
@@ -16,6 +17,8 @@ import { Input, fieldClass } from "@/ui/input";
 import { PageContainer, PageHeader } from "@/ui/page";
 import { Skeleton } from "@/ui/skeleton";
 import { StatusDot } from "@/ui/status-dot";
+
+const STATUS_LABEL = { online: msg("Online"), busy: msg("Busy"), offline: msg("Offline") } as const;
 
 const MAX_CAPS = 32;
 const MAX_CAP_LEN = 40;
@@ -30,8 +33,8 @@ export default function AgentsPage() {
 		<PageContainer>
 			{workspaceId ? <WorkspaceCrumb workspaceId={workspaceId} /> : null}
 			<PageHeader
-				title="Agents"
-				description="Agents are the identities OMP sessions run under on this machine. Name them and describe what they're good at; this is only a label and never changes how a session behaves."
+				title={t("Agents")}
+				description={t("Agents are the identities OMP sessions run under on this machine. Name them and describe what they're good at; this is only a label and never changes how a session behaves.")}
 			/>
 			{agents.isPending ? (
 				<div aria-busy className="grid gap-3 sm:grid-cols-2">
@@ -42,16 +45,16 @@ export default function AgentsPage() {
 			) : agents.error ? (
 				<EmptyState
 					icon={Bot}
-					title="Could not load agents"
+					title={t("Could not load agents")}
 					description={errorMessage(agents.error)}
 					action={
 						<Button size="sm" variant="outline" onClick={() => void agents.refetch()}>
-							<RefreshCw /> Retry
+							<RefreshCw /> {t("Retry")}
 						</Button>
 					}
 				/>
 			) : agents.data.length === 0 ? (
-				<EmptyState icon={Bot} title="No agents yet" description="An agent identity is created when you start your first session." className="rounded-xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border)]" />
+				<EmptyState icon={Bot} title={t("No agents yet")} description={t("An agent identity is created when you start your first session.")} className="rounded-xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border)]" />
 			) : (
 				<ul className="grid gap-3 sm:grid-cols-2">
 					{agents.data.map((a) => (
@@ -67,14 +70,14 @@ export default function AgentsPage() {
 function WorkspaceCrumb({ workspaceId }: { workspaceId: string }) {
 	const ws = useWorkspace(workspaceId);
 	return (
-		<nav aria-label="Breadcrumb" className="-mb-2">
+		<nav aria-label={t("Breadcrumb")} className="-mb-2">
 			<Link
 				to="/workspaces/$workspaceId"
 				params={{ workspaceId }}
 				className="inline-flex items-center gap-1 rounded-md py-1 text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:py-3"
 			>
 				<ChevronLeft className="size-3.5" />
-				{ws.data ? ws.data.name : ws.isPending ? <Skeleton className="h-3 w-20" /> : "Workspace"}
+				{ws.data ? ws.data.name : ws.isPending ? <Skeleton className="h-3 w-20" /> : t("Workspace")}
 			</Link>
 		</nav>
 	);
@@ -88,22 +91,22 @@ function AgentCard({ agent: a, onEdit }: { agent: Agent; onEdit: () => void }) {
 			<div className="flex items-start justify-between gap-3">
 				<div className="flex min-w-0 flex-col gap-0.5">
 					<div className="flex min-w-0 items-center gap-2">
-						<StatusDot status={a.status} label={a.status} />
+						<StatusDot status={a.status} label={tr(STATUS_LABEL[a.status])} />
 						<h2 className="truncate text-sm font-semibold tracking-tight">{a.name}</h2>
 					</div>
-					<p className={cn("truncate text-xs", a.role ? "text-muted-foreground" : "text-subtle")}>{a.role || "No role set"}</p>
+					<p className={cn("truncate text-xs", a.role ? "text-muted-foreground" : "text-subtle")}>{a.role || t("No role set")}</p>
 				</div>
 				<div className="flex shrink-0 items-center gap-1.5">
 					<Badge variant="outline" className="font-mono">
 						{a.runtime}
 					</Badge>
-					<Button variant="ghost" size="icon-sm" aria-label={`Edit ${a.name}`} onClick={onEdit}>
+					<Button variant="ghost" size="icon-sm" aria-label={t("Edit {name}", { name: a.name })} onClick={onEdit}>
 						<Pencil />
 					</Button>
 				</div>
 			</div>
 			{a.capabilities.length > 0 ? (
-				<ul className="flex flex-wrap gap-1.5" aria-label="Capabilities">
+				<ul className="flex flex-wrap gap-1.5" aria-label={t("Capabilities")}>
 					{shown.map((c) => (
 						<li key={c}>
 							<Badge variant="neutral">{c}</Badge>
@@ -116,14 +119,12 @@ function AgentCard({ agent: a, onEdit }: { agent: Agent; onEdit: () => void }) {
 					) : null}
 				</ul>
 			) : (
-				<p className="text-xs text-subtle">No capabilities listed.</p>
+				<p className="text-xs text-subtle">{t("No capabilities listed.")}</p>
 			)}
 			<div className="mt-auto flex items-center justify-between gap-2 border-t pt-2.5 text-xs text-subtle">
-				<span className="capitalize">{a.status}</span>
-				<span className="tabular">
-					{a.activeSessions} active {a.activeSessions === 1 ? "session" : "sessions"}
-				</span>
-				<span className="hidden sm:inline">Since {relativeTime(a.createdAt)}</span>
+				<span>{tr(STATUS_LABEL[a.status])}</span>
+				<span className="tabular">{t("{count, plural, one {# active session} other {# active sessions}}", { count: a.activeSessions })}</span>
+				<span className="hidden sm:inline">{t("Since {time}", { time: relativeTime(a.createdAt) })}</span>
 			</div>
 		</li>
 	);
@@ -157,11 +158,11 @@ function EditForm({ agent, onClose }: { agent: Agent; onClose: () => void }) {
 		},
 		onError: (e, _b, ctx) => {
 			if (ctx?.prev) qc.setQueryData(qk.agents, ctx.prev);
-			toast.error(`Could not update ${agent.name}`, { description: errorMessage(e) });
+			toast.error(t("Could not update {name}", { name: agent.name }), { description: errorMessage(e) });
 		},
 		onSuccess: (next) => {
 			qc.setQueryData<Agent[]>(qk.agents, (d) => d?.map((a) => (a.id === next.id ? next : a)));
-			toast.success("Agent updated");
+			toast.success(t("Agent updated"));
 		},
 		onSettled: () => void qc.invalidateQueries({ queryKey: qk.agents }),
 	});
@@ -175,24 +176,24 @@ function EditForm({ agent, onClose }: { agent: Agent; onClose: () => void }) {
 			}}
 		>
 			<DialogHeader>
-				<DialogTitle>Edit agent</DialogTitle>
-				<DialogDescription>Changes apply to this machine only.</DialogDescription>
+				<DialogTitle>{t("Edit agent")}</DialogTitle>
+				<DialogDescription>{t("Changes apply to this machine only.")}</DialogDescription>
 			</DialogHeader>
-			<Field label="Name" error={nameInvalid ? "Name is required." : null}>
+			<Field label={t("Name")} error={nameInvalid ? t("Name is required.") : null}>
 				{(id) => <Input id={id} value={name} maxLength={64} autoComplete="off" aria-invalid={nameInvalid} onChange={(e) => setName(e.target.value)} />}
 			</Field>
-			<Field label="Role" hint="Free text, e.g. “Backend”.">
+			<Field label={t("Role")} hint={t("Free text, e.g. “Backend”.")}>
 				{(id) => <Input id={id} value={role} maxLength={120} autoComplete="off" onChange={(e) => setRole(e.target.value)} />}
 			</Field>
-			<Field label="Capabilities" hint="Press Enter or comma to add. Backspace removes the last one.">
+			<Field label={t("Capabilities")} hint={t("Press Enter or comma to add. Backspace removes the last one.")}>
 				{(id) => <TagsInput id={id} value={caps} onChange={setCaps} />}
 			</Field>
 			<DialogFooter>
 				<Button variant="ghost" onClick={onClose}>
-					Cancel
+					{t("Cancel")}
 				</Button>
 				<Button type="submit" variant="primary" disabled={nameInvalid}>
-					Save changes
+					{t("Save changes")}
 				</Button>
 			</DialogFooter>
 		</form>
@@ -229,15 +230,15 @@ function TagsInput({ id, value, onChange }: { id: string; value: string[]; onCha
 			onClick={() => ref.current?.focus()}
 			className={cn(fieldClass, "flex min-h-8 flex-wrap items-center gap-1.5 py-1.5 coarse:min-h-11 focus-within:shadow-[inset_0_0_0_1px_var(--accent),0_0_0_3px_var(--accent-soft)]")}
 		>
-			{value.map((t) => (
-				<span key={t} className="inline-flex items-center gap-1 rounded-md bg-surface-3 py-0.5 pl-1.5 pr-0.5 text-xs">
-					{t}
+			{value.map((tag) => (
+				<span key={tag} className="inline-flex items-center gap-1 rounded-md bg-surface-3 py-0.5 pl-1.5 pr-0.5 text-xs">
+					{tag}
 					<button
 						type="button"
-						aria-label={`Remove ${t}`}
+						aria-label={t("Remove {tag}", { tag })}
 						onClick={(e) => {
 							e.stopPropagation();
-							onChange(value.filter((x) => x !== t));
+							onChange(value.filter((x) => x !== tag));
 						}}
 						className="grid size-4 place-items-center rounded text-subtle hover:bg-border-strong hover:text-foreground coarse:size-6"
 					>
@@ -253,7 +254,7 @@ function TagsInput({ id, value, onChange }: { id: string; value: string[]; onCha
 				onKeyDown={onKeyDown}
 				onBlur={() => add(draft)}
 				maxLength={MAX_CAP_LEN * 2}
-				placeholder={value.length === 0 ? "e.g. refactoring" : ""}
+				placeholder={value.length === 0 ? t("e.g. refactoring") : ""}
 				disabled={value.length >= MAX_CAPS}
 				className="min-w-24 flex-1 bg-transparent text-[13px] outline-none placeholder:text-subtle"
 			/>

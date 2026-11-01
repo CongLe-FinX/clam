@@ -1,4 +1,4 @@
-import type { Checkpoint, Participant, SharedInvite, SharedMessage, SharedMessagesPage, SharedSession, SharedSessionDetail } from "@clam/contracts";
+import { i18nMsg, type Checkpoint, type I18nMessage, type Participant, type SharedInvite, type SharedMessage, type SharedMessagesPage, type SharedSession, type SharedSessionDetail } from "@clam/contracts";
 import { projects } from "@clam/database";
 import { normalizeRepoUrl } from "@clam/task-engine";
 import { eq } from "drizzle-orm";
@@ -80,6 +80,7 @@ export class SharedViews {
 			kind: row.kind as SharedMessage["kind"],
 			to: row.to,
 			text: row.text,
+			...(row.i18n && { i18n: row.i18n }),
 			originNodeId: row.authorNodeId,
 			hlc: row.hlc,
 			createdAt: row.createdAt,
@@ -90,16 +91,16 @@ export class SharedViews {
 	}
 
 	/** Whether this node could take over right now, and if not why (participant and former-driver side). */
-	takeover(row: SharedRow): { available: boolean; reason: string | null } {
-		if (row.state !== "active") return { available: false, reason: "This node left the shared session" };
-		if (row.localRole === "driver") return { available: false, reason: "This node is already the driver" };
-		if (!row.localProjectId) return { available: false, reason: row.vcs === "files" ? "No local folder is linked to this shared session" : "No local clone of the repository is linked to this shared session" };
+	takeover(row: SharedRow): { available: boolean; reason: I18nMessage | null } {
+		if (row.state !== "active") return { available: false, reason: i18nMsg("This node left the shared session") };
+		if (row.localRole === "driver") return { available: false, reason: i18nMsg("This node is already the driver") };
+		if (!row.localProjectId) return { available: false, reason: row.vcs === "files" ? i18nMsg("No local folder is linked to this shared session") : i18nMsg("No local clone of the repository is linked to this shared session") };
 		const held = this.store.latestHeldCheckpoint(row.id);
-		if (!held) return { available: false, reason: row.vcs === "files" ? "No session snapshot and folder bundle have been received yet" : "No session snapshot has been received yet" };
-		if (!held.snapshotSha256) return { available: false, reason: "The last checkpoint has no session snapshot" };
+		if (!held) return { available: false, reason: row.vcs === "files" ? i18nMsg("No session snapshot and folder bundle have been received yet") : i18nMsg("No session snapshot has been received yet") };
+		if (!held.snapshotSha256) return { available: false, reason: i18nMsg("The last checkpoint has no session snapshot") };
 		const driver = this.ctx.network.peers.row(row.driverNodeId);
 		const driverOnline = driver !== undefined && (driver.status === "online" || driver.status === "degraded");
-		if (driverOnline) return { available: false, reason: `${driver.name} (the driver) is online; ask it to transfer, or continue here anyway` };
+		if (driverOnline) return { available: false, reason: i18nMsg("{name} (the driver) is online; ask it to transfer, or continue here anyway", { name: driver.name }) };
 		return { available: true, reason: null };
 	}
 
@@ -122,7 +123,8 @@ export class SharedViews {
 			participants,
 			lastCheckpoint: last ? this.checkpoint(last) : null,
 			takeoverAvailable: takeover.available,
-			takeoverBlockedReason: takeover.reason,
+			takeoverBlockedReason: takeover.reason?.text ?? null,
+			takeoverBlockedI18n: takeover.reason?.i18n,
 			rescueBranch: row.rescueBranch,
 			rescueFiles: row.rescueFiles ? { sha256: row.rescueFiles.sha256, size: row.rescueFiles.size, fileCount: row.rescueFiles.fileCount, paths: row.rescueFiles.paths, epoch: row.rescueFiles.epoch, at: row.rescueFiles.at } : null,
 			agentMessageBudget: this.store.budget(row.id, row.agentMessageLimit).remaining,

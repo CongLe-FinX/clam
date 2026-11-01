@@ -2,7 +2,8 @@ import type { SharedSession } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Eye, Inbox, RefreshCw, Users } from "lucide-react";
 import { useMemo } from "react";
-import { errorMessage } from "@/lib/api";
+import { T, renderServerText, t, tr } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { isPendingInvite, useNode, useSharedInvites, useSharedSessions } from "@/lib/queries";
 import { cn, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
@@ -18,12 +19,16 @@ import { ModeLabel } from "./mode.tsx";
 const ROLE_VARIANT = { driver: "accent", participant: "neutral", former_driver: "warning" } as const satisfies Record<SharedSession["localRole"], string>;
 
 function statusLine(s: SharedSession): { text: string; tone: "warning" | "muted" | "success" } {
-	if (s.localRole === "former_driver") return { text: s.rescueBranch ? `Work continues elsewhere · your unpushed changes are on ${s.rescueBranch}` : "Work continues on another machine", tone: "warning" };
+	if (s.localRole === "former_driver") return { text: s.rescueBranch ? t("Work continues elsewhere · your unpushed changes are on {branch}", { branch: s.rescueBranch }) : t("Work continues on another machine"), tone: "warning" };
 	if (s.localRole === "participant") {
-		if (s.takeoverAvailable) return { text: "The driver looks offline — you can continue the work on this machine", tone: "warning" };
-		return { text: s.takeoverBlockedReason ?? "Following the driver live", tone: "muted" };
+		if (s.takeoverAvailable) return { text: t("The driver looks offline — you can continue the work on this machine"), tone: "warning" };
+		return { text: s.takeoverBlockedReason ? renderServerText(s.takeoverBlockedReason, s.takeoverBlockedI18n) : t("Following the driver live"), tone: "muted" };
 	}
-	return { text: s.lastCheckpoint ? `Checkpoint ${s.lastCheckpoint.seq} · ${relativeTime(s.lastCheckpoint.at)}${s.vcs === "git" && s.lastCheckpoint.commit && !s.lastCheckpoint.pushed ? " · not pushed" : ""}` : "No checkpoint yet", tone: "success" };
+	return { text: s.lastCheckpoint
+			? s.vcs === "git" && s.lastCheckpoint.commit && !s.lastCheckpoint.pushed
+				? t("Checkpoint {seq} · {time} · not pushed", { seq: s.lastCheckpoint.seq, time: relativeTime(s.lastCheckpoint.at) })
+				: t("Checkpoint {seq} · {time}", { seq: s.lastCheckpoint.seq, time: relativeTime(s.lastCheckpoint.at) })
+			: t("No checkpoint yet"), tone: "success" };
 }
 
 function SharedRow({ s }: { s: SharedSession }) {
@@ -34,32 +39,32 @@ function SharedRow({ s }: { s: SharedSession }) {
 		<>
 			<div className="flex flex-wrap items-center gap-2">
 				<h3 className="min-w-0 flex-1 truncate text-sm font-semibold">{s.title}</h3>
-				{s.unreadMessages > 0 ? <span className="tabular grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-2xs font-semibold text-accent-foreground" aria-label={`${s.unreadMessages} unread messages`}>{s.unreadMessages}</span> : null}
-				<Badge variant={ROLE_VARIANT[s.localRole]}>{ROLE_LABEL[s.localRole]}</Badge>
+				{s.unreadMessages > 0 ? <span className="tabular grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-2xs font-semibold text-accent-foreground" aria-label={t("{count, plural, one {# unread message} other {# unread messages}}", { count: s.unreadMessages })}>{s.unreadMessages}</span> : null}
+				<Badge variant={ROLE_VARIANT[s.localRole]}>{tr(ROLE_LABEL[s.localRole])}</Badge>
 				{s.localRole === "participant" ? (
 					<Badge variant="outline" className="gap-1">
-						<Eye aria-hidden /> Live view
+						<Eye aria-hidden /> {t("Live view")}
 					</Badge>
 				) : null}
 			</div>
 			<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
 				{driver ? (
 					<span className="inline-flex items-center gap-1.5">
-						<StatusDot status={nodeDot(driver.nodeStatus)} label={NODE_STATUS_LABEL[driver.nodeStatus]} />
+						<StatusDot status={nodeDot(driver.nodeStatus)} label={tr(NODE_STATUS_LABEL[driver.nodeStatus])} />
 						<span>
-							Driver <span className="font-medium text-foreground">{participantLabel(driver)}</span>
+							<T text="Driver <b>{name}</b>" params={{ name: participantLabel(driver) }} tags={{ b: <span className="font-medium text-foreground" /> }} />
 						</span>
 					</span>
 				) : null}
 				<ModeLabel vcs={s.vcs} repo={s.repo} className="text-xs" />
-				<span className="tabular font-mono text-2xs text-subtle">epoch {s.epoch}</span>
+				<span className="tabular font-mono text-2xs text-subtle">{t("epoch {epoch}", { epoch: s.epoch })}</span>
 			</div>
 			<div className="flex flex-wrap items-center gap-1.5">
 				{team.map((p) => (
 					<span key={p.nodeId} className="inline-flex items-center gap-1.5 rounded-md bg-surface-2 px-1.5 py-1 text-2xs text-muted-foreground">
-						<StatusDot status={nodeDot(p.nodeStatus)} label={NODE_STATUS_LABEL[p.nodeStatus]} className="size-1.5 [&>span]:size-1.5" />
+						<StatusDot status={nodeDot(p.nodeStatus)} label={tr(NODE_STATUS_LABEL[p.nodeStatus])} className="size-1.5 [&>span]:size-1.5" />
 						{participantLabel(p)}
-						{p.state === "invited" ? <span className="text-subtle">· invited</span> : null}
+						{p.state === "invited" ? <span className="text-subtle">· {t("invited")}</span> : null}
 					</span>
 				))}
 			</div>
@@ -72,7 +77,7 @@ function SharedRow({ s }: { s: SharedSession }) {
 				<Link to="/sessions/$sessionId" params={{ sessionId: s.localSessionId }} className="flex min-h-11 flex-col gap-2 rounded-xl p-4 outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)]">
 					{body}
 					<span className="inline-flex items-center gap-1 text-xs font-medium text-accent">
-						Open session <ArrowUpRight className="size-3" aria-hidden />
+						{t("Open session")} <ArrowUpRight className="size-3" aria-hidden />
 					</span>
 				</Link>
 			) : (
@@ -92,16 +97,16 @@ export default function SharedPage() {
 	return (
 		<PageContainer>
 			<PageHeader
-				eyebrow="Agent Network"
-				title="Shared sessions"
-				description={`Work that several machines do together${node ? ` — ${node.name} drives some and follows others` : ""}. Add an agent from another machine to a session to share it.`}
+				eyebrow={t("Agent Network")}
+				title={t("Shared sessions")}
+				description={node ? t("Work that several machines do together — {name} drives some and follows others. Add an agent from another machine to a session to share it.", { name: node.name }) : t("Work that several machines do together. Add an agent from another machine to a session to share it.")}
 			/>
 
 			{pending.length > 0 ? (
-				<section aria-label="Invitations" className="flex flex-col gap-3">
+				<section aria-label={t("Invitations")} className="flex flex-col gap-3">
 					<SectionTitle>
 						<span className="inline-flex items-center gap-1.5">
-							<Inbox className="size-3.5" aria-hidden /> Invitations <span className="tabular rounded-full bg-accent px-1.5 text-2xs text-accent-foreground">{pending.length}</span>
+							<Inbox className="size-3.5" aria-hidden /> {t("Invitations")} <span className="tabular rounded-full bg-accent px-1.5 text-2xs text-accent-foreground">{pending.length}</span>
 						</span>
 					</SectionTitle>
 					{pending.map((i) => (
@@ -110,10 +115,10 @@ export default function SharedPage() {
 				</section>
 			) : null}
 
-			<section aria-label="Shared sessions" className="flex flex-col gap-3">
+			<section aria-label={t("Shared sessions")} className="flex flex-col gap-3">
 				<SectionTitle>
 					<span className="inline-flex items-center gap-1.5">
-						<Users className="size-3.5" aria-hidden /> Sessions
+						<Users className="size-3.5" aria-hidden /> {t("Sessions")}
 					</span>
 				</SectionTitle>
 				{sessions.isPending ? (
@@ -124,22 +129,22 @@ export default function SharedPage() {
 				) : sessions.isError ? (
 					<EmptyState
 						icon={RefreshCw}
-						title="Could not load shared sessions"
-						description={errorMessage(sessions.error)}
+						title={t("Could not load shared sessions")}
+						description={errorText(sessions.error)}
 						action={
 							<Button variant="outline" onClick={() => void sessions.refetch()}>
-								Retry
+								{t("Retry")}
 							</Button>
 						}
 					/>
 				) : sorted.length === 0 ? (
 					<EmptyState
 						icon={Users}
-						title="No shared sessions yet"
-						description="Open an agent session and use “Add agent” in its header to bring an agent from another machine into it. Invitations from other machines show up here."
+						title={t("No shared sessions yet")}
+						description={t("Open an agent session and use “Add agent” in its header to bring an agent from another machine into it. Invitations from other machines show up here.")}
 						action={
 							<Button asChild variant="outline">
-								<Link to="/node/sessions">Go to agent sessions</Link>
+								<Link to="/node/sessions">{t("Go to agent sessions")}</Link>
 							</Button>
 						}
 					/>

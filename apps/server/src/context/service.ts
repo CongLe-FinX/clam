@@ -7,6 +7,7 @@ import {
 	type CreateContextBody,
 	type ResolveContextConflictBody,
 	type UpdateContextBody,
+	i18nMsg,
 } from "@clam/contracts";
 import { applyIncoming, buildPreface, canonicalBody, canonicalTitle, createVersion, resolveConflict, searchContexts, versionId, withPreface, type Applied, type PrefaceItem, type VersionRecord } from "@clam/context-engine";
 import { workspaceMembers, workspaces, type contexts } from "@clam/database";
@@ -227,7 +228,7 @@ export class ContextService {
 		this.requireWorkspace(input.workspaceId);
 		const project = input.projectId ? this.scopeOfProject(input.projectId, input.workspaceId) : null;
 		const title = canonicalTitle(input.title);
-		if (title === "") throw ApiError.badRequest("A context needs a title");
+		if (title === "") throw ApiError.badRequest(i18nMsg("A context needs a title"));
 		const at = nowIso();
 		const version = createVersion(null, { title, body: input.body, author, originNodeId: this.nodeId, at });
 		const id = newId("ctx");
@@ -259,13 +260,13 @@ export class ContextService {
 	update(id: string, input: z.infer<typeof UpdateContextBody>, author: ContextAuthor): Context {
 		const row = this.store.get(id);
 		if (input.baseVersion !== row.version) {
-			throw new ApiError(409, "stale_version", `The context is at version ${row.version}; the edit is based on version ${input.baseVersion}. Reload it and apply the change again.`, { currentVersion: row.version });
+			throw new ApiError(409, "stale_version", i18nMsg("The context is at version {current}; the edit is based on version {base}. Reload it and apply the change again.", { current: row.version, base: input.baseVersion }), { currentVersion: row.version });
 		}
-		if (row.conflict) throw new ApiError(409, "context_conflict", "This context is in conflict with a version from another node; resolve the conflict first.", { contextId: row.id });
+		if (row.conflict) throw new ApiError(409, "context_conflict", i18nMsg("This context is in conflict with a version from another node; resolve the conflict first."), { contextId: row.id });
 		const head = this.store.head(row);
 		const title = input.title === undefined ? head.title : canonicalTitle(input.title);
 		const body = input.body === undefined ? head.body : canonicalBody(input.body);
-		if (title === "") throw ApiError.badRequest("A context needs a title");
+		if (title === "") throw ApiError.badRequest(i18nMsg("A context needs a title"));
 		const shareable = input.shareable ?? row.shareable;
 		const textChanged = title !== head.title || body !== head.body;
 
@@ -296,7 +297,7 @@ export class ContextService {
 	 */
 	private retract(row: ContextRow, head: VersionRecord, edit: { title: string; body: string; textChanged: boolean }, author: ContextAuthor): Context {
 		if (row.originNodeId !== this.nodeId) {
-			throw new ApiError(409, "not_origin", "Only the node that created this context can stop sharing it; delete your copy instead.");
+			throw new ApiError(409, "not_origin", i18nMsg("Only the node that created this context can stop sharing it; delete your copy instead."));
 		}
 		const at = nowIso();
 		const tombstone = createVersion(head, { title: head.title, body: "", deleted: true, author, originNodeId: this.nodeId, at });
@@ -347,10 +348,10 @@ export class ContextService {
 
 	resolve(id: string, input: z.infer<typeof ResolveContextConflictBody>, author: ContextAuthor): Context {
 		const row = this.store.get(id);
-		if (!row.conflict) throw new ApiError(409, "no_conflict", "This context has no open conflict.");
-		if (input.keep === "merged" && (input.body === undefined || canonicalBody(input.body) === "")) throw ApiError.badRequest("A merged resolution needs the merged text in `body`");
+		if (!row.conflict) throw new ApiError(409, "no_conflict", i18nMsg("This context has no open conflict."));
+		if (input.keep === "merged" && (input.body === undefined || canonicalBody(input.body) === "")) throw ApiError.badRequest(i18nMsg("A merged resolution needs the merged text in `body`"));
 		const state = this.store.state(row);
-		if (!state.head || !state.conflict) throw new ApiError(409, "no_conflict", "This context has no open conflict.");
+		if (!state.head || !state.conflict) throw new ApiError(409, "no_conflict", i18nMsg("This context has no open conflict."));
 		const resolved = resolveConflict({ head: state.head, conflict: state.conflict }, { keep: input.keep, ...(input.body !== undefined && { body: input.body }), author, originNodeId: this.nodeId, at: nowIso() });
 		const saved = this.store.db.$client.transaction(() => {
 			this.store.insertSnapshot(row.id, resolved);

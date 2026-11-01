@@ -3,6 +3,7 @@ import { routes } from "@clam/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { FolderGit2, Layers, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import { t } from "@/i18n";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
@@ -25,7 +26,7 @@ export function useDeleteWorkspace(onDone?: () => void) {
 			qc.setQueryData<Workspace[]>(qk.workspaces, (list) => list?.filter((w) => w.id !== id));
 			qc.removeQueries({ queryKey: qk.workspace(id) });
 			void qc.invalidateQueries({ queryKey: qk.projectsAll });
-			toast.success("Workspace deleted");
+			toast.success(t("Workspace deleted"));
 			onDone?.();
 		},
 		onError: (e) => toast.error(errorMessage(e)),
@@ -41,11 +42,11 @@ export default function WorkspacesPage() {
 	return (
 		<PageContainer>
 			<PageHeader
-				title="Workspaces"
-				description="A workspace groups projects and the agents that work on them."
+				title={t("Workspaces")}
+				description={t("A workspace groups projects and the agents that work on them.")}
 				actions={
 					<Button variant="primary" onClick={() => openDialog({ kind: "create-workspace" })}>
-						<Plus /> New workspace
+						<Plus /> {t("New workspace")}
 					</Button>
 				}
 			/>
@@ -57,16 +58,16 @@ export default function WorkspacesPage() {
 				</div>
 			) : null}
 			{workspaces.isError ? (
-				<EmptyState title="Could not load workspaces" description={errorMessage(workspaces.error)} action={<Button onClick={() => void workspaces.refetch()}>Retry</Button>} />
+				<EmptyState title={t("Could not load workspaces")} description={errorMessage(workspaces.error)} action={<Button onClick={() => void workspaces.refetch()}>{t("Retry")}</Button>} />
 			) : null}
 			{workspaces.isSuccess && workspaces.data.length === 0 ? (
 				<EmptyState
 					icon={Layers}
-					title="No workspaces yet"
-					description="Create a workspace, then add the projects your agents will work on."
+					title={t("No workspaces yet")}
+					description={t("Create a workspace, then add the projects your agents will work on.")}
 					action={
 						<Button variant="primary" onClick={() => openDialog({ kind: "create-workspace" })}>
-							<Plus /> New workspace
+							<Plus /> {t("New workspace")}
 						</Button>
 					}
 				/>
@@ -81,29 +82,29 @@ export default function WorkspacesPage() {
 								</div>
 								<div className="min-w-0 flex-1 pr-8">
 									<h3 className="truncate text-sm font-semibold tracking-tight">{w.name}</h3>
-									<p className="line-clamp-2 min-h-8 text-xs text-muted-foreground">{w.description || "No description"}</p>
+									<p className="line-clamp-2 min-h-8 text-xs text-muted-foreground">{w.description || t("No description")}</p>
 								</div>
 							</div>
 							<div className="flex items-center gap-3 text-xs text-subtle">
 								<span className="flex items-center gap-1">
-									<FolderGit2 className="size-3.5" /> {w.projectCount} {w.projectCount === 1 ? "project" : "projects"}
+									<FolderGit2 className="size-3.5" /> {t("{count, plural, one {# project} other {# projects}}", { count: w.projectCount })}
 								</span>
-								<span>Updated {relativeTime(w.updatedAt)}</span>
+								<span>{t("Updated {time}", { time: relativeTime(w.updatedAt) })}</span>
 							</div>
 						</Link>
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
-								<Button variant="ghost" size="icon-sm" className="absolute right-2 top-2" aria-label={`Actions for ${w.name}`}>
+								<Button variant="ghost" size="icon-sm" className="absolute right-2 top-2" aria-label={t("Actions for {name}", { name: w.name })}>
 									<MoreHorizontal />
 								</Button>
 							</DropdownMenuTrigger>
 							<DropdownMenuContent>
 								<DropdownMenuItem onSelect={() => openDialog({ kind: "edit-workspace", workspaceId: w.id })}>
-									<Pencil /> Edit
+									<Pencil /> {t("Edit")}
 								</DropdownMenuItem>
 								<DropdownMenuSeparator />
 								<DropdownMenuItem danger onSelect={() => setToDelete(w)}>
-									<Trash2 /> Delete
+									<Trash2 /> {t("Delete")}
 								</DropdownMenuItem>
 							</DropdownMenuContent>
 						</DropdownMenu>
@@ -113,9 +114,9 @@ export default function WorkspacesPage() {
 			<ConfirmDialog
 				open={toDelete !== null}
 				onOpenChange={(o) => !o && setToDelete(null)}
-				title={`Delete “${toDelete?.name ?? ""}”?`}
-				description="The workspace and its project entries are removed from CL Agent Mesh. Files on disk are not touched."
-				confirmLabel="Delete workspace"
+				title={t("Delete “{name}”?", { name: toDelete?.name ?? "" })}
+				description={t("The workspace and its project entries are removed from CL Agent Mesh. Files on disk are not touched.")}
+				confirmLabel={t("Delete workspace")}
 				danger
 				loading={del.isPending}
 				onConfirm={() => toDelete && del.mutate(toDelete.id)}

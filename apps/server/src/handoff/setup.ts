@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { lstat } from "node:fs/promises";
 import path from "node:path";
-import type { SetupDecisionBody } from "@clam/contracts";
+import { i18nMsg, plainMsg, type SetupDecisionBody } from "@clam/contracts";
 import { checkRuntimes, runSetupCommand, type SetupReport, setupFingerprint } from "@clam/handoff-engine";
 import type { z } from "zod";
 import { ApiError } from "../http/errors.ts";
@@ -92,13 +92,13 @@ export class DependencySetup implements SetupApi {
 		const wanted = new Map<string, "approved" | "denied">();
 		for (const id of body.approve) wanted.set(id, "approved");
 		for (const id of body.deny) {
-			if (wanted.has(id)) throw ApiError.badRequest(`Setup command ${id} is both approved and denied`);
+			if (wanted.has(id)) throw ApiError.badRequest(i18nMsg("Setup command {id} is both approved and denied", { id }));
 			wanted.set(id, "denied");
 		}
 		for (const [id, state] of wanted) {
 			const row = rows.get(id);
 			if (!row) throw ApiError.notFound("Setup command");
-			if (row.state !== "pending_approval" && row.state !== state) throw ApiError.conflict(`Setup command is ${row.state} already`, { state: row.state });
+			if (row.state !== "pending_approval" && row.state !== state) throw ApiError.conflict(i18nMsg("Setup command is {state} already", { state: row.state }), { state: row.state });
 		}
 		const at = nowIso();
 		store.transaction(() => {
@@ -110,7 +110,7 @@ export class DependencySetup implements SetupApi {
 		if (wanted.size > 0) {
 			const approved = [...wanted].filter(([, s]) => s === "approved").length;
 			const denied = wanted.size - approved;
-			this.hub.note(handoffId, `Setup commands: ${approved} approved, ${denied} denied`);
+			this.hub.note(handoffId, i18nMsg("Setup commands: {approved} approved, {denied} denied", { approved, denied }));
 		}
 		this.hub.changed(handoffId);
 	}
@@ -172,7 +172,7 @@ export class DependencySetup implements SetupApi {
 		for (const row of deps) {
 			if (!RUNNABLE_STATES[row.state]) continue;
 			const outcome = await this.execute(handoffId, row);
-			if (!outcome.ok) throw new HandoffStepError("deps_failed", outcome.detail, 5);
+			if (!outcome.ok) throw new HandoffStepError("deps_failed", plainMsg(outcome.detail), 5);
 		}
 		if (store.setupRows(handoffId).filter((r) => r.purpose !== "check").every((r) => r.state === "succeeded")) {
 			store.update(handoffId, { setupFingerprint: fingerprint });
@@ -218,7 +218,7 @@ export class DependencySetup implements SetupApi {
 			}
 		}
 
-		if (issues.length > 0) throw new HandoffStepError("validation_failed", `Workspace validation failed: ${issues.join("; ")}`, 6);
+		if (issues.length > 0) throw new HandoffStepError("validation_failed", i18nMsg("Workspace validation failed: {issues}", { issues: issues.join("; ") }), 6);
 		return facts.length > 0 ? facts.join(", ") : "nothing to validate";
 	}
 
@@ -271,11 +271,12 @@ export class DependencySetup implements SetupApi {
 		});
 		this.hub.changed(handoffId);
 		if (ok) {
-			this.hub.note(handoffId, `Ran \`${row.command}\`: succeeded`);
+			this.hub.note(handoffId, i18nMsg("Ran `{command}`: succeeded", { command: row.command }));
 			return { ok: true };
 		}
+		const seconds = Math.max(1, Math.round(timings.stepTimeoutMs / 1000));
 		const why = result.timedOut
-			? `timed out after ${Math.max(1, Math.round(timings.stepTimeoutMs / 1000))} s`
+			? `timed out after ${seconds} s`
 			: result.error !== null
 				? `could not be started (${result.error})`
 				: result.aborted
@@ -283,7 +284,19 @@ export class DependencySetup implements SetupApi {
 					: `exited with code ${result.exitCode ?? "none"}${result.signal ? ` (${result.signal})` : ""}`;
 		const lastLines = result.outputTail.split("\n").filter((l) => l.trim() !== "").slice(-3).join(" | ");
 		const detail = `\`${row.command}\` ${why}${lastLines ? `: ${lastLines}` : ""}`.slice(0, 1500);
-		this.hub.note(handoffId, `Ran \`${row.command}\`: failed (${why})`);
+		const command = row.command;
+		this.hub.note(
+			handoffId,
+			result.timedOut
+				? i18nMsg("Ran `{command}`: failed (timed out after {seconds} s)", { command, seconds })
+				: result.error !== null
+					? i18nMsg("Ran `{command}`: failed (could not be started ({error}))", { command, error: result.error })
+					: result.aborted
+						? i18nMsg("Ran `{command}`: failed (was aborted)", { command })
+						: result.signal
+							? i18nMsg("Ran `{command}`: failed (exited with code {code} ({signal}))", { command, code: result.exitCode ?? "none", signal: result.signal })
+							: i18nMsg("Ran `{command}`: failed (exited with code {code})", { command, code: result.exitCode ?? "none" }),
+		);
 		return { ok: false, detail };
 	}
 }

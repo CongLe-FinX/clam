@@ -1,3 +1,4 @@
+import { type I18nMessage, i18nMsg } from "@clam/contracts";
 import type { GitPushResult, GitStatus, RepositoryRef, TaskResult } from "@clam/contracts";
 import type { GitEngine } from "@clam/git-engine";
 import { compareUrl, normalizeRepoUrl, slugify, taskBranchName } from "@clam/task-engine";
@@ -27,7 +28,54 @@ export interface DeliveryResult {
 	compareUrl: string | null;
 	artifacts: TaskResult["artifacts"];
 	changed: boolean;
-	note: string;
+	note: I18nMessage;
+}
+
+/** What restoring the human's own branch after delivery left to say (appended to the delivery note). */
+type RestoreTail = { kind: "none" } | { kind: "dirty"; original: string } | { kind: "failed"; original: string; error: string };
+
+function noChangesNote(tail: RestoreTail): I18nMessage {
+	switch (tail.kind) {
+		case "none":
+			return i18nMsg("The agent made no changes.");
+		case "dirty":
+			return i18nMsg("The agent made no changes. The working tree still has uncommitted changes, so {original} was not checked out again.", { original: tail.original });
+		case "failed":
+			return i18nMsg("The agent made no changes. Could not check {original} out again: {error}", { original: tail.original, error: tail.error });
+	}
+}
+
+function pushedNote(branch: string, tail: RestoreTail): I18nMessage {
+	switch (tail.kind) {
+		case "none":
+			return i18nMsg("Pushed {branch}.", { branch });
+		case "dirty":
+			return i18nMsg("Pushed {branch}. The working tree still has uncommitted changes, so {original} was not checked out again.", { branch, original: tail.original });
+		case "failed":
+			return i18nMsg("Pushed {branch}. Could not check {original} out again: {error}", { branch, original: tail.original, error: tail.error });
+	}
+}
+
+/** `patchError` is null when a patch of the commits was attached. */
+function pushFailedNote(branch: string, pushError: string, patchError: string | null, tail: RestoreTail): I18nMessage {
+	if (patchError === null) {
+		switch (tail.kind) {
+			case "none":
+				return i18nMsg("Could not push {branch}: {error} The commits are on the local branch {branch}. A patch of the commits is attached.", { branch, error: pushError });
+			case "dirty":
+				return i18nMsg("Could not push {branch}: {error} The commits are on the local branch {branch}. A patch of the commits is attached. The working tree still has uncommitted changes, so {original} was not checked out again.", { branch, error: pushError, original: tail.original });
+			case "failed":
+				return i18nMsg("Could not push {branch}: {error} The commits are on the local branch {branch}. A patch of the commits is attached. Could not check {original} out again: {restoreError}", { branch, error: pushError, original: tail.original, restoreError: tail.error });
+		}
+	}
+	switch (tail.kind) {
+		case "none":
+			return i18nMsg("Could not push {branch}: {error} The commits are on the local branch {branch}. No patch could be attached ({patchError}).", { branch, error: pushError, patchError });
+		case "dirty":
+			return i18nMsg("Could not push {branch}: {error} The commits are on the local branch {branch}. No patch could be attached ({patchError}). The working tree still has uncommitted changes, so {original} was not checked out again.", { branch, error: pushError, patchError, original: tail.original });
+		case "failed":
+			return i18nMsg("Could not push {branch}: {error} The commits are on the local branch {branch}. No patch could be attached ({patchError}). Could not check {original} out again: {restoreError}", { branch, error: pushError, patchError, original: tail.original, restoreError: tail.error });
+	}
 }
 
 export type ProjectRef = { id: string; path: string; repository: RepositoryRef | null };
@@ -172,7 +220,7 @@ export class TaskGit {
 		);
 		if (commits === 0 && !changed) {
 			const restored = await this.restore(project, prepared, status);
-			return { branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [], changed: false, note: `The agent made no changes.${restored}` };
+			return { branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [], changed: false, note: noChangesNote(restored) };
 		}
 
 		let pushed: GitPushResult | null = null;
@@ -186,7 +234,8 @@ export class TaskGit {
 			this.deps.log.warn({ taskId: task.id, projectId: project.id }, "task branch push failed; attaching a patch");
 		}
 
-		let result: DeliveryResult;
+		let result: Omit<DeliveryResult, "note">;
+		let patchError: string | null = null;
 		if (pushed) {
 			const repo = task.repoUrl === null ? null : normalizeRepoUrl(task.repoUrl);
 			result = {
@@ -196,10 +245,10 @@ export class TaskGit {
 				compareUrl: repo ? compareUrl(repo, prepared.baseBranch, workBranch) : null,
 				artifacts: [],
 				changed,
-				note: `Pushed ${workBranch}.`,
 			};
 		} else {
 			const attached = await this.attachPatch(task, dir, baseRef);
+			patchError = attached.error;
 			result = {
 				branch: workBranch,
 				commit: status.headSha,
@@ -207,11 +256,10 @@ export class TaskGit {
 				compareUrl: null,
 				artifacts: attached.artifacts,
 				changed,
-				note: `Could not push ${workBranch}: ${pushError} The commits are on the local branch ${workBranch}. ${attached.note}`,
 			};
 		}
-		result.note += await this.restore(project, prepared, status);
-		return result;
+		const tail = await this.restore(project, prepared, status);
+		return { ...result, note: pushed ? pushedNote(workBranch, tail) : pushFailedNote(workBranch, pushError, patchError, tail) };
 	}
 
 	/** Never modifies anything. */
@@ -242,26 +290,26 @@ export class TaskGit {
 		return { baseBranch, remoteShas, localNames };
 	}
 
-	private async attachPatch(task: GitSubject, dir: string, baseRef: string): Promise<{ artifacts: TaskResult["artifacts"]; note: string }> {
+	private async attachPatch(task: GitSubject, dir: string, baseRef: string): Promise<{ artifacts: TaskResult["artifacts"]; error: string | null }> {
 		try {
 			const { patch } = await this.deps.git.formatPatch(dir, { base: baseRef });
 			const row = await this.deps.artifacts.add(task.id, { name: `${slugify(task.title)}.patch`, mediaType: "text/x-patch", bytes: patch });
-			return { artifacts: [{ artifactId: row.id, name: row.name, sha256: row.sha256, size: row.size }], note: "A patch of the commits is attached." };
+			return { artifacts: [{ artifactId: row.id, name: row.name, sha256: row.sha256, size: row.size }], error: null };
 		} catch (err) {
-			return { artifacts: [], note: `No patch could be attached (${errorText(err)}).` };
+			return { artifacts: [], error: errorText(err) };
 		}
 	}
 
-	/** Back to the branch the human was on, but only on a clean tree. Returns text to append to the note ("" when nothing to say). */
-	private async restore(project: ProjectRef, prepared: PreparedBranch, status: GitStatus): Promise<string> {
+	/** Back to the branch the human was on, but only on a clean tree. What is left to say about it. */
+	private async restore(project: ProjectRef, prepared: PreparedBranch, status: GitStatus): Promise<RestoreTail> {
 		const original = prepared.originalBranch;
-		if (!original || status.branch === original) return "";
-		if (status.files.length > 0) return ` The working tree still has uncommitted changes, so ${original} was not checked out again.`;
+		if (!original || status.branch === original) return { kind: "none" };
+		if (status.files.length > 0) return { kind: "dirty", original };
 		try {
 			await this.gitService.checkout(project.id, original);
-			return "";
+			return { kind: "none" };
 		} catch (err) {
-			return ` Could not check ${original} out again: ${errorText(err)}`;
+			return { kind: "failed", original, error: errorText(err) };
 		}
 	}
 }

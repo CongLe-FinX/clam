@@ -3,8 +3,10 @@ import { type InfiniteData, type QueryClient, useInfiniteQuery, useMutation, use
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
 import { toast } from "sonner";
-import { api, errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { api, errorText } from "@/lib/api";
 import { qk } from "@/lib/queries";
+import { formatNumber } from "@/lib/utils";
 import { useTopic } from "@/lib/ws";
 import { isTerminal } from "./format.ts";
 
@@ -88,13 +90,13 @@ export function useCreateTask() {
 	const navigate = useNavigate();
 	return useMutation({
 		mutationFn: (body: CreateTaskInput) => api.post<Task>(routes.tasks, body),
-		onSuccess: (t) => {
-			qc.setQueryData<Task[]>(qk.tasks, (d) => (d ? [t, ...d.filter((x) => x.id !== t.id)] : d));
+		onSuccess: (task) => {
+			qc.setQueryData<Task[]>(qk.tasks, (d) => (d ? [task, ...d.filter((x) => x.id !== task.id)] : d));
 			void qc.invalidateQueries({ queryKey: qk.tasks });
-			toast.success(`Delegated “${t.title}” to ${t.executor.agentName ? `${t.executor.agentName}@` : ""}${t.executor.nodeName}`, {
-				description: t.delivery.state === "pending" ? "It will be delivered as soon as the machine is reachable." : undefined,
+			toast.success(t("Delegated “{title}” to {target}", { title: task.title, target: `${task.executor.agentName ? `${task.executor.agentName}@` : ""}${task.executor.nodeName}` }), {
+				description: task.delivery.state === "pending" ? t("It will be delivered as soon as the machine is reachable.") : undefined,
 			});
-			void navigate({ to: "/tasks/$taskId", params: { taskId: t.id } });
+			void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } });
 		},
 	});
 }
@@ -117,8 +119,8 @@ export function useApplyTaskFiles(taskId: string) {
 	return useMutation({
 		mutationFn: (body: { projectId: string; paths?: string[]; overwrite: string[] }) => api.post<FilesApplyResult>(routes.taskFilesApply(taskId), body),
 		onSuccess: (r, vars) => {
-			toast.success(`Applied ${r.written.length} ${r.written.length === 1 ? "file" : "files"}`, {
-				description: r.skipped.length > 0 ? `${r.skipped.length} skipped.` : undefined,
+			toast.success(t("{count, plural, one {Applied # file} other {Applied # files}}", { count: r.written.length }), {
+				description: r.skipped.length > 0 ? t("{count} skipped.", { count: formatNumber(r.skipped.length) }) : undefined,
 			});
 			void qc.invalidateQueries({ queryKey: qk.task(taskId) });
 			void qc.invalidateQueries({ queryKey: qk.tasks });
@@ -132,12 +134,12 @@ export function useDecideTask(id: string) {
 	const qc = useQueryClient();
 	return useMutation({
 		mutationFn: (body: DecideBody) => api.post<Task>(routes.taskDecide(id), body),
-		onSuccess: (t, v) => {
-			putTask(qc, t);
-			toast.success(v.decision === "accept" ? "Task accepted" : "Task rejected");
+		onSuccess: (task, v) => {
+			putTask(qc, task);
+			toast.success(v.decision === "accept" ? t("Task accepted") : t("Task rejected"));
 			void qc.invalidateQueries({ queryKey: qk.task(id) });
 		},
-		onError: (e) => toast.error("Could not update the task", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not update the task"), { description: errorText(e) }),
 	});
 }
 
@@ -145,12 +147,12 @@ export function useCancelTask(id: string) {
 	const qc = useQueryClient();
 	return useMutation({
 		mutationFn: (reason?: string) => api.post<Task>(routes.taskCancel(id), reason ? { reason } : {}),
-		onSuccess: (t) => {
-			putTask(qc, t);
+		onSuccess: (task) => {
+			putTask(qc, task);
 			void qc.invalidateQueries({ queryKey: qk.task(id) });
-			toast.success("Cancellation requested");
+			toast.success(t("Cancellation requested"));
 		},
-		onError: (e) => toast.error("Could not cancel the task", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not cancel the task"), { description: errorText(e) }),
 	});
 }
 
@@ -159,12 +161,12 @@ export function useRetryTask(id: string) {
 	const navigate = useNavigate();
 	return useMutation({
 		mutationFn: () => api.post<Task>(routes.taskRetry(id)),
-		onSuccess: (t) => {
+		onSuccess: (task) => {
 			void qc.invalidateQueries({ queryKey: qk.tasks });
-			toast.success("Task delegated again");
-			void navigate({ to: "/tasks/$taskId", params: { taskId: t.id } });
+			toast.success(t("Task delegated again"));
+			void navigate({ to: "/tasks/$taskId", params: { taskId: task.id } });
 		},
-		onError: (e) => toast.error("Could not retry the task", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not retry the task"), { description: errorText(e) }),
 	});
 }
 
@@ -173,7 +175,7 @@ export function usePostTaskMessage(id: string) {
 	return useMutation({
 		mutationFn: (body: PostMessageInput) => api.post<TaskMessage>(routes.taskMessages(id), body),
 		onSuccess: (m) => patchDetail(qc, id, (d) => ({ ...d, messages: upsertMessage(d.messages, m) })),
-		onError: (e) => toast.error("Could not send the message", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not send the message"), { description: errorText(e) }),
 	});
 }
 

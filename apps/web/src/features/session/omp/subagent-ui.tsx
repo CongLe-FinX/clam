@@ -1,7 +1,8 @@
 import { Ban, Check, CircleDashed, Loader2, MessageSquarePlus, Square, TriangleAlert, ChevronRight } from "lucide-react";
 import { memo, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { errorMessage } from "@/lib/api";
+import { msg, t, tr, type Msg } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { cn, formatCompact, formatCost, formatDuration } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Tip } from "@/ui/tooltip";
@@ -35,12 +36,12 @@ const TONE = {
 } as const;
 
 export const STATUS = {
-	pending: { label: "Queued", tone: "neutral", Icon: CircleDashed },
-	running: { label: "Running", tone: "accent", Icon: Loader2 },
-	completed: { label: "Done", tone: "success", Icon: Check },
-	failed: { label: "Failed", tone: "danger", Icon: TriangleAlert },
-	aborted: { label: "Stopped", tone: "warning", Icon: Ban },
-} as const satisfies Record<SubagentRec["status"], { label: string; tone: keyof typeof TONE; Icon: typeof Check }>;
+	pending: { label: msg("Queued"), tone: "neutral", Icon: CircleDashed },
+	running: { label: msg("Running"), tone: "accent", Icon: Loader2 },
+	completed: { label: msg("Done"), tone: "success", Icon: Check },
+	failed: { label: msg("Failed"), tone: "danger", Icon: TriangleAlert },
+	aborted: { label: msg("Stopped"), tone: "warning", Icon: Ban },
+} as const satisfies Record<SubagentRec["status"], { label: Msg; tone: keyof typeof TONE; Icon: typeof Check }>;
 
 /** Status with icon and label (never colour alone). */
 export function StatusChip({ status, className }: { status: SubagentRec["status"]; className?: string }) {
@@ -48,7 +49,7 @@ export function StatusChip({ status, className }: { status: SubagentRec["status"
 	return (
 		<span className={cn("inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-2xs font-medium leading-none", TONE[tone], className)}>
 			<Icon className={cn("size-3", status === "running" && "animate-spin")} aria-hidden />
-			{label}
+			{tr(label)}
 		</span>
 	);
 }
@@ -83,7 +84,7 @@ export function liveLine(s: SubagentRec): { kind: "tool" | "text"; text: string 
 		if (s.stage) return { kind: "text", text: s.stage };
 		const last = s.recentOutput.at(-1);
 		if (last) return { kind: "text", text: last };
-		return { kind: "text", text: "Starting…" };
+		return { kind: "text", text: t("Starting…") };
 	}
 	const last = s.recentOutput.at(-1);
 	if (s.status === "failed" && s.error) return { kind: "text", text: s.error };
@@ -92,9 +93,9 @@ export function liveLine(s: SubagentRec): { kind: "tool" | "text"; text: string 
 
 export function SubagentStats({ s, className }: { s: SubagentRec; className?: string }) {
 	const parts: string[] = [];
-	if (s.tokens > 0) parts.push(`${formatCompact(s.tokens)} tok`);
+	if (s.tokens > 0) parts.push(t("{count} tok", { count: formatCompact(s.tokens) }));
 	if (s.cost > 0) parts.push(formatCost(s.cost));
-	if (s.toolCount > 0) parts.push(`${s.toolCount} ${s.toolCount === 1 ? "tool" : "tools"}`);
+	if (s.toolCount > 0) parts.push(t("{count, plural, one {# tool} other {# tools}}", { count: s.toolCount }));
 	if (parts.length === 0) return null;
 	return <span className={cn("tabular font-mono text-2xs text-subtle", className)}>{parts.join(" · ")}</span>;
 }
@@ -115,12 +116,12 @@ export function useStop(store: OmpStore, s: SubagentRec): { stopping: boolean; s
 				.then((r) => {
 					if (!r.cancelled) {
 						setStopping(false);
-						toast.info(`${s.id} had already finished`);
+						toast.info(t("{id} had already finished", { id: s.id }));
 					}
 				})
 				.catch((e) => {
 					setStopping(false);
-					toast.error(`Could not stop ${s.id}: ${errorMessage(e)}`);
+					toast.error(t("Could not stop {id}: {error}", { id: s.id, error: errorText(e) }));
 				});
 		},
 	};
@@ -141,7 +142,7 @@ export const SubagentRow = memo(function SubagentRow({ store, s, compact }: { st
 			<button
 				type="button"
 				onClick={() => store.openSubagent(s.id)}
-				aria-label={`Open ${s.id} transcript`}
+				aria-label={t("Open {id} transcript", { id: s.id })}
 				className={cn("flex min-w-0 flex-1 items-start gap-3 py-2.5 pr-1 pl-3 text-left outline-none focus-visible:bg-surface-2", compact && "py-2")}
 			>
 				<Avatar name={s.id} index={s.index} />
@@ -153,7 +154,7 @@ export const SubagentRow = memo(function SubagentRow({ store, s, compact }: { st
 					{s.description && !compact ? <span className="line-clamp-2 break-words text-xs text-muted-foreground">{s.description}</span> : null}
 					{line ? (
 						<span key={line.text} className={cn("animate-fade-in flex min-w-0 items-center gap-1.5 text-xs", s.status === "failed" ? "text-danger" : "text-muted-foreground")}>
-							{line.kind === "tool" ? <span className="shrink-0 rounded bg-surface-3 px-1 font-mono text-2xs text-subtle">tool</span> : null}
+							{line.kind === "tool" ? <span className="shrink-0 rounded bg-surface-3 px-1 font-mono text-2xs text-subtle">{t("tool")}</span> : null}
 							<span className={cn("min-w-0 flex-1 truncate", line.kind === "tool" && "font-mono text-2xs")} title={line.text}>
 								{line.text}
 							</span>
@@ -180,13 +181,13 @@ export const SubagentRow = memo(function SubagentRow({ store, s, compact }: { st
 			<div className="flex shrink-0 flex-col items-center justify-center gap-0.5 pr-1.5">
 				{live ? (
 					<>
-						<Tip label="Stop this subagent">
-							<Button variant="ghost" size="icon-sm" aria-label={`Stop ${s.id}`} loading={stopping} onClick={stop} className="text-danger hover:bg-danger/10 hover:text-danger">
+						<Tip label={t("Stop this subagent")}>
+							<Button variant="ghost" size="icon-sm" aria-label={t("Stop {id}", { id: s.id })} loading={stopping} onClick={stop} className="text-danger hover:bg-danger/10 hover:text-danger">
 								<Square className="fill-current" />
 							</Button>
 						</Tip>
-						<Tip label="Send it a message">
-							<Button variant="ghost" size="icon-sm" aria-label={`Message ${s.id}`} onClick={() => store.openSubagent(s.id)}>
+						<Tip label={t("Send it a message")}>
+							<Button variant="ghost" size="icon-sm" aria-label={t("Message {id}", { id: s.id })} onClick={() => store.openSubagent(s.id)}>
 								<MessageSquarePlus />
 							</Button>
 						</Tip>

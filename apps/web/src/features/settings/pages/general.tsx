@@ -1,22 +1,42 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import type { NodeSettings } from "@clam/contracts";
-import { errorMessage } from "@/lib/api";
+import { msg, renderServerText, t, tr, type Msg } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { Input } from "@/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
 import { Skeleton } from "@/ui/skeleton";
 import { Switch } from "@/ui/switch";
 import { HandoffSettingsSection } from "@/features/handoff/settings-section";
 import { InlineError, PageBody, PageIntro, SettingsSection } from "../components/section";
+import { LanguagePicker } from "../components/language-picker";
 import { ThemePicker } from "../components/theme-picker";
 import { usePatchSettings, useSettings } from "../hooks";
 
-const APPROVAL_MODES: { value: NodeSettings["approvalMode"]; label: string; hint: string }[] = [
-	{ value: "always-ask", label: "Always ask", hint: "Every tool call needs your approval." },
-	{ value: "always-ask-cached", label: "Always ask (remember)", hint: "Ask once per identical tool call, then remember it for the session." },
-	{ value: "write", label: "Ask for writes", hint: "Read-only tools run freely; file writes and commands need approval." },
-	{ value: "yolo", label: "Auto-approve everything", hint: "Agents run every tool without asking. Use only in disposable environments." },
+const APPROVAL_MODES: { value: NodeSettings["approvalMode"]; label: Msg; hint: Msg }[] = [
+	{ value: "always-ask", label: msg("Always ask"), hint: msg("Every tool call needs your approval.") },
+	{ value: "always-ask-cached", label: msg("Always ask (remember)"), hint: msg("Ask once per identical tool call, then remember it for the session.") },
+	{ value: "write", label: msg("Ask for writes"), hint: msg("Read-only tools run freely; file writes and commands need approval.") },
+	{ value: "yolo", label: msg("Auto-approve everything"), hint: msg("Agents run every tool without asking. Use only in disposable environments.") },
 ];
+
+type SettingField = "nodeName" | "autoStart" | "idle" | "maxRuntimes" | "approval";
+
+/** Toast texts per setting; spelled out so every sentence is one catalog key. */
+function fieldLabels(field: SettingField) {
+	switch (field) {
+		case "nodeName":
+			return { updated: t("Machine name updated"), failed: t("Could not save machine name"), whole: "" };
+		case "autoStart":
+			return { updated: t("Autostart updated"), failed: t("Could not save autostart"), whole: "" };
+		case "idle":
+			return { updated: t("Idle timeout updated"), failed: t("Could not save idle timeout"), whole: t("Idle timeout must be a whole number") };
+		case "maxRuntimes":
+			return { updated: t("Max runtimes updated"), failed: t("Could not save max runtimes"), whole: t("Max runtimes must be a whole number") };
+		case "approval":
+			return { updated: t("Approval mode updated"), failed: t("Could not save approval mode"), whole: "" };
+	}
+}
 
 function Row({ label, hint, children, htmlFor }: { label: string; hint?: string; children: React.ReactNode; htmlFor?: string }) {
 	return (
@@ -86,15 +106,15 @@ export default function GeneralPage() {
 	const settings = useSettings();
 	const patch = usePatchSettings();
 
-	const save = (p: Partial<NodeSettings>, label: string) =>
+	const save = (p: Partial<NodeSettings>, field: SettingField) =>
 		patch.mutate(p, {
-			onSuccess: () => toast.success(`${label} updated`),
-			onError: (e) => toast.error(`Could not save ${label.toLowerCase()}`, { description: errorMessage(e) }),
+			onSuccess: () => toast.success(fieldLabels(field).updated),
+			onError: (e) => toast.error(fieldLabels(field).failed, { description: errorText(e) }),
 		});
-	const num = (key: "runtimeIdleTimeoutMin" | "maxConcurrentRuntimes", label: string) => (v: string) => {
+	const num = (key: "runtimeIdleTimeoutMin" | "maxConcurrentRuntimes", field: SettingField) => (v: string) => {
 		const n = Number(v);
-		if (!Number.isInteger(n)) return toast.error(`${label} must be a whole number`);
-		save({ [key]: n }, label);
+		if (!Number.isInteger(n)) return toast.error(fieldLabels(field).whole);
+		save({ [key]: n }, field);
 	};
 
 	const s = settings.data;
@@ -102,10 +122,19 @@ export default function GeneralPage() {
 
 	return (
 		<>
-			<PageIntro title="General" description="Settings for this machine. Changes apply immediately; running agent processes pick up approval mode on their next start." />
+			<PageIntro title={t("General")} description={t("Settings for this machine. Changes apply immediately; running agent processes pick up approval mode on their next start.")} />
 			<PageBody>
-				<SettingsSection title="Appearance" description="Saved in this browser, so your phone and your desktop can use different themes.">
-					<ThemePicker />
+				<SettingsSection title={t("Appearance")} description={t("Theme and language are saved in this browser, so your phone and your desktop can differ.")}>
+					<div className="space-y-5">
+						<div>
+							<h3 className="mb-2 text-xs font-medium text-muted-foreground">{t("Theme")}</h3>
+							<ThemePicker />
+						</div>
+						<div>
+							<h3 className="mb-2 text-xs font-medium text-muted-foreground">{t("Language")}</h3>
+							<LanguagePicker />
+						</div>
+					</div>
 				</SettingsSection>
 				{settings.isError && <InlineError error={settings.error} onRetry={() => settings.refetch()} />}
 				{settings.isPending && (
@@ -117,32 +146,32 @@ export default function GeneralPage() {
 				)}
 				{s && (
 					<>
-						<SettingsSection title="Machine">
+						<SettingsSection title={t("Machine")}>
 							<div className="divide-y divide-border">
-								<Row label="Machine name" hint="Shown to teammates and in the Agent Network." htmlFor="node-name">
-									<CommitInput id="node-name" value={s.nodeName} onCommit={(v) => save({ nodeName: v }, "Machine name")} />
+								<Row label={t("Machine name")} hint={t("Shown to teammates and in the Agent Network.")} htmlFor="node-name">
+									<CommitInput id="node-name" value={s.nodeName} onCommit={(v) => save({ nodeName: v }, "nodeName")} />
 								</Row>
-								<Row label="Start automatically" hint={s.autoStartDetail ?? "Launch CL Agent Mesh when you log in to this machine."} htmlFor="autostart">
-									<Switch id="autostart" checked={s.autoStart} onCheckedChange={(v) => save({ autoStart: v }, "Autostart")} />
+								<Row label={t("Start automatically")} hint={s.autoStartDetail !== undefined ? renderServerText(s.autoStartDetail, s.autoStartI18n) : t("Launch CL Agent Mesh when you log in to this machine.")} htmlFor="autostart">
+									<Switch id="autostart" checked={s.autoStart} onCheckedChange={(v) => save({ autoStart: v }, "autoStart")} />
 								</Row>
 							</div>
 						</SettingsSection>
 
-						<SettingsSection title="Agent runtime">
+						<SettingsSection title={t("Agent runtime")}>
 							<div className="divide-y divide-border">
-								<Row label="Idle timeout" hint="Stop an idle agent process after this long. It restarts on demand and resumes its session." htmlFor="idle-timeout">
+								<Row label={t("Idle timeout")} hint={t("Stop an idle agent process after this long. It restarts on demand and resumes its session.")} htmlFor="idle-timeout">
 									<CommitInput
 										id="idle-timeout"
 										type="number"
 										min={1}
 										max={1440}
-										suffix="minutes"
+										suffix={t("minutes")}
 										className="w-24"
 										value={s.runtimeIdleTimeoutMin}
-										onCommit={num("runtimeIdleTimeoutMin", "Idle timeout")}
+										onCommit={num("runtimeIdleTimeoutMin", "idle")}
 									/>
 								</Row>
-								<Row label="Max concurrent runtimes" hint="Upper bound for simultaneously running OMP processes on this machine." htmlFor="max-runtimes">
+								<Row label={t("Max concurrent runtimes")} hint={t("Upper bound for simultaneously running OMP processes on this machine.")} htmlFor="max-runtimes">
 									<CommitInput
 										id="max-runtimes"
 										type="number"
@@ -150,18 +179,18 @@ export default function GeneralPage() {
 										max={64}
 										className="w-24"
 										value={s.maxConcurrentRuntimes}
-										onCommit={num("maxConcurrentRuntimes", "Max runtimes")}
+										onCommit={num("maxConcurrentRuntimes", "maxRuntimes")}
 									/>
 								</Row>
-								<Row label="Tool approval mode" hint={mode?.hint} htmlFor="approval-mode">
-									<Select value={s.approvalMode} onValueChange={(v) => save({ approvalMode: v as NodeSettings["approvalMode"] }, "Approval mode")}>
+								<Row label={t("Tool approval mode")} hint={mode ? tr(mode.hint) : undefined} htmlFor="approval-mode">
+									<Select value={s.approvalMode} onValueChange={(v) => save({ approvalMode: v as NodeSettings["approvalMode"] }, "approval")}>
 										<SelectTrigger id="approval-mode" className="w-full sm:w-60">
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
 											{APPROVAL_MODES.map((m) => (
 												<SelectItem key={m.value} value={m.value}>
-													{m.label}
+													{tr(m.label)}
 												</SelectItem>
 											))}
 										</SelectContent>
@@ -170,7 +199,7 @@ export default function GeneralPage() {
 							</div>
 							{s.approvalMode === "yolo" && (
 								<p className="mt-2 rounded-md border border-warning/30 bg-warning/10 p-2.5 text-xs text-warning">
-									Auto-approve is on: agents can run shell commands and modify files without asking.
+									{t("Auto-approve is on: agents can run shell commands and modify files without asking.")}
 								</p>
 							)}
 						</SettingsSection>

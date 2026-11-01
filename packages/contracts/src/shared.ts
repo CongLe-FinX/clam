@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDate } from "./common.ts";
+import { I18nText, IsoDate } from "./common.ts";
 
 /**
  * Shared sessions: one piece of work driven by an agent session on one node, with agents on other nodes joined as
@@ -71,9 +71,11 @@ export const SharedTransfer = z.object({
 	phase: TransferPhase,
 	/** One line describing the current phase, ready to show ("Waiting for node-b to accept the invitation…"). */
 	message: z.string(),
+	/** Structured twin of `message` for localisation; absent on records from older nodes. */
+	i18n: I18nText.optional(),
 	stopRunning: z.boolean(),
 	/** Set with `failed`. */
-	error: z.object({ code: z.string(), message: z.string() }).nullable(),
+	error: z.object({ code: z.string(), message: z.string(), i18n: I18nText.optional() }).nullable(),
 	/** Set with `continuing`: the new driver's session on the target node, and its page (target UI URL + `/sessions/<id>`) when that node's UI URL is known. */
 	newSessionId: z.string().nullable(),
 	newSessionUrl: z.string().nullable(),
@@ -106,6 +108,8 @@ export const SharedSession = z.object({
 	takeoverAvailable: z.boolean(),
 	/** Why takeover is not available (e.g. "no snapshot received yet", "no local clone"). */
 	takeoverBlockedReason: z.string().nullable(),
+	/** Structured twin of `takeoverBlockedReason` for localisation. */
+	takeoverBlockedI18n: I18nText.optional(),
 	/** Rescue branch where this node's unpushed changes were saved after losing the driver role. */
 	rescueBranch: z.string().nullable(),
 	/** Files mode: this node's work after the last checkpoint, saved as a bundle when it lost the driver role (apply it to a project with `sharedRescueApply`). */
@@ -154,6 +158,8 @@ export const SharedMessage = z.object({
 	/** Who should act on it: `all`, the current `lead` (default without mentions), or explicit agents (from @mentions). */
 	to: z.object({ mode: z.enum(["all", "lead", "agents"]), agents: z.array(z.object({ nodeId: z.string(), agentId: z.string() })) }),
 	text: z.string(),
+	/** Structured twin of `text` for localisation (generated system lines); `text` stays the English rendering. Absent on human/agent messages and on messages from older nodes. */
+	i18n: I18nText.optional(),
 	/** Node that accepted the message first (group log is replicated; any online member node can accept). */
 	originNodeId: z.string(),
 	/** Hybrid logical clock used for ordering: sort by (hlc, originNodeId). */

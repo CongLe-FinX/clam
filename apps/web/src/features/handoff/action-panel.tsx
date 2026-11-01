@@ -1,7 +1,8 @@
 import type { Handoff } from "@clam/contracts";
 import { Check, Clock, OctagonAlert, RotateCw, TriangleAlert, Undo2, X, XCircle } from "lucide-react";
 import { useState } from "react";
-import { ApiError, errorMessage } from "@/lib/api";
+import { renderServerText, t, tr } from "@/i18n";
+import { ApiError, errorText } from "@/lib/api";
 import { useAgents, usePeers, useProjects } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -31,23 +32,28 @@ export function DecisionPanel({ h, actions }: { h: Handoff; actions: HandoffActi
 	return (
 		<Card className="shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--accent)_45%,transparent)]">
 			<CardHeader>
-				<CardTitle>{h.source.nodeName} wants to hand this work to this machine</CardTitle>
+				<CardTitle>{t("{name} wants to hand this work to this machine", { name: h.source.nodeName })}</CardTitle>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-4 pt-3">
 				<p className="text-[13px] text-muted-foreground">
-					Accepting restores the {noGit ? "folder bundle" : "branch"} into a separate working folder on this machine, then asks you to approve any setup commands. Your own files are never overwritten, and the source keeps the task
-					until this machine confirms it is ready.
+					{noGit
+						? t(
+								"Accepting restores the folder bundle into a separate working folder on this machine, then asks you to approve any setup commands. Your own files are never overwritten, and the source keeps the task until this machine confirms it is ready.",
+							)
+						: t(
+								"Accepting restores the branch into a separate working folder on this machine, then asks you to approve any setup commands. Your own files are never overwritten, and the source keeps the task until this machine confirms it is ready.",
+							)}
 				</p>
 				{canAccept ? (
 					<div className="grid gap-3 sm:grid-cols-2">
-						<Field label="Project" hint={noGit ? "Optional. By default a fresh folder is created." : "Optional. By default the matching local project is used, or the repository is cloned."}>
+						<Field label={t("Project")} hint={noGit ? t("Optional. By default a fresh folder is created.") : t("Optional. By default the matching local project is used, or the repository is cloned.")}>
 							{(id) => (
 								<Select value={projectId} onValueChange={setProjectId}>
 									<SelectTrigger id={id}>
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
-										<SelectItem value={DEFAULT}>Choose automatically</SelectItem>
+										<SelectItem value={DEFAULT}>{t("Choose automatically")}</SelectItem>
 										{[...(projects.data ?? [])]
 											.sort((a, b) => a.name.localeCompare(b.name))
 											.map((p) => (
@@ -59,14 +65,14 @@ export function DecisionPanel({ h, actions }: { h: Handoff; actions: HandoffActi
 								</Select>
 							)}
 						</Field>
-						<Field label="Agent" hint="Optional. Runs the new session.">
+						<Field label={t("Agent")} hint={t("Optional. Runs the new session.")}>
 							{(id) => (
 								<Select value={agentId} onValueChange={setAgentId}>
 									<SelectTrigger id={id}>
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
-										<SelectItem value={DEFAULT}>Default agent</SelectItem>
+										<SelectItem value={DEFAULT}>{t("Default agent")}</SelectItem>
 										{(agents.data ?? []).map((a) => (
 											<SelectItem key={a.id} value={a.id}>
 												{a.name}
@@ -85,12 +91,12 @@ export function DecisionPanel({ h, actions }: { h: Handoff; actions: HandoffActi
 							loading={actions.decide.isPending}
 							onClick={() => actions.decide.mutate({ decision: "accept", projectId: projectId === DEFAULT ? undefined : projectId, agentId: agentId === DEFAULT ? undefined : agentId })}
 						>
-							<Check /> Accept handoff
+							<Check /> {t("Accept handoff")}
 						</Button>
 					) : null}
 					{canReject ? (
 						<Button variant="outline" className="text-danger" disabled={actions.decide.isPending} onClick={() => setRejectOpen(true)}>
-							<X /> Reject
+							<X /> {t("Reject")}
 						</Button>
 					) : null}
 				</div>
@@ -106,16 +112,16 @@ function RejectDialog({ actions, onClose }: { actions: HandoffActions; onClose: 
 		<Dialog open onOpenChange={(o) => !o && !actions.decide.isPending && onClose()}>
 			<DialogContent sheetOnMobile className="max-w-md">
 				<DialogHeader>
-					<DialogTitle>Reject this handoff?</DialogTitle>
-					<DialogDescription>The source keeps the task and sees your reason.</DialogDescription>
+					<DialogTitle>{t("Reject this handoff?")}</DialogTitle>
+					<DialogDescription>{t("The source keeps the task and sees your reason.")}</DialogDescription>
 				</DialogHeader>
-				<Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={2000} aria-label="Reason" placeholder="Why not? (required)" className="resize-none" />
+				<Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={3} maxLength={2000} aria-label={t("Reason")} placeholder={t("Why not? (required)")} className="resize-none" />
 				<DialogFooter>
 					<Button variant="ghost" onClick={onClose} disabled={actions.decide.isPending}>
-						Back
+						{t("Back")}
 					</Button>
 					<Button variant="danger" disabled={reason.trim() === ""} loading={actions.decide.isPending} onClick={() => actions.decide.mutate({ decision: "reject", reason: reason.trim() }, { onSuccess: onClose })}>
-						Reject handoff
+						{t("Reject handoff")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>
@@ -134,22 +140,22 @@ export function ActionButtons({ h, actions }: { h: Handoff; actions: HandoffActi
 		<div className="flex flex-wrap gap-2">
 			{can("retry") ? (
 				<Button variant="primary" size="sm" loading={actions.retry.isPending} onClick={() => actions.retry.mutate()}>
-					<RotateCw /> {h.role === "target" ? "Retry this step" : "Retry"}
+					<RotateCw /> {h.role === "target" ? t("Retry this step") : t("Retry")}
 				</Button>
 			) : null}
 			{can("extend") ? (
 				<Button variant="outline" size="sm" onClick={() => setDlg("extend")}>
-					<Clock /> Extend deadline
+					<Clock /> {t("Extend deadline")}
 				</Button>
 			) : null}
 			{can("reclaim") ? (
 				<Button variant="outline" size="sm" onClick={() => setDlg("reclaim")}>
-					<Undo2 /> Reclaim task
+					<Undo2 /> {t("Reclaim task")}
 				</Button>
 			) : null}
 			{can("cancel") ? (
 				<Button variant="outline" size="sm" className="text-danger" onClick={() => setDlg("cancel")}>
-					<XCircle /> Cancel handoff
+					<XCircle /> {t("Cancel handoff")}
 				</Button>
 			) : null}
 			{dlg === "cancel" ? <CancelDialog h={h} actions={actions} onClose={() => setDlg(null)} /> : null}
@@ -164,19 +170,19 @@ function CancelDialog({ h, actions, onClose }: { h: Handoff; actions: HandoffAct
 		<Dialog open onOpenChange={(o) => !o && !actions.cancel.isPending && onClose()}>
 			<DialogContent sheetOnMobile className="max-w-md">
 				<DialogHeader>
-					<DialogTitle>Cancel this handoff?</DialogTitle>
+					<DialogTitle>{t("Cancel this handoff?")}</DialogTitle>
 					<DialogDescription>
 						{h.role === "source"
-							? `${h.target.nodeName} stops restoring and discards its copy. The task stays here and keeps running.`
-							: `The restore on this machine stops and its working copy is cleaned up. ${h.source.nodeName} keeps the task.`}
+							? t("{name} stops restoring and discards its copy. The task stays here and keeps running.", { name: h.target.nodeName })
+							: t("The restore on this machine stops and its working copy is cleaned up. {name} keeps the task.", { name: h.source.nodeName })}
 					</DialogDescription>
 				</DialogHeader>
 				<DialogFooter>
 					<Button variant="ghost" onClick={onClose} disabled={actions.cancel.isPending}>
-						Keep going
+						{t("Keep going")}
 					</Button>
 					<Button variant="danger" loading={actions.cancel.isPending} onClick={() => actions.cancel.mutate(undefined, { onSuccess: onClose })}>
-						Cancel handoff
+						{t("Cancel handoff")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>
@@ -190,10 +196,10 @@ function ExtendDialog({ actions, onClose }: { actions: HandoffActions; onClose: 
 		<Dialog open onOpenChange={(o) => !o && !actions.extend.isPending && onClose()}>
 			<DialogContent sheetOnMobile className="max-w-sm">
 				<DialogHeader>
-					<DialogTitle>Extend the restore deadline</DialogTitle>
-					<DialogDescription>Gives the target more time to finish restoring and acknowledge. The task stays with this machine until it does.</DialogDescription>
+					<DialogTitle>{t("Extend the restore deadline")}</DialogTitle>
+					<DialogDescription>{t("Gives the target more time to finish restoring and acknowledge. The task stays with this machine until it does.")}</DialogDescription>
 				</DialogHeader>
-				<Field label="Add">
+				<Field label={t("Add")}>
 					{(id) => (
 						<Select value={String(minutes)} onValueChange={(v) => setMinutes(Number(v))}>
 							<SelectTrigger id={id}>
@@ -202,7 +208,7 @@ function ExtendDialog({ actions, onClose }: { actions: HandoffActions; onClose: 
 							<SelectContent>
 								{EXTEND_OPTIONS.map((m) => (
 									<SelectItem key={m} value={String(m)}>
-										{m < 60 ? `${m} minutes` : `${m / 60} ${m === 60 ? "hour" : "hours"}`}
+										{m < 60 ? t("{count, plural, one {# minute} other {# minutes}}", { count: m }) : t("{count, plural, one {# hour} other {# hours}}", { count: m / 60 })}
 									</SelectItem>
 								))}
 							</SelectContent>
@@ -211,10 +217,10 @@ function ExtendDialog({ actions, onClose }: { actions: HandoffActions; onClose: 
 				</Field>
 				<DialogFooter>
 					<Button variant="ghost" onClick={onClose} disabled={actions.extend.isPending}>
-						Back
+						{t("Back")}
 					</Button>
 					<Button variant="primary" loading={actions.extend.isPending} onClick={() => actions.extend.mutate(minutes, { onSuccess: onClose })}>
-						Extend
+						{t("Extend")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>
@@ -236,7 +242,7 @@ function ReclaimDialog({ h, actions, onClose }: { h: Handoff; actions: HandoffAc
 		actions.reclaim.mutate(mustOverride && override, {
 			onSuccess: onClose,
 			onError: (e) => {
-				setError(errorMessage(e));
+				setError(errorText(e));
 				if (e instanceof ApiError && (e.status === 409 || e.status === 412 || e.status === 422)) setServerAskedOverride(true);
 			},
 		});
@@ -245,28 +251,28 @@ function ReclaimDialog({ h, actions, onClose }: { h: Handoff; actions: HandoffAc
 		<Dialog open onOpenChange={(o) => !o && !actions.reclaim.isPending && onClose()}>
 			<DialogContent sheetOnMobile className="max-w-md">
 				<DialogHeader>
-					<DialogTitle>Reclaim “{h.title}” on this machine?</DialogTitle>
+					<DialogTitle>{t("Reclaim “{title}” on this machine?", { title: h.title })}</DialogTitle>
 					<DialogDescription>
-						This machine takes the task back and {h.target.nodeName} is told the handoff is void. Ownership moves to a new epoch so the old one can never write again.
+						{t("This machine takes the task back and {name} is told the handoff is void. Ownership moves to a new epoch so the old one can never write again.", { name: h.target.nodeName })}
 					</DialogDescription>
 				</DialogHeader>
 				<div className="scrollbar-thin -mx-1 flex min-h-0 flex-col gap-3 overflow-y-auto px-1">
 					<div role="alert" className="flex items-start gap-2.5 rounded-xl bg-warning/10 p-3 text-[13px] shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--warning)_35%,transparent)]">
 						<TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
 						<div className="min-w-0">
-							<strong>Risk of duplicate execution.</strong> {RECLAIM_RISK}
+							<strong>{t("Risk of duplicate execution.")}</strong> {tr(RECLAIM_RISK)}
 						</div>
 					</div>
 					{mustOverride ? (
 						<label className="flex cursor-pointer items-start gap-2.5 text-[13px]">
 							<input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--accent)]" />
 							<span>
-								{unreachable ? `${h.target.nodeName} is not reachable, so I cannot check whether it acknowledged. ` : "The server could not prove the target did not acknowledge. "}
-								<strong>I understand the risk and want to reclaim anyway.</strong>
+								{unreachable ? t("{name} is not reachable, so I cannot check whether it acknowledged.", { name: h.target.nodeName }) : t("The server could not prove the target did not acknowledge.")}{" "}
+								<strong>{t("I understand the risk and want to reclaim anyway.")}</strong>
 							</span>
 						</label>
 					) : (
-						<p className="text-xs text-subtle">{h.target.nodeName} is reachable, so this machine first asks it whether it acknowledged. If it did, nothing is reclaimed.</p>
+						<p className="text-xs text-subtle">{t("{name} is reachable, so this machine first asks it whether it acknowledged. If it did, nothing is reclaimed.", { name: h.target.nodeName })}</p>
 					)}
 					{error ? (
 						<p role="alert" className="break-words text-xs text-danger">
@@ -276,10 +282,10 @@ function ReclaimDialog({ h, actions, onClose }: { h: Handoff; actions: HandoffAc
 				</div>
 				<DialogFooter>
 					<Button variant="ghost" onClick={onClose} disabled={actions.reclaim.isPending}>
-						Keep waiting
+						{t("Keep waiting")}
 					</Button>
 					<Button variant="danger" disabled={mustOverride && !override} loading={actions.reclaim.isPending} onClick={reclaim}>
-						Reclaim task
+						{t("Reclaim task")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>
@@ -289,7 +295,9 @@ function ReclaimDialog({ h, actions, onClose }: { h: Handoff; actions: HandoffAc
 
 /** Plain-English failure explanation with the recommended next actions. Also covers an ack timeout that carries no failure record. */
 export function FailureCard({ h, actions }: { h: Handoff; actions: HandoffActions }) {
-	const failure = h.failure ?? (h.state === "ack_timeout" ? { code: "timeout" as const, detail: `${h.target.nodeName} has not acknowledged before the deadline.`, step: null } : null);
+	const failure =
+		h.failure ??
+		(h.state === "ack_timeout" ? { code: "timeout" as const, detail: t("{name} has not acknowledged before the deadline.", { name: h.target.nodeName }), i18n: undefined, step: null } : null);
 	if (!failure) return null;
 	const text = FAILURE_TEXT[failure.code];
 	return (
@@ -298,22 +306,21 @@ export function FailureCard({ h, actions }: { h: Handoff; actions: HandoffAction
 				<div className="flex items-start gap-2.5">
 					<OctagonAlert className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden />
 					<div className="min-w-0">
-						<h3 className="text-sm font-semibold text-danger">{text.title}</h3>
-						<p className="mt-1 text-[13px]">{text.body}</p>
+						<h3 className="text-sm font-semibold text-danger">{tr(text.title)}</h3>
+						<p className="mt-1 text-[13px]">{tr(text.body)}</p>
 						<p className="mt-1.5 text-[13px] text-muted-foreground">
-							<span className="font-medium text-foreground">Recommended: </span>
-							{text.advice}
+							<span className="font-medium text-foreground">{t("Recommended: ")}</span>
+							{tr(text.advice)}
 						</p>
 					</div>
 				</div>
 				{failure.detail ? (
-					<pre className={cn("scrollbar-thin max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-2 p-2.5 font-mono text-xs text-muted-foreground")}>{failure.detail}</pre>
+					<pre className={cn("scrollbar-thin max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-2 p-2.5 font-mono text-xs text-muted-foreground")}>{renderServerText(failure.detail, failure.i18n)}</pre>
 				) : null}
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
 					<ActionButtons h={h} actions={actions} />
 					<span className="font-mono text-2xs text-subtle">
-						code {failure.code}
-						{failure.step !== null ? ` · step ${failure.step}` : ""}
+						{failure.step !== null ? t("code {code} · step {step}", { code: failure.code, step: failure.step }) : t("code {code}", { code: failure.code })}
 					</span>
 				</div>
 			</CardContent>

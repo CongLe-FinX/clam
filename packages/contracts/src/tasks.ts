@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDate } from "./common.ts";
+import { I18nText, IsoDate } from "./common.ts";
 
 /**
  * Local UI contracts for M4 (delegation, task engine, agent-to-agent discussion).
@@ -89,11 +89,13 @@ export const Task = z.object({
 	constraints: TaskConstraints,
 	/** Why it was rejected / failed / blocked. */
 	reason: z.string().nullable(),
+	/** Structured twin of `reason` for localisation when the reason is our own text (absent for a user's reason or an older node). */
+	reasonI18n: I18nText.optional(),
 	result: TaskResult.nullable(),
 	/** Executor-reported spend for this task (USD), when known. */
 	cost: z.number().nullable(),
 	/** Sender side: delivery of the task itself to the executor (outbox). */
-	delivery: z.object({ state: z.enum(["pending", "delivered", "failed"]), attempts: z.number().int(), lastError: z.string().nullable() }),
+	delivery: z.object({ state: z.enum(["pending", "delivered", "failed"]), attempts: z.number().int(), lastError: z.string().nullable(), lastErrorI18n: I18nText.optional() }),
 	/** Agent-authored messages left before the discussion needs a human (loop guard). */
 	agentMessageBudget: z.number().int(),
 	unreadMessages: z.number().int(),
@@ -113,6 +115,8 @@ export const TaskEvent = z.object({
 	at: IsoDate,
 	/** Human-readable one-liner for timelines. */
 	summary: z.string(),
+	/** Structured twin of `summary` for localisation; `summary` stays the English rendering. Absent on events from older nodes. */
+	i18n: I18nText.optional(),
 	payload: z.unknown(),
 });
 export type TaskEvent = z.infer<typeof TaskEvent>;
@@ -206,6 +210,9 @@ export const ActivityItem = z.object({
 	workspaceId: z.string().nullable(),
 	nodeName: z.string(),
 	summary: z.string(),
+	/** Set for task status entries: `summary` is `<subject>: <text of i18n>` (subject = the task title, never translated). Without it `i18n` twins the whole `summary`. */
+	subject: z.string().optional(),
+	i18n: I18nText.optional(),
 });
 export type ActivityItem = z.infer<typeof ActivityItem>;
 

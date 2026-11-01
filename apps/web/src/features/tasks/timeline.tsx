@@ -1,7 +1,8 @@
 import type { TaskEvent } from "@clam/contracts";
 import { CheckCheck, CircleDot, History, MessageSquare, StickyNote, Wrench, Zap, type LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
-import { cn } from "@/lib/utils";
+import { msg, renderServerText, t, tr, type Msg } from "@/i18n";
+import { cn, formatDate, formatNumber } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
 
@@ -14,8 +15,17 @@ const ICON: Record<TaskEvent["type"], LucideIcon> = {
 	note: StickyNote,
 	late_result: History,
 };
+const TYPE_LABEL: Record<TaskEvent["type"], Msg> = {
+	status: msg("Status"),
+	progress: msg("Progress"),
+	tool: msg("Tool"),
+	message: msg("Message"),
+	result: msg("Result"),
+	note: msg("Note"),
+	late_result: msg("Late result"),
+};
 const SHOWN = 12;
-const time = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const STAMP: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" };
 
 /** Newest first. Messages live in the Discussion, so they are left out here. */
 export function Timeline({ events }: { events: TaskEvent[] }) {
@@ -25,12 +35,12 @@ export function Timeline({ events }: { events: TaskEvent[] }) {
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle>Timeline</CardTitle>
+				<CardTitle>{t("Timeline")}</CardTitle>
 				<span className="tabular font-mono text-2xs text-subtle">{list.length}</span>
 			</CardHeader>
 			<CardContent className="pt-3">
 				{list.length === 0 ? (
-					<p className="text-[13px] text-subtle">No events yet.</p>
+					<p className="text-[13px] text-subtle">{t("No events yet.")}</p>
 				) : (
 					<ol className="flex flex-col">
 						{shown.map((e, i) => {
@@ -42,9 +52,9 @@ export function Timeline({ events }: { events: TaskEvent[] }) {
 										<Icon className="size-2.5" aria-hidden />
 									</span>
 									<div className="min-w-0 flex-1">
-										<p className="break-words text-[13px] leading-snug">{e.summary}</p>
-										<p className="tabular text-2xs text-subtle" title={`seq ${e.seq}`}>
-											{time.format(Date.parse(e.at))} · {e.type}
+										<p className="break-words text-[13px] leading-snug">{renderServerText(e.summary, e.i18n)}</p>
+										<p className="tabular text-2xs text-subtle" title={t("seq {seq}", { seq: e.seq })}>
+											{formatDate(e.at, STAMP)} · {tr(TYPE_LABEL[e.type])}
 										</p>
 									</div>
 								</li>
@@ -54,7 +64,7 @@ export function Timeline({ events }: { events: TaskEvent[] }) {
 				)}
 				{list.length > SHOWN ? (
 					<Button variant="ghost" size="sm" className="mt-2 w-full" onClick={() => setAll((v) => !v)}>
-						{all ? "Show fewer" : `Show all ${list.length}`}
+						{all ? t("Show fewer") : t("Show all {count}", { count: formatNumber(list.length) })}
 					</Button>
 				) : null}
 			</CardContent>

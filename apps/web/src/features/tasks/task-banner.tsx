@@ -1,21 +1,24 @@
 import type { Task } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Network } from "lucide-react";
-import { useMemo } from "react";
+import { type ReactNode, useMemo } from "react";
+import { T, t } from "@/i18n";
 import { isActiveTask, useTasks } from "@/lib/queries";
 import { TaskStatusPill } from "./components.tsx";
 import { partyLabel } from "./format.ts";
 
-function Row({ task, verb, other }: { task: Task; verb: string; other: string }) {
+const BOLD = { b: <span className="font-medium" /> };
+
+function Row({ task, children }: { task: Task; children: ReactNode }) {
 	return (
 		<div className="flex min-h-9 items-center gap-2 px-3 text-[13px] coarse:min-h-11">
 			<Network className="size-4 shrink-0 text-accent" aria-hidden />
 			<span className="min-w-0 flex-1 truncate">
-				{verb} <span className="font-medium">‘{task.title}’</span> {other}
+				{children}
 			</span>
 			<TaskStatusPill status={task.status} className="shrink-0" />
 			<Link to="/tasks/$taskId" params={{ taskId: task.id }} className="inline-flex shrink-0 items-center gap-0.5 rounded-md px-1 py-0.5 text-xs font-medium text-accent hover:underline coarse:py-2">
-				Open <ArrowUpRight className="size-3" aria-hidden />
+				{t("Open")} <ArrowUpRight className="size-3" aria-hidden />
 			</Link>
 		</div>
 	);
@@ -37,11 +40,19 @@ export function TaskBanner({ sessionId }: { sessionId: string }) {
 	if (!executing && delegated.length === 0) return null;
 	return (
 		<div className="animate-fade-in flex shrink-0 flex-col divide-y border-b bg-accent-soft/60">
-			{executing ? <Row task={executing} verb={isActiveTask(executing) ? "Running task" : "Task"} other={`for ${executing.sender.nodeName}`} /> : null}
-			{delegated.slice(0, 2).map((t) => (
-				<Row key={t.id} task={t} verb="Delegated" other={`to ${partyLabel(t.executor)}`} />
+			{executing ? <Row task={executing}>
+				{isActiveTask(executing) ? (
+					<T text="Running task ‘<b>{title}</b>’ for {name}" params={{ title: executing.title, name: executing.sender.nodeName }} tags={BOLD} />
+				) : (
+					<T text="Task ‘<b>{title}</b>’ for {name}" params={{ title: executing.title, name: executing.sender.nodeName }} tags={BOLD} />
+				)}
+			</Row> : null}
+			{delegated.slice(0, 2).map((d) => (
+				<Row key={d.id} task={d} >
+					<T text="Delegated ‘<b>{title}</b>’ to {name}" params={{ title: d.title, name: partyLabel(d.executor) }} tags={BOLD} />
+				</Row>
 			))}
-			{delegated.length > 2 ? <p className="px-3 py-1.5 text-2xs text-subtle">+{delegated.length - 2} more delegated tasks</p> : null}
+			{delegated.length > 2 ? <p className="px-3 py-1.5 text-2xs text-subtle">{t("{count, plural, one {+# more delegated task} other {+# more delegated tasks}}", { count: delegated.length - 2 })}</p> : null}
 		</div>
 	);
 }

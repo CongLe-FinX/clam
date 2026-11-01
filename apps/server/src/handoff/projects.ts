@@ -1,3 +1,4 @@
+import { i18nMsg } from "@clam/contracts";
 import { agents, projects, workspaces } from "@clam/database";
 import type { HandoffManifest } from "@clam/handoff-engine";
 import { normalizeRepoUrl } from "@clam/task-engine";
@@ -34,21 +35,21 @@ export function resolveTargetProject(ctx: ServerContext, manifest: HandoffManife
 		const candidates = candidateProjects(ctx, key);
 		const projectId = chosen ?? (candidates.length === 1 ? candidates[0]?.id : undefined);
 		if (!projectId) {
-			throw new ApiError(409, "project_required", candidates.length === 0 ? "No local project is linked to this repository; choose a project explicitly" : "Several local projects match this repository; choose one", {
+			throw new ApiError(409, "project_required", candidates.length === 0 ? i18nMsg("No local project is linked to this repository; choose a project explicitly") : i18nMsg("Several local projects match this repository; choose one"), {
 				candidates: candidates.map((p) => p.id),
 			});
 		}
 		const project = ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
 		if (!project) throw ApiError.notFound("Project");
 		if (!project.repository || `${project.repository.owner}/${project.repository.name}`.toLowerCase() !== key) {
-			throw new ApiError(409, "project_mismatch", "That project is not linked to the handed-over repository");
+			throw new ApiError(409, "project_mismatch", i18nMsg("That project is not linked to the handed-over repository"));
 		}
 		return { project, created: false };
 	}
 	if (chosen) {
 		const project = ctx.db.select().from(projects).where(eq(projects.id, chosen)).get();
 		if (!project) throw ApiError.notFound("Project");
-		if (project.workspaceId !== manifest.workspaceId) throw new ApiError(409, "project_mismatch", "That project belongs to another workspace than the task");
+		if (project.workspaceId !== manifest.workspaceId) throw new ApiError(409, "project_mismatch", i18nMsg("That project belongs to another workspace than the task"));
 		return { project, created: false };
 	}
 	if (!ctx.db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, manifest.workspaceId)).get()) throw ApiError.notFound("Workspace");
@@ -59,10 +60,10 @@ export function resolveTargetProject(ctx: ServerContext, manifest: HandoffManife
 export function resolveTargetAgent(ctx: ServerContext, choice: { agentId?: string | null | undefined }): { id: string; name: string } {
 	if (choice.agentId) {
 		const agent = ctx.db.select().from(agents).where(and(eq(agents.id, choice.agentId), eq(agents.runtime, "omp"))).get();
-		if (!agent) throw new ApiError(400, "unknown_agent", "The agent does not exist on this node");
+		if (!agent) throw new ApiError(400, "unknown_agent", i18nMsg("The agent does not exist on this node"));
 		return { id: agent.id, name: agent.name };
 	}
 	const first = ctx.db.select().from(agents).where(eq(agents.runtime, "omp")).orderBy(asc(agents.createdAt)).get();
-	if (!first) throw ApiError.unavailable("This node has no OMP agent configured");
+	if (!first) throw ApiError.unavailable(i18nMsg("This node has no OMP agent configured"));
 	return { id: first.id, name: first.name };
 }

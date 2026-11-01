@@ -3,7 +3,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Check, FolderGit2, Link2, Lock, Search, ShieldCheck, X } from "lucide-react";
 import { toast } from "sonner";
 import type { GithubAccount, GithubRepo, Project, RepoPermissionCheck } from "@clam/contracts";
-import { errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
@@ -72,24 +73,24 @@ function RepoRow({
 							{repo.fullName}
 						</a>
 					</div>
-					<div className="truncate text-xs text-muted-foreground">{repo.description ?? "No description"}</div>
+					<div className="truncate text-xs text-muted-foreground">{repo.description ?? t("No description")}</div>
 				</div>
 				<div className="flex shrink-0 gap-1.5">
-					<Button size="sm" variant="outline" loading={checking} onClick={onCheck} aria-label={`Check access to ${repo.fullName}`}>
+					<Button size="sm" variant="outline" loading={checking} onClick={onCheck} aria-label={t("Check access to {repo}", { repo: repo.fullName })}>
 						<ShieldCheck className="size-3.5" />
-						<span className="hidden sm:inline">Check access</span>
+						<span className="hidden sm:inline">{t("Check access")}</span>
 					</Button>
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
-							<Button size="sm" variant="secondary" aria-label={`Link ${repo.fullName} to a project`}>
+							<Button size="sm" variant="secondary" aria-label={t("Link {repo} to a project", { repo: repo.fullName })}>
 								<Link2 className="size-3.5" />
-								<span className="hidden sm:inline">Link</span>
+								<span className="hidden sm:inline">{t("Link")}</span>
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end" className="max-h-72 w-64 overflow-y-auto">
-							<DropdownMenuLabel>Link to project</DropdownMenuLabel>
+							<DropdownMenuLabel>{t("Link to project")}</DropdownMenuLabel>
 							<DropdownMenuSeparator />
-							{projects.length === 0 && <div className="px-2 py-3 text-xs text-muted-foreground">No projects yet. Create one first.</div>}
+							{projects.length === 0 && <div className="px-2 py-3 text-xs text-muted-foreground">{t("No projects yet. Create one first.")}</div>}
 							{projects.map((p) => (
 								<DropdownMenuItem key={p.id} onSelect={() => onLink(p)}>
 									<span className="min-w-0 flex-1 truncate">{p.name}</span>
@@ -104,24 +105,24 @@ function RepoRow({
 				{repo.private && (
 					<Badge variant="outline" className="gap-1">
 						<Lock className="size-3" />
-						Private
+						{t("Private")}
 					</Badge>
 				)}
-				{linked.length > 0 && <Badge variant="accent">Linked</Badge>}
-				<span>{repo.pushedAt ? `Pushed ${fmtAgo(repo.pushedAt)}` : "Never pushed"}</span>
+				{linked.length > 0 && <Badge variant="accent">{t("Linked")}</Badge>}
+				<span>{repo.pushedAt ? t("Pushed {when}", { when: fmtAgo(repo.pushedAt) }) : t("Never pushed")}</span>
 				<span className="font-mono">{repo.defaultBranch}</span>
 				{check ? (
 					<span className="flex flex-wrap gap-1">
-						<PermChip ok={check.clone} label="Clone" />
-						<PermChip ok={check.fetch} label="Fetch" />
-						<PermChip ok={check.push} label="Push" />
-						<PermChip ok={check.createPr} label="Create PR" />
+						<PermChip ok={check.clone} label={t("Clone")} />
+						<PermChip ok={check.fetch} label={t("Fetch")} />
+						<PermChip ok={check.push} label={t("Push")} />
+						<PermChip ok={check.createPr} label={t("Create PR")} />
 					</span>
 				) : (
 					<span className="flex gap-1">
-						{repo.permissions.pull && <span>pull</span>}
-						{repo.permissions.push && <span>push</span>}
-						{repo.permissions.admin && <span>admin</span>}
+						{repo.permissions.pull && <span>{t("pull")}</span>}
+						{repo.permissions.push && <span>{t("push")}</span>}
+						{repo.permissions.admin && <span>{t("admin")}</span>}
 					</span>
 				)}
 			</div>
@@ -137,9 +138,9 @@ export function GithubReposDialog({ account, open, onOpenChange }: { account: Gi
 				<DialogHeader>
 					<DialogTitle className="flex items-center gap-2">
 						<FolderGit2 className="size-4" />
-						Repositories{account ? ` · ${account.login}` : ""}
+						{account ? t("Repositories · {login}", { login: account.login }) : t("Repositories")}
 					</DialogTitle>
-					<DialogDescription>Check clone, fetch, push and pull-request access, or link a repository to a project.</DialogDescription>
+					<DialogDescription>{t("Check clone, fetch, push and pull-request access, or link a repository to a project.")}</DialogDescription>
 				</DialogHeader>
 				{open && account && <ReposBody account={account} />}
 			</DialogContent>
@@ -173,7 +174,7 @@ function ReposBody({ account }: { account: GithubAccount }) {
 			{ accountId: account.id, owner: r.owner, repo: r.name },
 			{
 				onSuccess: (res) => setChecks((c) => ({ ...c, [r.id]: res })),
-				onError: (e) => toast.error(`Access check failed for ${r.fullName}`, { description: errorMessage(e) }),
+				onError: (e) => toast.error(t("Access check failed for {repo}", { repo: r.fullName }), { description: errorText(e) }),
 				onSettled: () => setCheckingId(null),
 			},
 		);
@@ -186,8 +187,8 @@ function ReposBody({ account }: { account: GithubAccount }) {
 				repository: { owner: r.owner, name: r.name, externalId: r.id, htmlUrl: r.htmlUrl, defaultBranch: r.defaultBranch, accountId: account.id },
 			},
 			{
-				onSuccess: () => toast.success(`Linked ${r.fullName} to ${p.name}`),
-				onError: (e) => toast.error("Could not link repository", { description: errorMessage(e) }),
+				onSuccess: () => toast.success(t("Linked {repo} to {project}", { repo: r.fullName, project: p.name })),
+				onError: (e) => toast.error(t("Could not link repository"), { description: errorText(e) }),
 			},
 		);
 
@@ -195,7 +196,7 @@ function ReposBody({ account }: { account: GithubAccount }) {
 		<>
 			<div className="relative">
 				<Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-				<Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search repositories" className="pl-8" aria-label="Search repositories" />
+				<Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("Search repositories")} className="pl-8" aria-label={t("Search repositories")} />
 			</div>
 			{repos.isError && <InlineError error={repos.error} onRetry={() => repos.refetch()} />}
 			<div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
@@ -207,7 +208,7 @@ function ReposBody({ account }: { account: GithubAccount }) {
 					</div>
 				)}
 				{!repos.isPending && items.length === 0 && !repos.isError && (
-					<div className="py-10 text-center text-sm text-muted-foreground">{dq ? `No repositories match “${dq}”.` : "This account has no accessible repositories."}</div>
+					<div className="py-10 text-center text-sm text-muted-foreground">{dq ? t("No repositories match “{query}”.", { query: dq }) : t("This account has no accessible repositories.")}</div>
 				)}
 				<div style={{ height: virt.getTotalSize(), position: "relative" }}>
 					{vItems.map((v) => {

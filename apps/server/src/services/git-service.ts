@@ -2,25 +2,7 @@ import { type FSWatcher, watch } from "node:fs";
 import { readdir, realpath, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import type { z } from "zod";
-import type {
-	ClmeshInitResult,
-	CloneProjectBody,
-	CreatePullRequestBody,
-	GitBranch,
-	GitCommit,
-	GitConflictReport,
-	GitDiff,
-	GitDiffQuery,
-	GitIdentity,
-	GitLogPage,
-	GitOperation,
-	GitPullResult,
-	GitPushResult,
-	GitStatus,
-	Project,
-	PullRequest,
-	RepositoryRef,
-} from "@clam/contracts";
+import { i18nMsg, type ClmeshInitResult, type CloneProjectBody, type CreatePullRequestBody, type GitBranch, type GitCommit, type GitConflictReport, type GitDiff, type GitDiffQuery, type GitIdentity, type GitLogPage, type GitOperation, type GitPullResult, type GitPushResult, type GitStatus, type Project, type PullRequest, type RepositoryRef } from "@clam/contracts";
 import { agentSessions, agents, gitSyncStates, projects, settings, workspaces } from "@clam/database";
 import { type GitAuth, initClmesh } from "@clam/git-engine";
 import { and, eq } from "drizzle-orm";
@@ -52,8 +34,8 @@ export interface OverviewEntry {
 export function safeGitPaths(paths: readonly string[]): string[] {
 	return paths.map((input) => {
 		const rel = normalizeRelativePath(input);
-		if (rel === "" ) throw ApiError.badRequest("A path must name a file or directory inside the project, not the project root.");
-		if (rel === ".git" || rel.startsWith(".git/")) throw ApiError.badRequest("Paths inside .git cannot be addressed.");
+		if (rel === "" ) throw ApiError.badRequest(i18nMsg("A path must name a file or directory inside the project, not the project root."));
+		if (rel === ".git" || rel.startsWith(".git/")) throw ApiError.badRequest(i18nMsg("Paths inside .git cannot be addressed."));
 		return rel;
 	});
 }
@@ -61,7 +43,7 @@ export function safeGitPaths(paths: readonly string[]): string[] {
 /** A ref/branch name from a request: no option injection (`-x`), whitespace or control characters. */
 export function safeRef(ref: string, what = "ref"): string {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
-	if (ref.startsWith("-") || /[\s\u0000-\u001f\u007f]/.test(ref)) throw ApiError.badRequest(`Invalid ${what}: ${JSON.stringify(ref.slice(0, 80))}`);
+	if (ref.startsWith("-") || /[\s\u0000-\u001f\u007f]/.test(ref)) throw ApiError.badRequest(i18nMsg("Invalid {what}: {ref}", { what, ref: JSON.stringify(ref.slice(0, 80)) }));
 	return ref;
 }
 
@@ -127,10 +109,10 @@ export class GitService {
 			real = await realpath(row.path);
 			if (!(await stat(real)).isDirectory()) throw new Error("not a directory");
 		} catch {
-			throw new ApiError(409, "project_dir_missing", `The project directory no longer exists: ${row.path}`);
+			throw new ApiError(409, "project_dir_missing", i18nMsg("The project directory no longer exists: {path}", { path: row.path }));
 		}
 		if (real !== row.path) {
-			throw new ApiError(409, "project_dir_moved", `The project directory resolves elsewhere now (${real}); re-add the project at its new location.`);
+			throw new ApiError(409, "project_dir_moved", i18nMsg("The project directory resolves elsewhere now ({path}); re-add the project at its new location.", { path: real }));
 		}
 		return { row, dir: row.path };
 	}
@@ -216,7 +198,7 @@ export class GitService {
 		if (configured) return { ...configured, source: "git-config" };
 		const accountId = this.accountIdFor(row);
 		if (accountId) return { ...(await this.ctx.github.commitIdentity(accountId)), source: "account" };
-		throw new ApiError(409, "no_git_identity", "No commit identity is available: connect a GitHub account, set user.name/user.email in the repository, or set an identity for this project.");
+		throw new ApiError(409, "no_git_identity", i18nMsg("No commit identity is available: connect a GitHub account, set user.name/user.email in the repository, or set an identity for this project."));
 	}
 
 	identity(projectId: string): Promise<GitIdentity> {
@@ -438,8 +420,8 @@ export class GitService {
 			const q: GitDiffQuery = { ...query };
 			if (q.path !== undefined) q.path = safeGitPaths([q.path])[0] as string;
 			for (const key of ["commit", "base", "head"] as const) if (q[key] !== undefined) q[key] = safeRef(q[key] as string, key);
-			if (q.scope === "commit" && !q.commit) throw ApiError.badRequest("scope=commit needs a commit.");
-			if (q.scope === "range" && (!q.base || !q.head)) throw ApiError.badRequest("scope=range needs base and head.");
+			if (q.scope === "commit" && !q.commit) throw ApiError.badRequest(i18nMsg("scope=commit needs a commit."));
+			if (q.scope === "range" && (!q.base || !q.head)) throw ApiError.badRequest(i18nMsg("scope=range needs base and head."));
 			return this.ctx.git.diff(dir, q);
 		});
 	}
@@ -527,7 +509,7 @@ export class GitService {
 			.where(eq(agentSessions.id, sessionId))
 			.get();
 		if (!session) throw ApiError.notFound("Session");
-		if (session.projectId !== projectId) throw ApiError.badRequest("That session belongs to a different project.");
+		if (session.projectId !== projectId) throw ApiError.badRequest(i18nMsg("That session belongs to a different project."));
 		return `${session.agentName}@${readNodeSettings(this.ctx.db).nodeName}`;
 	}
 
@@ -592,9 +574,9 @@ export class GitService {
 
 	private repoFor(row: ProjectRow): { owner: string; repo: string; accountId: string } {
 		const repository = row.repository;
-		if (!repository) throw new ApiError(409, "no_repository", "This project is not linked to a GitHub repository.");
+		if (!repository) throw new ApiError(409, "no_repository", i18nMsg("This project is not linked to a GitHub repository."));
 		const accountId = this.accountIdFor(row);
-		if (!accountId) throw new ApiError(409, "no_github_account", "Connect a GitHub account (Settings → GitHub) to use pull requests.");
+		if (!accountId) throw new ApiError(409, "no_github_account", i18nMsg("Connect a GitHub account (Settings → GitHub) to use pull requests."));
 		return { owner: repository.owner, repo: repository.name, accountId };
 	}
 
@@ -603,11 +585,11 @@ export class GitService {
 			const { owner, repo, accountId } = this.repoFor(row);
 			const status = await this.ctx.git.status(dir);
 			const head = safeRef(body.head ?? status.branch ?? "", "head branch");
-			if (head === "") throw ApiError.badRequest("No head branch: check out a branch or pass `head`.");
+			if (head === "") throw ApiError.badRequest(i18nMsg("No head branch: check out a branch or pass `head`."));
 			const base = safeRef(body.base, "base branch");
 			const remoteBranches = await this.ctx.git.branches(dir);
 			if (!remoteBranches.some((b) => b.remote && (b.name === `origin/${head}` || b.name === `refs/remotes/origin/${head}`))) {
-				throw new ApiError(409, "branch_not_pushed", `Branch ${head} is not on the remote yet; push it before opening a pull request.`);
+				throw new ApiError(409, "branch_not_pushed", i18nMsg("Branch {branch} is not on the remote yet; push it before opening a pull request.", { branch: head }));
 			}
 			return this.ctx.github.createPullRequest(accountId, owner, repo, { title: body.title, body: body.body, head, base, draft: body.draft });
 		});
@@ -635,9 +617,9 @@ export class GitService {
 	 */
 	async startClone(body: CloneProjectInput): Promise<GitOperation> {
 		return this.guarded(async () => {
-			if (!NAME.test(body.owner) || !NAME.test(body.repo)) throw ApiError.badRequest("Invalid repository owner or name.");
+			if (!NAME.test(body.owner) || !NAME.test(body.repo)) throw ApiError.badRequest(i18nMsg("Invalid repository owner or name."));
 			if (body.branch !== undefined) safeRef(body.branch, "branch");
-			if (body.path.includes("\0") || !path.isAbsolute(body.path)) throw ApiError.badRequest("The target path must be absolute.");
+			if (body.path.includes("\0") || !path.isAbsolute(body.path)) throw ApiError.badRequest(i18nMsg("The target path must be absolute."));
 			const dest = path.resolve(body.path);
 			if (!this.ctx.db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, body.workspaceId)).get()) throw ApiError.notFound("Workspace");
 			if (!this.ctx.github.listAccounts().some((a) => a.id === body.accountId)) throw ApiError.notFound("GitHub account");
@@ -646,16 +628,16 @@ export class GitService {
 			try {
 				const info = await stat(dest);
 				existed = true;
-				if (!info.isDirectory()) throw new ApiError(409, "git_dest_not_empty", `${dest} exists and is not a directory.`);
-				if ((await readdir(dest)).length > 0) throw new ApiError(409, "git_dest_not_empty", `${dest} is not empty; clone into a new or empty directory.`);
+				if (!info.isDirectory()) throw new ApiError(409, "git_dest_not_empty", i18nMsg("{path} exists and is not a directory.", { path: dest }));
+				if ((await readdir(dest)).length > 0) throw new ApiError(409, "git_dest_not_empty", i18nMsg("{path} is not empty; clone into a new or empty directory.", { path: dest }));
 			} catch (err) {
 				if (err instanceof ApiError) throw err;
-				if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw ApiError.badRequest(`Cannot use ${dest}: ${(err as Error).message}`);
+				if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw ApiError.badRequest(i18nMsg("Cannot use {path}: {error}", { path: dest, error: (err as Error).message }));
 			}
-			if (this.cloneDests.has(dest)) throw new ApiError(409, "git_dest_not_empty", `A clone into ${dest} is already running.`);
+			if (this.cloneDests.has(dest)) throw new ApiError(409, "git_dest_not_empty", i18nMsg("A clone into {path} is already running.", { path: dest }));
 			const canonicalDest = existed ? await realpath(dest) : path.join(await realpath(path.dirname(dest)).catch(() => path.dirname(dest)), path.basename(dest));
 			if (this.ctx.db.select({ id: projects.id }).from(projects).where(and(eq(projects.workspaceId, body.workspaceId), eq(projects.path, canonicalDest))).get()) {
-				throw ApiError.conflict(`This workspace already has a project at ${canonicalDest}`);
+				throw ApiError.conflict(i18nMsg("This workspace already has a project at {dir}", { dir: canonicalDest }));
 			}
 
 			// Access and metadata first: a 404/403/SSO answer arrives as the response, not as a failed background job.

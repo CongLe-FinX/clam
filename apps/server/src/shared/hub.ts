@@ -1,5 +1,5 @@
 import type { wire } from "@clam/agent-network";
-import { ATTACHMENT_EAGER_MAX_BYTES, type SaveAttachmentBody, type FileEntry, type SharedAttachment } from "@clam/contracts";
+import { ATTACHMENT_EAGER_MAX_BYTES, type I18nMessage, type SaveAttachmentBody, type FileEntry, type SharedAttachment } from "@clam/contracts";
 import type { Checkpoint, DecideSharedInviteBody, FilesApplyResult, FilesPreview, SessionLiveState, SharedInvite, SharedMessage, SharedSession, SharedSessionDetail, SharedTopicEvent, TransferBody, UiResponseBody } from "@clam/contracts";
 import type { GroupMessageKind, MessageTo } from "@clam/task-engine";
 import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from "fastify";
@@ -125,7 +125,7 @@ export interface DiscussionApi {
 	retryPending(): Promise<void>;
 	markRead(sharedId: string): void;
 	/** A `system` message: replicated to every member node, or (`local`) a note about something every node observes itself, kept in this node's copy only. */
-	note(sharedId: string, text: string, options?: { local?: boolean }): void;
+	note(sharedId: string, say: I18nMessage, options?: { local?: boolean }): void;
 	/** Queue an existing message for one node (the history a participant gets when it joins). */
 	enqueue(message: SharedMessageRow, peerId: string): void;
 	start(): void;

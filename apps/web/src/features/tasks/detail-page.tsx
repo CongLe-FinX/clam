@@ -6,9 +6,10 @@ import { LazyMarkdown } from "@/components/lazy-markdown";
 import { useKeyboardInset } from "@/features/session/use-keyboard-inset";
 import { KeyValue } from "@/features/settings/components/section";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
-import { ApiError, errorMessage } from "@/lib/api";
+import { msg, renderServerText, T, t, tr } from "@/i18n";
+import { ApiError, errorText } from "@/lib/api";
 import { useProjects } from "@/lib/queries";
-import { cn, formatBytes, formatCost, formatDuration, relativeTime } from "@/lib/utils";
+import { cn, formatBytes, formatCost, formatDateTime, formatDuration, formatNumber, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
@@ -19,7 +20,7 @@ import { Textarea } from "@/ui/textarea";
 import { AcceptPanel } from "./accept-panel.tsx";
 import { DeliveryMark, DirectionChip, PartyChip, TaskStatusPill } from "./components.tsx";
 import { Discussion } from "./discussion.tsx";
-import { APPROVAL_MODES, isTerminal, ownParty, repoSlug } from "./format.ts";
+import { APPROVAL_MODES, STATUS_META, isTerminal, ownParty, repoSlug } from "./format.ts";
 import { useCancelTask, useRetryTask, useTask, useTaskLive } from "./hooks.ts";
 import { ResultCard } from "./result-card.tsx";
 import { Timeline } from "./timeline.tsx";
@@ -38,7 +39,7 @@ function TaskGate({ id }: { id: string }) {
 	if (q.data) return <TaskView detail={q.data} />;
 	if (q.isPending) {
 		return (
-			<div className="mx-auto flex max-w-5xl flex-col gap-4 p-6" aria-busy aria-label="Loading task">
+			<div className="mx-auto flex max-w-5xl flex-col gap-4 p-6" aria-busy aria-label={t("Loading task")}>
 				<Skeleton className="h-8 w-2/3" />
 				<Skeleton className="h-28" />
 				<Skeleton className="h-48" />
@@ -50,16 +51,16 @@ function TaskGate({ id }: { id: string }) {
 		<EmptyState
 			className="h-full"
 			icon={notFound ? SearchX : TriangleAlert}
-			title={notFound ? "Task not found" : "Could not load this task"}
-			description={notFound ? "It may have been removed, or the link is wrong." : errorMessage(q.error)}
+			title={notFound ? t("Task not found") : t("Could not load this task")}
+			description={notFound ? t("It may have been removed, or the link is wrong.") : errorText(q.error)}
 			action={
 				notFound ? (
 					<Button asChild variant="outline">
-						<Link to="/tasks">All tasks</Link>
+						<Link to="/tasks">{t("All tasks")}</Link>
 					</Button>
 				) : (
 					<Button variant="outline" onClick={() => void q.refetch()}>
-						<RotateCw /> Retry
+						<RotateCw /> {t("Retry")}
 					</Button>
 				)
 			}
@@ -102,7 +103,7 @@ function TaskView({ detail }: { detail: TaskDetail }) {
 				<ResultCard task={task} />
 				<Card>
 					<CardHeader>
-						<CardTitle>Instructions</CardTitle>
+						<CardTitle>{t("Instructions")}</CardTitle>
 					</CardHeader>
 					<CardContent className="pt-3">
 						<LazyMarkdown text={task.description} />
@@ -117,13 +118,13 @@ function TaskView({ detail }: { detail: TaskDetail }) {
 	return (
 		<div className="flex h-full min-h-0 flex-col bg-background" style={kbInset > 0 ? { paddingBottom: kbInset } : undefined}>
 			<div className="flex h-[calc(3rem+env(safe-area-inset-top))] shrink-0 items-center gap-1 border-b bg-surface-1 px-2 pt-safe coarse:h-[calc(3.5rem+env(safe-area-inset-top))]">
-				<Button asChild variant="ghost" size="icon" aria-label="Back to tasks">
+				<Button asChild variant="ghost" size="icon" aria-label={t("Back to tasks")}>
 					<Link to="/tasks">
 						<ChevronLeft />
 					</Link>
 				</Button>
 				<h1 className="flex min-w-0 flex-1 items-baseline gap-2 text-sm font-semibold tracking-tight">
-					Task <span className="truncate font-mono text-2xs font-normal text-subtle">{task.id}</span>
+					{t("Task")} <span className="truncate font-mono text-2xs font-normal text-subtle">{task.id}</span>
 				</h1>
 				<TaskStatusPill status={task.status} />
 			</div>
@@ -134,15 +135,15 @@ function TaskView({ detail }: { detail: TaskDetail }) {
 				</div>
 			) : (
 				<>
-					<div role="tablist" aria-label="Task sections" className="mx-3 my-2 flex shrink-0 rounded-lg bg-surface-2 p-0.5">
+					<div role="tablist" aria-label={t("Task sections")} className="mx-3 my-2 flex shrink-0 rounded-lg bg-surface-2 p-0.5">
 						<TabButton active={tab === "details"} onClick={() => setTab("details")}>
-							<ListChecks className="size-3.5" aria-hidden /> Details
+							<ListChecks className="size-3.5" aria-hidden /> {t("Details")}
 						</TabButton>
 						<TabButton active={tab === "discussion"} onClick={() => setTab("discussion")}>
-							<MessagesSquare className="size-3.5" aria-hidden /> Discussion
+							<MessagesSquare className="size-3.5" aria-hidden /> {t("Discussion")}
 							<span className="tabular font-mono text-2xs text-subtle">{messages.length}</span>
 							{unread > 0 ? (
-								<Badge variant="accent" aria-label={`${unread} unread`}>
+								<Badge variant="accent" aria-label={t("{count} unread", { count: formatNumber(unread) })}>
 									{unread}
 								</Badge>
 							) : null}
@@ -192,21 +193,21 @@ function Header({ task }: { task: Task }) {
 				<div className="flex flex-wrap items-center gap-1.5">
 					<TaskStatusPill status={task.status} />
 					<DirectionChip direction={task.direction} />
-					<Badge variant="outline" title="Ownership epoch (fencing token)">
-						epoch {task.epoch}
+					<Badge variant="outline" title={t("Ownership epoch (fencing token)")}>
+						{t("epoch {epoch}", { epoch: task.epoch })}
 					</Badge>
-					<Badge variant="outline">{task.deliverAs === "branch" ? "delivers a branch" : task.deliverAs === "files" ? "delivers files" : "delivers a summary"}</Badge>
+					<Badge variant="outline">{task.deliverAs === "branch" ? t("delivers a branch") : task.deliverAs === "files" ? t("delivers files") : t("delivers a summary")}</Badge>
 					{task.direction === "outgoing" ? <DeliveryMark state={task.delivery.state} /> : null}
 				</div>
 				<h2 className="text-lg font-semibold leading-snug tracking-tight">{task.title}</h2>
 				<div className="flex flex-col gap-1.5 text-[13px] sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3">
 					<span className="flex min-w-0 items-center gap-2">
-						<span className="w-8 shrink-0 text-2xs uppercase tracking-wider text-subtle sm:hidden">from</span>
+						<span className="w-8 shrink-0 text-2xs uppercase tracking-wider text-subtle sm:hidden">{t("from")}</span>
 						<PartyChip party={task.sender} role="sender" mine={task.direction === "outgoing"} />
 					</span>
-					<ArrowRight className="hidden size-3.5 shrink-0 text-subtle sm:block" aria-label="delegated to" />
+					<ArrowRight className="hidden size-3.5 shrink-0 text-subtle sm:block" aria-label={t("delegated to")} />
 					<span className="flex min-w-0 items-center gap-2">
-						<span className="w-8 shrink-0 text-2xs uppercase tracking-wider text-subtle sm:hidden">to</span>
+						<span className="w-8 shrink-0 text-2xs uppercase tracking-wider text-subtle sm:hidden">{t("to")}</span>
 						<PartyChip party={task.executor} mine={task.direction === "incoming"} />
 					</span>
 				</div>
@@ -214,23 +215,23 @@ function Header({ task }: { task: Task }) {
 					{own.sessionId ? (
 						<Button asChild size="sm" variant="outline">
 							<Link to="/sessions/$sessionId" params={{ sessionId: own.sessionId }}>
-								<SquareTerminal /> {task.direction === "incoming" ? "Open the executing session" : "Open the delegating session"}
+								<SquareTerminal /> {task.direction === "incoming" ? t("Open the executing session") : t("Open the delegating session")}
 							</Link>
 						</Button>
 					) : null}
 					{canRetry ? (
 						<Button size="sm" variant="primary" loading={retry.isPending} onClick={() => retry.mutate()}>
-							<RotateCw /> Retry
+							<RotateCw /> {t("Retry")}
 						</Button>
 					) : null}
 					{canCancel ? (
 						<Button size="sm" variant="outline" className="text-danger" onClick={() => setCancelOpen(true)}>
-							<XCircle /> Cancel task
+							<XCircle /> {t("Cancel task")}
 						</Button>
 					) : null}
 					{canHandOff ? (
 						<Button size="sm" variant="outline" onClick={() => setHandOffOpen(true)}>
-							<Waypoints /> Hand off…
+							<Waypoints /> {t("Hand off…")}
 						</Button>
 					) : null}
 				</div>
@@ -252,20 +253,20 @@ function CancelDialog({ task, onClose }: { task: Task; onClose: () => void }) {
 		<Dialog open onOpenChange={(o) => !o && !cancel.isPending && onClose()}>
 			<DialogContent className="max-w-md">
 				<DialogHeader>
-					<DialogTitle>Cancel “{task.title}”?</DialogTitle>
+					<DialogTitle>{t("Cancel “{title}”?", { title: task.title })}</DialogTitle>
 					<DialogDescription>
 						{task.direction === "outgoing"
-							? `${task.executor.nodeName} stops the run. Work already committed on a task branch is kept there.`
-							: "The run on this machine is stopped. Work already done stays in the project; nothing is deleted."}
+							? t("{name} stops the run. Work already committed on a task branch is kept there.", { name: task.executor.nodeName })
+							: t("The run on this machine is stopped. Work already done stays in the project; nothing is deleted.")}
 					</DialogDescription>
 				</DialogHeader>
-				<Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} maxLength={2000} aria-label="Reason (optional)" placeholder="Reason (optional)" className="resize-none" />
+				<Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} maxLength={2000} aria-label={t("Reason (optional)")} placeholder={t("Reason (optional)")} className="resize-none" />
 				<DialogFooter>
 					<Button variant="ghost" onClick={onClose} disabled={cancel.isPending}>
-						Keep running
+						{t("Keep running")}
 					</Button>
 					<Button variant="danger" loading={cancel.isPending} onClick={() => cancel.mutate(reason.trim() || undefined, { onSuccess: onClose })}>
-						Cancel task
+						{t("Cancel task")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>
@@ -278,30 +279,36 @@ function Notices({ task }: { task: Task }) {
 	if (task.direction === "outgoing" && task.delivery.state === "pending") {
 		items.push(
 			<Notice key="pending" tone="warning" icon={TriangleAlert}>
-				<strong>Not delivered yet.</strong> {task.executor.nodeName} has not received this task. It stays queued on this machine and is sent when the machine is reachable
-				{task.delivery.attempts > 0 ? ` (attempt ${task.delivery.attempts}${task.delivery.lastError ? `: ${task.delivery.lastError}` : ""})` : ""}.
+				<T
+					text="<b>Not delivered yet.</b> {name} has not received this task. It stays queued on this machine and is sent when the machine is reachable{attempt}."
+					params={{
+						name: task.executor.nodeName,
+						attempt: task.delivery.attempts > 0 ? ` (${task.delivery.lastError ? t("attempt {attempts}: {error}", { attempts: task.delivery.attempts, error: renderServerText(task.delivery.lastError, task.delivery.lastErrorI18n) }) : t("attempt {attempts}", { attempts: task.delivery.attempts })})` : "",
+					}}
+					tags={{ b: <strong /> }}
+				/>
 			</Notice>,
 		);
 	}
 	if (task.direction === "outgoing" && task.delivery.state === "failed") {
 		items.push(
 			<Notice key="failed-delivery" tone="danger" icon={TriangleAlert}>
-				<strong>Delivery failed.</strong> {task.delivery.lastError ?? "The machine did not accept the task."}
+				<strong>{t("Delivery failed.")}</strong> {task.delivery.lastError ? renderServerText(task.delivery.lastError, task.delivery.lastErrorI18n) : t("The machine did not accept the task.")}
 			</Notice>,
 		);
 	}
 	if (task.reason && (task.status === "blocked" || task.status === "failed" || task.status === "rejected" || task.status === "cancelled")) {
-		const label = { blocked: "Blocked", failed: "Failed", rejected: "Rejected", cancelled: "Cancelled" }[task.status];
+		const label = tr(STATUS_META[task.status].label);
 		items.push(
 			<Notice key="reason" tone={task.status === "blocked" ? "warning" : task.status === "cancelled" ? "neutral" : "danger"} icon={task.status === "blocked" ? OctagonAlert : TriangleAlert}>
-				<strong>{label}.</strong> {task.reason}
+				<strong>{label}.</strong> {renderServerText(task.reason, task.reasonI18n)}
 			</Notice>,
 		);
 	}
 	if (task.status === "offered" && task.direction === "outgoing") {
 		items.push(
 			<Notice key="offered" tone="neutral" icon={ListChecks}>
-				Waiting for {task.executor.nodeName} to accept. You can still discuss the task below once it is delivered.
+				{t("Waiting for {name} to accept. You can still discuss the task below once it is delivered.", { name: task.executor.nodeName })}
 			</Notice>,
 		);
 	}
@@ -309,9 +316,9 @@ function Notices({ task }: { task: Task }) {
 }
 
 const DELIVER_DESCRIPTION = {
-	branch: "A task branch pushed to GitHub (patch attached if the push is refused)",
-	files: "The changed files, returned as a bundle to preview and apply",
-	summary: "A written summary only",
+	branch: msg("A task branch pushed to GitHub (patch attached if the push is refused)"),
+	files: msg("The changed files, returned as a bundle to preview and apply"),
+	summary: msg("A written summary only"),
 } as const;
 
 // ───────────────────────── details ─────────────────────────
@@ -321,69 +328,70 @@ function MetaCard({ task }: { task: Task }) {
 	const project = projects.data?.find((p) => p.id === task.projectId);
 	const slug = task.repo ? repoSlug(task.repo.url) : null;
 	const c = task.constraints;
-	const approval = c.approvalMode ? APPROVAL_MODES.find((m) => m.value === c.approvalMode)?.label : undefined;
+	const approvalLabel = c.approvalMode ? APPROVAL_MODES.find((m) => m.value === c.approvalMode)?.label : undefined;
+	const approval = approvalLabel ? tr(approvalLabel) : undefined;
 	const duration = task.startedAt ? Date.parse(task.finishedAt ?? new Date().toISOString()) - Date.parse(task.startedAt) : null;
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle>Details</CardTitle>
+				<CardTitle>{t("Details")}</CardTitle>
 			</CardHeader>
 			<CardContent className="pt-1">
 				<dl className="divide-y">
-					<KeyValue label="Project (this machine)">
+					<KeyValue label={t("Project (this machine)")}>
 						{project ? (
 							<Link to="/projects/$projectId" params={{ projectId: project.id }} className="text-accent hover:underline">
 								{project.name}
 							</Link>
 						) : (
-							<span className="text-subtle">{task.projectId ? "Unknown project" : "Not chosen yet"}</span>
+							<span className="text-subtle">{task.projectId ? t("Unknown project") : t("Not chosen yet")}</span>
 						)}
 					</KeyValue>
 					{task.repo ? (
 						<>
-							<KeyValue label="Repository">
+							<KeyValue label={t("Repository")}>
 								<a href={task.repo.url} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 text-accent hover:underline">
 									{slug ?? task.repo.url} <ExternalLink className="size-3" aria-hidden />
 								</a>
 							</KeyValue>
-							<KeyValue label="Base branch" mono>
-								{task.repo.branch ?? <span className="font-sans text-subtle">repository default</span>}
+							<KeyValue label={t("Base branch")} mono>
+								{task.repo.branch ?? <span className="font-sans text-subtle">{t("repository default")}</span>}
 								{task.repo.commit ? <span className="ml-2 text-subtle">@ {task.repo.commit.slice(0, 8)}</span> : null}
 							</KeyValue>
 						</>
 					) : (
-						<KeyValue label="Repository">
-							<span className="text-subtle">No repository — folder task</span>
+						<KeyValue label={t("Repository")}>
+							<span className="text-subtle">{t("No repository — folder task")}</span>
 						</KeyValue>
 					)}
 					{task.inputFiles ? (
-						<KeyValue label="Input files">
-							{task.inputFiles.fileCount} {task.inputFiles.fileCount === 1 ? "file" : "files"} · {formatBytes(task.inputFiles.size)}
+						<KeyValue label={t("Input files")}>
+							{t("{count, plural, one {# file} other {# files}} · {size}", { count: task.inputFiles.fileCount, size: formatBytes(task.inputFiles.size) })}
 						</KeyValue>
 					) : null}
-					<KeyValue label="Deliver as">{DELIVER_DESCRIPTION[task.deliverAs]}</KeyValue>
-					<KeyValue label="Constraints">
+					<KeyValue label={t("Deliver as")}>{tr(DELIVER_DESCRIPTION[task.deliverAs])}</KeyValue>
+					<KeyValue label={t("Constraints")}>
 						{c.maxCostUsd === undefined && !approval && !c.deadline ? (
-							<span className="text-subtle">None</span>
+							<span className="text-subtle">{t("None")}</span>
 						) : (
 							<span className="flex flex-wrap gap-1.5">
-								{c.maxCostUsd !== undefined ? <Badge variant="outline">max {formatCost(c.maxCostUsd)}</Badge> : null}
-								{approval ? <Badge variant="outline">approval: {approval}</Badge> : null}
-								{c.deadline ? <Badge variant="outline">due {relativeTime(c.deadline)}</Badge> : null}
+								{c.maxCostUsd !== undefined ? <Badge variant="outline">{t("max {cost}", { cost: formatCost(c.maxCostUsd) })}</Badge> : null}
+								{approval ? <Badge variant="outline">{t("approval: {mode}", { mode: approval })}</Badge> : null}
+								{c.deadline ? <Badge variant="outline">{t("due {when}", { when: relativeTime(c.deadline) })}</Badge> : null}
 							</span>
 						)}
 					</KeyValue>
-					<KeyValue label="Cost so far" mono>
+					<KeyValue label={t("Cost so far")} mono>
 						{formatCost(task.cost)}
 					</KeyValue>
-					<KeyValue label="Created">{`${relativeTime(task.createdAt)} · ${new Date(task.createdAt).toLocaleString()}`}</KeyValue>
-					{task.startedAt ? <KeyValue label="Started">{new Date(task.startedAt).toLocaleString()}</KeyValue> : null}
-					{task.finishedAt ? <KeyValue label="Finished">{`${new Date(task.finishedAt).toLocaleString()}${duration !== null ? ` · took ${formatDuration(duration)}` : ""}`}</KeyValue> : null}
-					<KeyValue label="Task ID" mono>
+					<KeyValue label={t("Created")}>{`${relativeTime(task.createdAt)} · ${formatDateTime(task.createdAt)}`}</KeyValue>
+					{task.startedAt ? <KeyValue label={t("Started")}>{formatDateTime(task.startedAt)}</KeyValue> : null}
+					{task.finishedAt ? <KeyValue label={t("Finished")}>{duration !== null ? t("{when} · took {duration}", { when: formatDateTime(task.finishedAt), duration: formatDuration(duration) }) : formatDateTime(task.finishedAt)}</KeyValue> : null}
+					<KeyValue label={t("Task ID")} mono>
 						{task.id}
 					</KeyValue>
 					{task.retryOf ? (
-						<KeyValue label="Retry of">
+						<KeyValue label={t("Retry of")}>
 							<Link to="/tasks/$taskId" params={{ taskId: task.retryOf }} className="font-mono text-xs text-accent hover:underline">
 								{task.retryOf}
 							</Link>

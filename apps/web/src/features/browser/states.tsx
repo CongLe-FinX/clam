@@ -4,7 +4,8 @@ import { Download, Globe, Lock, Menu, RefreshCw, ShieldAlert, TriangleAlert } fr
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 import { accessKey, useAccess } from "@/features/auth/hooks";
-import { api, ApiError, errorMessage } from "@/lib/api";
+import { t, T } from "@/i18n";
+import { api, ApiError, errorText } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
@@ -19,7 +20,7 @@ function CenteredCard({ children }: { children: React.ReactNode }) {
 	const openNav = useUi((s) => s.setDrawerOpen);
 	return (
 		<div className="relative h-full">
-			<Button variant="ghost" size="icon" aria-label="Open navigation" onClick={() => openNav(true)} className="absolute left-1 top-[max(0.25rem,env(safe-area-inset-top))] z-10 md:hidden">
+			<Button variant="ghost" size="icon" aria-label={t("Open navigation")} onClick={() => openNav(true)} className="absolute left-1 top-[max(0.25rem,env(safe-area-inset-top))] z-10 md:hidden">
 				<Menu />
 			</Button>
 			<div className="scrollbar-thin h-full overflow-y-auto overscroll-contain">
@@ -34,7 +35,7 @@ function CenteredCard({ children }: { children: React.ReactNode }) {
 /** First load / cold start of the machine's browser: the toolbar and viewer shapes, no spinner soup. */
 export function BrowserSkeleton({ label }: { label?: string }) {
 	return (
-		<div className="flex h-full flex-col" role="status" aria-label={label ?? "Loading the browser"}>
+		<div className="flex h-full flex-col" role="status" aria-label={label ?? t("Loading the browser")}>
 			<div className="flex items-center gap-2 border-b p-2">
 				<Skeleton className="size-8 coarse:size-11" />
 				<Skeleton className="size-8 coarse:size-11" />
@@ -63,7 +64,7 @@ export function ErrorCard({ title, message, onRetry, retrying }: { title: string
 			</CardHeader>
 			<CardContent className="pt-3">
 				<Button variant="primary" onClick={onRetry} loading={retrying}>
-					<RefreshCw /> Retry
+					<RefreshCw /> {t("Retry")}
 				</Button>
 			</CardContent>
 		</CenteredCard>
@@ -76,7 +77,7 @@ export function InstallCard({ status }: { status: BrowserStatus }) {
 	const install = useMutation({
 		mutationFn: () => api.post<BrowserStatus>(routes.browserInstall),
 		onSuccess: (next) => qc.setQueryData(bk.status, next),
-		onError: (e) => toast.error(errorMessage(e)),
+		onError: (e) => toast.error(errorText(e)),
 	});
 	const state = status.install.state;
 	const running = state === "running" || install.isPending;
@@ -85,15 +86,15 @@ export function InstallCard({ status }: { status: BrowserStatus }) {
 		<CenteredCard>
 			<CardHeader className="flex-col gap-1">
 				<CardTitle className="flex items-center gap-2">
-					<Globe className="size-4 text-accent" /> This machine needs a browser
+					<Globe className="size-4 text-accent" /> {t("This machine needs a browser")}
 				</CardTitle>
-				<CardDescription>The Browser runs Chromium on this machine so you can open its localhost pages from anywhere. No Chrome, Chromium, Edge or Brave was found.</CardDescription>
+				<CardDescription>{t("The Browser runs Chromium on this machine so you can open its localhost pages from anywhere. No Chrome, Chromium, Edge or Brave was found.")}</CardDescription>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-3 pt-3">
 				{running ? (
 					<div className="flex flex-col gap-2" role="status">
 						<div className="flex items-center justify-between text-[13px]">
-							<span>Installing Chromium…</span>
+							<span>{t("Installing Chromium…")}</span>
 							{progress !== null ? <span className="font-mono text-xs text-muted-foreground tabular">{Math.round(progress)}%</span> : null}
 						</div>
 						{progress !== null ? <Progress value={progress} /> : <Progress value={100} className="animate-pulse" />}
@@ -103,7 +104,7 @@ export function InstallCard({ status }: { status: BrowserStatus }) {
 					<>
 						{state === "failed" ? (
 							<div role="alert" className="rounded-lg bg-danger/10 p-3 text-[13px] text-danger">
-								<p className="font-medium">The install did not finish.</p>
+								<p className="font-medium">{t("The install did not finish.")}</p>
 								{status.install.error ? <p className="mt-1 break-words text-danger/90">{status.install.error}</p> : null}
 								{status.install.log.length > 0 ? <pre className="scrollbar-thin mt-2 max-h-32 overflow-auto font-mono text-2xs leading-4 text-muted-foreground">{status.install.log.slice(-8).join("\n")}</pre> : null}
 							</div>
@@ -111,17 +112,17 @@ export function InstallCard({ status }: { status: BrowserStatus }) {
 						{status.canInstall ? (
 							<div className="flex flex-col gap-2">
 								<Button variant="primary" size="lg" onClick={() => install.mutate()}>
-									<Download /> {state === "failed" ? "Try installing again" : "Install Chromium"}
+									<Download /> {state === "failed" ? t("Try installing again") : t("Install Chromium")}
 								</Button>
-								<p className="text-xs text-subtle">Downloads Chromium into this machine's data folder. It is used only by this Browser.</p>
+								<p className="text-xs text-subtle">{t("Downloads Chromium into this machine's data folder. It is used only by this Browser.")}</p>
 							</div>
 						) : (
 							<div className="flex flex-col gap-2 text-[13px] text-muted-foreground">
-								<p>The one-click install is not available here. Install Google Chrome, Chromium, Microsoft Edge or Brave on this machine, or point CL Agent Mesh at one:</p>
+								<p>{t("The one-click install is not available here. Install Google Chrome, Chromium, Microsoft Edge or Brave on this machine, or point CL Agent Mesh at one:")}</p>
 								<pre className="overflow-x-auto rounded-lg bg-surface-2 p-2.5 font-mono text-xs text-foreground">set CLAM_BROWSER_PATH=/path/to/chrome</pre>
-								<p className="text-xs text-subtle">Then restart CL Agent Mesh and check again.</p>
+								<p className="text-xs text-subtle">{t("Then restart CL Agent Mesh and check again.")}</p>
 								<Button variant="outline" className="self-start" onClick={() => void qc.invalidateQueries({ queryKey: bk.status })}>
-									<RefreshCw /> Check again
+									<RefreshCw /> {t("Check again")}
 								</Button>
 							</div>
 						)}
@@ -133,9 +134,9 @@ export function InstallCard({ status }: { status: BrowserStatus }) {
 }
 
 function passwordProblem(e: unknown): string {
-	if (e instanceof ApiError && e.status === 401) return "That password is not correct.";
-	if (e instanceof ApiError && e.status === 429) return `${e.message || "Too many attempts."} Wait a moment and try again.`;
-	return errorMessage(e);
+	if (e instanceof ApiError && e.status === 401) return t("That password is not correct.");
+	if (e instanceof ApiError && e.status === 429) return t("{message} Wait a moment and try again.", { message: e.message ? errorText(e) : t("Too many attempts.") });
+	return errorText(e);
 }
 
 /** 403 `tool_disabled` on the public origin: the Browser is off for remote access. Owners can switch it on with their password. */
@@ -149,7 +150,7 @@ export function RemoteOffCard() {
 			qc.setQueryData(accessKey, next);
 			setPassword("");
 			void qc.invalidateQueries({ queryKey: bk.all });
-			toast.success("Browser is on for remote access");
+			toast.success(t("Browser is on for remote access"));
 		},
 	});
 	const a = access.data;
@@ -165,17 +166,17 @@ export function RemoteOffCard() {
 					<Lock className="size-5" />
 				</div>
 				<div className="flex flex-col gap-1.5">
-					<h2 className="text-base font-semibold tracking-tight">Browser is switched off for remote access</h2>
-					<p className="text-[13px] text-muted-foreground">Turn it on from this machine's own UI (Settings → Remote access){canEnable ? ", or enable it here with your owner password." : "."}</p>
+					<h2 className="text-base font-semibold tracking-tight">{t("Browser is switched off for remote access")}</h2>
+					<p className="text-[13px] text-muted-foreground">{canEnable ? t("Turn it on from this machine's own UI (Settings → Remote access), or enable it here with your owner password.") : t("Turn it on from this machine's own UI (Settings → Remote access).")}</p>
 				</div>
 				{canEnable ? (
 					<form onSubmit={submit} className="flex w-full flex-col gap-3 text-left">
 						<p className="flex items-start gap-2.5 rounded-xl bg-warning/10 p-3 text-xs leading-relaxed text-muted-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--warning)_28%,transparent)]">
 							<ShieldAlert className="mt-0.5 size-4 shrink-0 text-warning" />
-							<span>Lets anyone who signs in to this machine's domain browse from this machine, including its localhost services.</span>
+							<span>{t("Lets anyone who signs in to this machine's domain browse from this machine, including its localhost services.")}</span>
 						</p>
 						<label className="flex flex-col gap-1.5 text-xs font-medium text-muted-foreground">
-							Owner password
+							{t("Owner password")}
 							<Input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-invalid={enable.isError || undefined} className="coarse:text-base" />
 						</label>
 						{enable.isError ? (
@@ -184,7 +185,7 @@ export function RemoteOffCard() {
 							</p>
 						) : null}
 						<Button type="submit" variant="primary" size="lg" loading={enable.isPending} disabled={!password}>
-							Enable remote Browser
+							{t("Enable remote Browser")}
 						</Button>
 					</form>
 				) : null}
@@ -202,9 +203,9 @@ export function StartPage({ ports, onOpen }: { ports: ListeningPort[] | undefine
 					<Globe className="size-6" />
 				</div>
 				<div className="flex flex-col gap-1.5">
-					<h2 className="text-base font-semibold tracking-tight">Browse this machine</h2>
+					<h2 className="text-base font-semibold tracking-tight">{t("Browse this machine")}</h2>
 					<p className="text-[13px] text-muted-foreground">
-						Type <code className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-xs text-foreground">localhost:1234</code> above. It is this machine's own localhost, not yours.
+						<T text="Type <code>localhost:1234</code> above. It is this machine's own localhost, not yours." tags={{ code: <code className="rounded-md bg-surface-3 px-1.5 py-0.5 font-mono text-xs text-foreground" /> }} />
 					</p>
 				</div>
 				{ports === undefined ? (

@@ -3,6 +3,7 @@ import { chmod, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { type I18nMessage, type I18nText, i18nMsg, plainMsg } from "@clam/contracts";
 import { resolveCloudflaredBinary } from "./detect.ts";
 
 export type TunnelRunConfig = { mode: "quick" } | { mode: "named"; token: string; hostname: string };
@@ -14,6 +15,8 @@ export interface TunnelRuntimeState {
 	pid: number | null;
 	connections: number;
 	lastError: string | null;
+	/** Structured twin of `lastError` for localisation when the error is our own text (cloudflared's own log lines have none). */
+	lastErrorI18n?: I18nText | null;
 	startedAt: string | null;
 }
 
@@ -64,7 +67,12 @@ const FATAL_PATTERNS: RegExp[] = [
 const MAX_ERROR_LEN = 300;
 
 function stoppedState(): TunnelRuntimeState {
-	return { state: "stopped", mode: "off", publicUrl: null, pid: null, connections: 0, lastError: null, startedAt: null };
+	return { state: "stopped", mode: "off", publicUrl: null, pid: null, connections: 0, lastError: null, lastErrorI18n: null, startedAt: null };
+}
+
+/** `lastError` + its twin from one message (or cleared). */
+function errorFields(m: I18nMessage | null): Pick<TunnelRuntimeState, "lastError" | "lastErrorI18n"> {
+	return { lastError: m?.text ?? null, lastErrorI18n: m?.i18n ?? null };
 }
 
 async function freeLoopbackPort(): Promise<number> {
@@ -80,12 +88,19 @@ async function freeLoopbackPort(): Promise<number> {
 	});
 }
 
+/** Thrown for a tunnel config the manager refuses; `detail` carries the localisable twin of the message. */
+export class TunnelConfigError extends TypeError {
+	constructor(readonly detail: I18nMessage) {
+		super(detail.text);
+		this.name = "TunnelConfigError";
+	}
+}
+
 function validateConfig(c: TunnelRunConfig): void {
 	if (c.mode === "quick") return;
-	if (c.mode !== "named") throw new TypeError("unknown tunnel mode");
-	if (typeof c.token !== "string" || c.token.length === 0 || !TOKEN_RE.test(c.token))
-		throw new TypeError("invalid tunnel token");
-	if (typeof c.hostname !== "string" || !HOSTNAME_RE.test(c.hostname)) throw new TypeError("invalid tunnel hostname");
+	if (c.mode !== "named") throw new TunnelConfigError(i18nMsg("unknown tunnel mode"));
+	if (typeof c.token !== "string" || c.token.length === 0 || !TOKEN_RE.test(c.token)) throw new TunnelConfigError(i18nMsg("invalid tunnel token"));
+	if (typeof c.hostname !== "string" || !HOSTNAME_RE.test(c.hostname)) throw new TunnelConfigError(i18nMsg("invalid tunnel hostname"));
 }
 
 /** Environment for the child: the parent's, minus every cloudflared option variable (TUNNEL_TOKEN, TUNNEL_URL, ...). */
@@ -101,8 +116,8 @@ function childEnv(): NodeJS.ProcessEnv {
 
 interface Attempt {
 	/** Non-null when restarting cannot help. */
-	fatal: string | null;
-	error: string | null;
+	fatal: I18nMessage | null;
+	error: I18nMessage | null;
 	/** How long the process stayed ready before exiting (0 if it never became ready). */
 	healthyMs: number;
 }
@@ -219,7 +234,7 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 			metricsPort = await freeLoopbackPort();
 			if (config.mode === "named") await writeTokenFile(config.token);
 		} catch (err) {
-			return { fatal: null, error: `failed to prepare cloudflared: ${(err as Error).message}`, healthyMs: 0 };
+			return { fatal: null, error: i18nMsg("failed to prepare cloudflared: {reason}", { reason: (err as Error).message }), healthyMs: 0 };
 		}
 		if (s.cancelled) {
 			await removeTokenFile();
@@ -235,7 +250,7 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 			child = spawn(binary, args, { stdio: ["ignore", "ignore", "pipe"], env: childEnv(), windowsHide: true });
 		} catch (err) {
 			await removeTokenFile();
-			return { fatal: `cannot start cloudflared: ${(err as Error).message}`, error: null, healthyMs: 0 };
+			return { fatal: i18nMsg("cannot start cloudflared: {reason}", { reason: (err as Error).message }), error: null, healthyMs: 0 };
 		}
 		s.child = child;
 		o.log?.info({ pid: child.pid, mode: config.mode, metricsPort }, "cloudflared spawned");
@@ -248,15 +263,15 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 		});
 
 		let publicUrl: string | null = namedUrl;
-		let fatal: string | null = null;
-		let lastErrLine: string | null = null;
-		let timeoutError: string | null = null;
+		let fatal: I18nMessage | null = null;
+		let lastErrLine: I18nMessage | null = null;
+		let timeoutError: I18nMessage | null = null;
 		let readySince: number | null = null;
 		let spawnError: Error | null = null;
 
 		const killForFatal = (reason: string): void => {
 			if (fatal) return;
-			fatal = reason;
+			fatal = plainMsg(reason);
 			void terminate(child);
 		};
 
@@ -267,7 +282,7 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 				if (!line) return;
 				o.log?.info({ cloudflared: line.slice(0, 500) }, "cloudflared");
 				if (/\b(ERR|FTL)\b/.test(line) || FATAL_PATTERNS.some((re) => re.test(line))) {
-					lastErrLine = line.replace(/^\S+Z\s+/, "").slice(0, MAX_ERROR_LEN);
+					lastErrLine = plainMsg(line.replace(/^\S+Z\s+/, "").slice(0, MAX_ERROR_LEN));
 				}
 				if (!named && !publicUrl) {
 					for (const m of line.matchAll(QUICK_URL_RE)) {
@@ -310,7 +325,7 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 						state: "running",
 						connections: ready,
 						publicUrl,
-						lastError: null,
+						...errorFields(null),
 						startedAt: current.startedAt ?? new Date().toISOString(),
 					});
 				} else if (current.state === "running") {
@@ -337,7 +352,7 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 
 		const startTimer = setTimeout(() => {
 			if (readySince === null && !finished) {
-				timeoutError = "timed out waiting for the tunnel to become ready";
+				timeoutError = i18nMsg("timed out waiting for the tunnel to become ready");
 				void terminate(child);
 			}
 		}, startTimeoutMs);
@@ -359,12 +374,12 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 		const healthyMs = readySince === null ? 0 : Date.now() - readySince;
 		if (spawnError) {
 			const err = spawnError as NodeJS.ErrnoException;
-			const msg = err.code === "ENOENT" ? "cloudflared executable not found" : `cannot start cloudflared: ${err.message}`;
+			const msg = err.code === "ENOENT" ? i18nMsg("cloudflared executable not found") : i18nMsg("cannot start cloudflared: {reason}", { reason: err.message });
 			return { fatal: msg, error: null, healthyMs: 0 };
 		}
 		if (fatal) return { fatal, error: null, healthyMs };
-		const code = child.exitCode !== null ? `exit code ${child.exitCode}` : `signal ${child.signalCode}`;
-		const error = timeoutError ?? lastErrLine ?? `cloudflared exited unexpectedly (${code})`;
+		const exit = child.exitCode !== null ? i18nMsg("cloudflared exited unexpectedly (exit code {code})", { code: child.exitCode }) : i18nMsg("cloudflared exited unexpectedly (signal {signal})", { signal: String(child.signalCode) });
+		const error = timeoutError ?? lastErrLine ?? exit;
 		return { fatal: null, error, healthyMs };
 	}
 
@@ -376,21 +391,21 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 			if (s.cancelled) return;
 			if (attempt.healthyMs > 0) everRan = true;
 			if (attempt.fatal) {
-				o.log?.warn({ error: attempt.fatal }, "cloudflared failed fatally; not restarting");
-				setState({ state: "error", pid: null, connections: 0, publicUrl: null, startedAt: null, lastError: attempt.fatal });
+				o.log?.warn({ error: attempt.fatal.text }, "cloudflared failed fatally; not restarting");
+				setState({ state: "error", pid: null, connections: 0, publicUrl: null, startedAt: null, ...errorFields(attempt.fatal) });
 				return;
 			}
 			if (attempt.healthyMs >= healthyResetMs) failures = 0;
 			const delay = Math.min(backoffMaxMs, backoffBaseMs * 2 ** failures);
 			failures = Math.min(failures + 1, 30);
-			o.log?.warn({ error: attempt.error, restartInMs: delay }, "cloudflared exited; restarting");
+			o.log?.warn({ error: attempt.error?.text, restartInMs: delay }, "cloudflared exited; restarting");
 			setState({
 				state: everRan ? "reconnecting" : "starting",
 				pid: null,
 				connections: 0,
 				publicUrl: config.mode === "named" ? `https://${config.hostname.toLowerCase()}` : null,
 				startedAt: null,
-				lastError: attempt.error,
+				...errorFields(attempt.error),
 			});
 			s.settleStart?.();
 			await sleep(s, delay);
@@ -423,7 +438,7 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 					...stoppedState(),
 					state: "error",
 					mode: config.mode,
-					lastError: "cloudflared executable not found",
+					...errorFields(i18nMsg("cloudflared executable not found")),
 				});
 				return snapshot();
 			}
@@ -434,7 +449,7 @@ export function createTunnelManager(o: CreateTunnelManagerOptions): TunnelManage
 			setState({ ...stoppedState(), state: "starting", mode: config.mode });
 			s.done = supervise(s, config, binary).catch((err: unknown) => {
 				if (s.cancelled) return;
-				setState({ state: "error", pid: null, connections: 0, publicUrl: null, lastError: (err as Error).message });
+				setState({ state: "error", pid: null, connections: 0, publicUrl: null, ...errorFields(plainMsg((err as Error).message)) });
 			});
 			await settled;
 			return snapshot();

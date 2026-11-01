@@ -1,12 +1,13 @@
 import type { GitFileKind, GitFileStatus } from "@clam/contracts";
+import { msg, type Msg } from "@/i18n";
 
 export type ChangeGroup = "staged" | "changes" | "untracked" | "conflicted";
 
-export const GROUP_LABEL: Record<ChangeGroup, string> = {
-	conflicted: "Conflicted",
-	staged: "Staged",
-	changes: "Changes",
-	untracked: "Untracked",
+export const GROUP_LABEL: Record<ChangeGroup, Msg> = {
+	conflicted: msg("Conflicted"),
+	staged: msg("Staged"),
+	changes: msg("Changes"),
+	untracked: msg("Untracked"),
 };
 export const GROUP_ORDER: ChangeGroup[] = ["conflicted", "staged", "changes", "untracked"];
 
@@ -34,15 +35,15 @@ export const KIND_LETTER: Record<GitFileKind, string> = {
 	untracked: "U",
 	conflicted: "!",
 };
-export const KIND_LABEL: Record<GitFileKind, string> = {
-	modified: "Modified",
-	added: "Added",
-	deleted: "Deleted",
-	renamed: "Renamed",
-	copied: "Copied",
-	typechange: "Type changed",
-	untracked: "Untracked",
-	conflicted: "Conflicted",
+export const KIND_LABEL: Record<GitFileKind, Msg> = {
+	modified: msg("Modified"),
+	added: msg("Added"),
+	deleted: msg("Deleted"),
+	renamed: msg("Renamed"),
+	copied: msg("Copied"),
+	typechange: msg("Type changed"),
+	untracked: msg("Untracked"),
+	conflicted: msg("Conflicted"),
 };
 export const KIND_TONE: Record<GitFileKind, string> = {
 	modified: "text-warning",

@@ -1,4 +1,4 @@
-import { AddWorkspaceMemberBody, CreateWorkspaceBody, routes, UpdateWorkspaceBody, type Workspace, type WorkspaceMember } from "@clam/contracts";
+import { AddWorkspaceMemberBody, CreateWorkspaceBody, routes, UpdateWorkspaceBody, type Workspace, type WorkspaceMember, i18nMsg } from "@clam/contracts";
 import { projects, workspaceMembers, workspaces } from "@clam/database";
 import { and, eq, ne, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -42,7 +42,7 @@ function assertNameFree(ctx: ServerContext, name: string, exceptId?: string): vo
 		.where(sql`lower(${workspaces.name}) = lower(${name})`)
 		.all()
 		.find((r) => r.id !== exceptId);
-	if (clash) throw ApiError.conflict(`A workspace named "${name}" already exists`);
+	if (clash) throw ApiError.conflict(i18nMsg('A workspace named "{name}" already exists', { name }));
 }
 
 /** Workspace CRUD. The list is ordered by name (case-insensitive). */

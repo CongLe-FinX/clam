@@ -3,10 +3,11 @@ import { useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowDown, ArrowUp, Check, CloudDownload, FolderGit2, GitBranch, Plus, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useDebounced } from "@/features/projects/session-list";
-import { errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { useWorkspaces } from "@/lib/queries";
 import { useUi } from "@/lib/store";
-import { cn, relativeTime } from "@/lib/utils";
+import { cn, formatDateTime, formatNumber, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
@@ -40,13 +41,13 @@ function EntryRow({ entry, workspace, onOpen }: { entry: GitOverviewEntry; works
 						<span className="truncate">{error}</span>
 					</span>
 				) : !status || !status.isRepo ? (
-					<span className="col-span-2 text-xs text-subtle sm:col-span-4 sm:col-start-2">Not a Git repository</span>
+					<span className="col-span-2 text-xs text-subtle sm:col-span-4 sm:col-start-2">{t("Not a Git repository")}</span>
 				) : (
 					<>
 						<span className="flex min-w-0 items-center gap-1.5 sm:order-none">
 							<Badge variant="neutral" className="max-w-full">
 								<GitBranch aria-hidden />
-								<span className="truncate font-mono">{status.branch ?? (status.detached ? `detached ${status.headSha?.slice(0, 7) ?? ""}` : "—")}</span>
+								<span className="truncate font-mono">{status.branch ?? (status.detached ? t("detached {sha}", { sha: status.headSha?.slice(0, 7) ?? "" }) : "—")}</span>
 							</Badge>
 							{status.ahead > 0 ? (
 								<Badge variant="accent" className="tabular">
@@ -64,17 +65,17 @@ function EntryRow({ entry, workspace, onOpen }: { entry: GitOverviewEntry; works
 						<span className="flex items-center justify-end">
 							{dirty > 0 ? (
 								<Badge variant="warning" className="tabular">
-									{dirty} changed
+									{t("{count} changed", { count: formatNumber(dirty) })}
 								</Badge>
 							) : (
 								<Badge variant="success">
-									<Check aria-hidden /> clean
+									<Check aria-hidden /> {t("clean")}
 								</Badge>
 							)}
 						</span>
-						<span className="hidden items-center justify-end gap-1 text-2xs text-subtle sm:flex" title={status.lastFetchedAt ?? "Never fetched"}>
+						<span className="hidden items-center justify-end gap-1 text-2xs text-subtle sm:flex" title={status.lastFetchedAt ? formatDateTime(status.lastFetchedAt) : t("Never fetched")}>
 							<CloudDownload aria-hidden className="size-3.5" />
-							{status.lastFetchedAt ? relativeTime(status.lastFetchedAt) : "never fetched"}
+							{status.lastFetchedAt ? relativeTime(status.lastFetchedAt) : t("never fetched")}
 						</span>
 						<span className={cn("hidden text-subtle transition-transform group-hover:translate-x-0.5 sm:block")}>›</span>
 					</>
@@ -105,14 +106,14 @@ export default function GitPage() {
 		<PageContainer wide>
 			<PageHeader
 				title="Git"
-				description="Branch, sync state and local changes of every project on this machine."
+				description={t("Branch, sync state and local changes of every project on this machine.")}
 				actions={
 					<>
-						<Button variant="outline" onClick={() => void q.refetch()} disabled={q.isFetching} aria-label="Refresh">
-							<RefreshCw className={cn(q.isFetching && "animate-spin")} /> Refresh
+						<Button variant="outline" onClick={() => void q.refetch()} disabled={q.isFetching} aria-label={t("Refresh")}>
+							<RefreshCw className={cn(q.isFetching && "animate-spin")} /> {t("Refresh")}
 						</Button>
 						<Button variant="primary" onClick={() => openDialog({ kind: "create-project", mode: "clone" })}>
-							<Plus /> Clone repository
+							<Plus /> {t("Clone repository")}
 						</Button>
 					</>
 				}
@@ -120,8 +121,8 @@ export default function GitPage() {
 			<input
 				value={search}
 				onChange={(e) => setSearch(e.target.value)}
-				placeholder="Search projects or branches"
-				aria-label="Search projects"
+				placeholder={t("Search projects or branches")}
+				aria-label={t("Search projects")}
 				className="h-8 w-full max-w-md rounded-lg bg-surface-1 px-3 text-[13px] shadow-[inset_0_0_0_1px_var(--border-strong)] outline-none placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1px_var(--accent),0_0_0_3px_var(--accent-soft)] coarse:h-11"
 			/>
 			<div className="overflow-hidden rounded-xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border)]">
@@ -134,23 +135,23 @@ export default function GitPage() {
 				) : q.error ? (
 					<EmptyState
 						icon={FolderGit2}
-						title="Could not load git overview"
-						description={errorMessage(q.error)}
+						title={t("Could not load git overview")}
+						description={errorText(q.error)}
 						action={
 							<Button size="sm" variant="outline" onClick={() => void q.refetch()}>
-								<RefreshCw /> Retry
+								<RefreshCw /> {t("Retry")}
 							</Button>
 						}
 					/>
 				) : entries.length === 0 ? (
 					<EmptyState
 						icon={FolderGit2}
-						title={needle ? "No matching projects" : "No projects yet"}
-						description={needle ? "Try a different search." : "Clone a GitHub repository or add a local directory to see its Git state here."}
+						title={needle ? t("No matching projects") : t("No projects yet")}
+						description={needle ? t("Try a different search.") : t("Clone a GitHub repository or add a local directory to see its Git state here.")}
 						action={
 							needle ? undefined : (
 								<Button variant="primary" size="sm" onClick={() => openDialog({ kind: "create-project", mode: "clone" })}>
-									<Plus /> Clone repository
+									<Plus /> {t("Clone repository")}
 								</Button>
 							)
 						}

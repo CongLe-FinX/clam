@@ -2,9 +2,10 @@ import type { AgentSession, SharedSession, SharedSessionDetail, SharedTransfer }
 import { Link } from "@tanstack/react-router";
 import { ArrowRightFromLine, Camera, ExternalLink, Eye, FolderOpen, FolderSync, GitBranch, Loader2, Play, ShieldAlert, TriangleAlert, Users } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
-import { ApiError, errorMessage } from "@/lib/api";
+import { T, renderServerText, t, tr } from "@/i18n";
+import { ApiError, errorText } from "@/lib/api";
 import { useProject } from "@/lib/queries";
-import { cn, formatBytes, relativeTime } from "@/lib/utils";
+import { cn, formatBytes, formatDateTime, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
@@ -39,7 +40,7 @@ function TakeoverDialog({ shared, force, onClose }: { shared: SharedSession; for
 	const driver = driverOf(shared);
 	const cp = shared.lastCheckpoint;
 	const [understood, setUnderstood] = useState(false);
-	const driverName = driver?.nodeName ?? "the driver";
+	const driverName = driver?.nodeName ?? t("the driver");
 	const files = shared.vcs === "files";
 	const ready = Boolean(cp?.snapshot) && (!force || understood);
 	const conflictPaths = files && takeover.error instanceof ApiError && takeover.error.code === "files_conflict" ? conflictPathsOf(takeover.error) : null;
@@ -48,9 +49,9 @@ function TakeoverDialog({ shared, force, onClose }: { shared: SharedSession; for
 		<Dialog open onOpenChange={(o) => !o && !takeover.isPending && onClose()}>
 			<DialogContent sheetOnMobile className="max-w-lg">
 				<DialogHeader>
-					<DialogTitle>{force ? "Take over while the driver is reachable?" : "Continue this work on this machine?"}</DialogTitle>
+					<DialogTitle>{force ? t("Take over while the driver is reachable?") : t("Continue this work on this machine?")}</DialogTitle>
 					<DialogDescription>
-						A new session on this machine picks up “{shared.title}” from the last checkpoint. It opens here, in this machine's own web UI.
+						{t("A new session on this machine picks up “{title}” from the last checkpoint. It opens here, in this machine's own web UI.", { title: shared.title })}
 					</DialogDescription>
 				</DialogHeader>
 				<div className="scrollbar-thin -mx-1 flex min-h-0 flex-col gap-3.5 overflow-y-auto px-1 text-[13px]">
@@ -59,83 +60,94 @@ function TakeoverDialog({ shared, force, onClose }: { shared: SharedSession; for
 						<div role="alert" className="flex items-start gap-2 rounded-lg bg-danger/10 px-3 py-2.5 text-xs text-danger">
 							<ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
 							<span>
-								<strong>{driverName} is still reachable and may be working right now.</strong> Taking over splits the work: when it notices the higher epoch its own session is stopped and becomes read-only, and anything it does before that is only saved{files ? " as a rescue bundle on that machine" : " on a rescue branch"}. Prefer asking its owner to hand the work over from the Team tab instead.
+								{files ? (
+									<T text="<b>{name} is still reachable and may be working right now.</b> Taking over splits the work: when it notices the higher epoch its own session is stopped and becomes read-only, and anything it does before that is only saved as a rescue bundle on that machine. Prefer asking its owner to hand the work over from the Team tab instead." params={{ name: driverName }} tags={{ b: <strong /> }} />
+								) : (
+									<T text="<b>{name} is still reachable and may be working right now.</b> Taking over splits the work: when it notices the higher epoch its own session is stopped and becomes read-only, and anything it does before that is only saved on a rescue branch. Prefer asking its owner to hand the work over from the Team tab instead." params={{ name: driverName }} tags={{ b: <strong /> }} />
+								)}
 							</span>
 						</div>
 					) : null}
 					<dl className="flex flex-col gap-2.5 rounded-xl bg-surface-2/60 p-3 shadow-[inset_0_0_0_1px_var(--border)]">
 						<div className="flex flex-col gap-0.5">
-							<dt className="text-2xs font-medium uppercase tracking-wider text-subtle">Starting from checkpoint</dt>
+							<dt className="text-2xs font-medium uppercase tracking-wider text-subtle">{t("Starting from checkpoint")}</dt>
 							<dd>
 								{cp ? (
 									<span className="flex flex-wrap items-center gap-x-2 gap-y-1">
 										<span className="font-medium">#{cp.seq}</span>
-										<span className="text-muted-foreground" title={new Date(cp.at).toLocaleString()}>
+										<span className="text-muted-foreground" title={formatDateTime(cp.at)}>
 											{relativeTime(cp.at)}
 										</span>
 										<CheckpointFacts shared={shared} c={cp} className="text-xs" />
-										{cp.snapshot ? <span className="text-xs text-muted-foreground">{cp.snapshot.messageCount} messages</span> : null}
+										{cp.snapshot ? <span className="text-xs text-muted-foreground">{t("{count, plural, one {# message} other {# messages}}", { count: cp.snapshot.messageCount })}</span> : null}
 									</span>
 								) : (
-									<span className="text-warning">No checkpoint has been received yet.</span>
+									<span className="text-warning">{t("No checkpoint has been received yet.")}</span>
 								)}
 							</dd>
 							{!files && cp && !cp.pushed && cp.commit ? (
 								<dd className="flex items-start gap-1.5 text-xs text-warning">
-									<TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden /> That commit was never pushed to GitHub, so the code may be behind the conversation.
+									<TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden /> {t("That commit was never pushed to GitHub, so the code may be behind the conversation.")}
 								</dd>
 							) : null}
 						</div>
 						<div className="flex flex-col gap-0.5">
-							<dt className="text-2xs font-medium uppercase tracking-wider text-subtle">What may be lost</dt>
+							<dt className="text-2xs font-medium uppercase tracking-wider text-subtle">{t("What may be lost")}</dt>
 							<dd className="text-muted-foreground">
-								Everything {driverName} did after that checkpoint{cp ? ` (${relativeTime(cp.at)})` : ""} — messages, file changes, commands — is not on this machine.
+								{cp
+									? t("Everything {name} did after that checkpoint ({time}) — messages, file changes, commands — is not on this machine.", { name: driverName, time: relativeTime(cp.at) })
+									: t("Everything {name} did after that checkpoint — messages, file changes, commands — is not on this machine.", { name: driverName })}
 							</dd>
 						</div>
 						<div className="flex flex-col gap-0.5">
-							<dt className="text-2xs font-medium uppercase tracking-wider text-subtle">Where it runs</dt>
+							<dt className="text-2xs font-medium uppercase tracking-wider text-subtle">{t("Where it runs")}</dt>
 							<dd className="flex flex-col gap-1 text-muted-foreground">
 								{files ? (
 									<>
 										<span>
-											Local folder: <span className="font-medium text-foreground">{project?.name ?? (shared.localProjectId ? "…" : "a managed folder is created for you")}</span>
+											<T text="Local folder: <b>{name}</b>" params={{ name: project?.name ?? (shared.localProjectId ? "…" : t("a managed folder is created for you")) }} tags={{ b: <span className="font-medium text-foreground" /> }} />
 											{project ? <span className="ml-1 font-mono text-2xs text-subtle">{project.path}</span> : null}
 										</span>
 										<span className="inline-flex items-center gap-1">
 											<FolderSync className="size-3.5 text-subtle" aria-hidden />
-											{cp?.files ? <>Folder state of checkpoint #{cp.seq} ({cp.files.fileCount} {cp.files.fileCount === 1 ? "file" : "files"}, {formatBytes(cp.files.size)})</> : "The checkpoint carries no folder changes; the folder stays as it is"}
+											{cp?.files ? t("Folder state of checkpoint #{seq} ({count, plural, one {# file} other {# files}}, {size})", { seq: cp.seq, count: cp.files.fileCount, size: formatBytes(cp.files.size) }) : t("The checkpoint carries no folder changes; the folder stays as it is")}
 										</span>
-										<span className="text-xs text-subtle">Files that differ locally are reported and never silently overwritten: the takeover stops and lists them, and you decide.</span>
+										<span className="text-xs text-subtle">{t("Files that differ locally are reported and never silently overwritten: the takeover stops and lists them, and you decide.")}</span>
 									</>
 								) : (
 									<>
 										<span>
-											Local clone: <span className="font-medium text-foreground">{project?.name ?? (shared.localProjectId ? "…" : "none linked")}</span>
+											<T text="Local clone: <b>{name}</b>" params={{ name: project?.name ?? (shared.localProjectId ? "…" : t("none linked")) }} tags={{ b: <span className="font-medium text-foreground" /> }} />
 											{project ? <span className="ml-1 font-mono text-2xs text-subtle">{project.path}</span> : null}
 										</span>
 										{shared.repo ? (
 											<span className="inline-flex items-center gap-1">
 												<GitBranch className="size-3.5 text-subtle" aria-hidden />
-												Branch <code className="font-mono text-foreground">{shared.repo.branch}</code>
-												{cp?.commit ? <> at <code className="font-mono">{shortCommit(cp.commit)}</code></> : null}
+												{cp?.commit ? (
+													<T text="Branch <code>{branch}</code> at <c>{commit}</c>" params={{ branch: shared.repo.branch, commit: shortCommit(cp.commit) }} tags={{ code: <code className="font-mono text-foreground" />, c: <code className="font-mono" /> }} />
+												) : (
+													<T text="Branch <code>{branch}</code>" params={{ branch: shared.repo.branch }} tags={{ code: <code className="font-mono text-foreground" /> }} />
+												)}
 											</span>
 										) : null}
-										<span className="text-xs text-subtle">Uncommitted changes in that clone are never discarded: if they overlap, the takeover stops and tells you.</span>
+										<span className="text-xs text-subtle">{t("Uncommitted changes in that clone are never discarded: if they overlap, the takeover stops and tells you.")}</span>
 									</>
 								)}
 							</dd>
 						</div>
 						<div className="flex flex-col gap-0.5">
-							<dt className="text-2xs font-medium uppercase tracking-wider text-subtle">Afterwards</dt>
+							<dt className="text-2xs font-medium uppercase tracking-wider text-subtle">{t("Afterwards")}</dt>
 							<dd className="text-muted-foreground">
-								This machine drives (epoch {shared.epoch + 1}); {driverName} stays in the team. If it comes back, its copy becomes read-only with a link here and its unsaved work is kept {files ? "as a rescue bundle you can preview and apply" : "on a rescue branch"}.
+								{files
+									? t("This machine drives (epoch {epoch}); {name} stays in the team. If it comes back, its copy becomes read-only with a link here and its unsaved work is kept as a rescue bundle you can preview and apply.", { epoch: shared.epoch + 1, name: driverName })
+									: t("This machine drives (epoch {epoch}); {name} stays in the team. If it comes back, its copy becomes read-only with a link here and its unsaved work is kept on a rescue branch.", { epoch: shared.epoch + 1, name: driverName })}
 							</dd>
 						</div>
 					</dl>
 					{force ? (
 						<label className="flex min-h-11 cursor-pointer items-start gap-2.5 text-xs">
 							<input type="checkbox" checked={understood} onChange={(e) => setUnderstood(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--danger)] coarse:size-5" />
-							<span>I understand that {driverName} may lose work it is doing right now.</span>
+							<span>{t("I understand that {name} may lose work it is doing right now.", { name: driverName })}</span>
 						</label>
 					) : null}
 					{conflictPaths ? (
@@ -143,11 +155,11 @@ function TakeoverDialog({ shared, force, onClose }: { shared: SharedSession; for
 							<span className="flex items-start gap-2">
 								<TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
 								<span>
-									<strong>Files in the local folder differ from the checkpoint.</strong> Nothing was changed. Overwriting replaces these with the checkpoint's versions; your local versions are saved first as a rescue bundle.
+									<T text="<b>Files in the local folder differ from the checkpoint.</b> Nothing was changed. Overwriting replaces these with the checkpoint's versions; your local versions are saved first as a rescue bundle." tags={{ b: <strong /> }} />
 								</span>
 							</span>
 							{conflictPaths.length > 0 ? (
-								<ul className="scrollbar-thin max-h-40 overflow-y-auto rounded-md bg-surface-2 py-1 text-foreground" aria-label="Files that differ locally">
+								<ul className="scrollbar-thin max-h-40 overflow-y-auto rounded-md bg-surface-2 py-1 text-foreground" aria-label={t("Files that differ locally")}>
 									{conflictPaths.map((p) => (
 										<li key={p} className="break-all px-2.5 py-0.5 font-mono text-2xs">
 											{p}
@@ -158,21 +170,21 @@ function TakeoverDialog({ shared, force, onClose }: { shared: SharedSession; for
 						</div>
 					) : takeover.error ? (
 						<p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
-							{errorMessage(takeover.error)}
+							{errorText(takeover.error)}
 						</p>
 					) : null}
 				</div>
 				<DialogFooter>
 					<Button variant="ghost" onClick={onClose} disabled={takeover.isPending}>
-						Cancel
+						{t("Cancel")}
 					</Button>
 					{conflictPaths ? (
 						<Button variant="danger" loading={takeover.isPending} onClick={() => takeover.mutate(true, { onSuccess: onClose })}>
-							<Play /> Overwrite local files
+							<Play /> {t("Overwrite local files")}
 						</Button>
 					) : (
 						<Button variant={force ? "danger" : "primary"} loading={takeover.isPending} disabled={!ready} onClick={() => takeover.mutate(force, { onSuccess: onClose })}>
-							<Play /> {force ? "Take over anyway" : "Continue on this machine"}
+							<Play /> {force ? t("Take over anyway") : t("Continue on this machine")}
 						</Button>
 					)}
 				</DialogFooter>
@@ -188,8 +200,8 @@ function DriverChip({ shared }: { shared: SharedSession }) {
 	if (!driver) return null;
 	return (
 		<Badge variant={driver.nodeStatus === "online" ? "success" : driver.nodeStatus === "offline" ? "danger" : "warning"} className="gap-1.5">
-			<StatusDot status={nodeDot(driver.nodeStatus)} label={NODE_STATUS_LABEL[driver.nodeStatus]} className="size-1.5 [&>span]:size-1.5" />
-			Driver {NODE_STATUS_LABEL[driver.nodeStatus].toLowerCase()}
+			<StatusDot status={nodeDot(driver.nodeStatus)} label={tr(NODE_STATUS_LABEL[driver.nodeStatus])} className="size-1.5 [&>span]:size-1.5" />
+			{t("Driver {status}", { status: tr(NODE_STATUS_LABEL[driver.nodeStatus]).toLowerCase() })}
 		</Badge>
 	);
 }
@@ -197,38 +209,38 @@ function DriverChip({ shared }: { shared: SharedSession }) {
 function MirrorBanner({ session, shared, onOpenTeam }: { session: AgentSession; shared: SharedSession | null; onOpenTeam: () => void }) {
 	const [dialog, setDialog] = useState<null | "continue" | "force">(null);
 	const driver = shared ? driverOf(shared) : undefined;
-	const driverNode = driver?.nodeName ?? "the driver machine";
+	const driverNode = driver?.nodeName ?? t("the driver machine");
 	const title = shared?.title ?? session.title;
 	const reachable = driver ? driver.nodeStatus === "online" || driver.nodeStatus === "degraded" : true;
 	return (
-		<div role="region" aria-label="Live view" className={cn(bar, "bg-accent-soft/60")}>
+		<div role="region" aria-label={t("Live view")} className={cn(bar, "bg-accent-soft/60")}>
 			<div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
 				<Eye className="size-4 shrink-0 text-accent" aria-hidden />
 				<p className="min-w-0 flex-1 basis-60">
-					Live view of <span className="font-semibold">“{title}”</span> running on <span className="font-semibold">{driverNode}</span>
-					<span className="text-muted-foreground"> · read-only</span>
+					<T text="Live view of <b>“{title}”</b> running on <b>{machine}</b>" params={{ title, machine: driverNode }} tags={{ b: <span className="font-semibold" /> }} />
+					<span className="text-muted-foreground"> · {t("read-only")}</span>
 				</p>
 				{shared ? <DriverChip shared={shared} /> : null}
 				<Button size="sm" variant="ghost" onClick={onOpenTeam} className="max-sm:hidden">
-					<Users /> Team
+					<Users /> {t("Team")}
 				</Button>
 			</div>
 			{shared ? (
 				shared.takeoverAvailable ? (
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-warning/10 px-3 py-2.5 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--warning)_40%,transparent)]">
 						<p className="min-w-0 flex-1 basis-56 text-xs text-warning">
-							<strong>{driverNode} looks offline.</strong> {shared.lastCheckpoint ? `This machine holds checkpoint ${shared.lastCheckpoint.seq} from ${relativeTime(shared.lastCheckpoint.at)}.` : null} You can continue the work here.
+							<strong>{t("{name} looks offline.", { name: driverNode })}</strong> {shared.lastCheckpoint ? `${t("This machine holds checkpoint {seq} from {time}.", { seq: shared.lastCheckpoint.seq, time: relativeTime(shared.lastCheckpoint.at) })} ` : null}{t("You can continue the work here.")}
 						</p>
 						<Button variant="primary" size="lg" onClick={() => setDialog("continue")} className="max-sm:w-full">
-							<Play /> Continue on this machine
+							<Play /> {t("Continue on this machine")}
 						</Button>
 					</div>
 				) : (
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
-						<p className="min-w-0 flex-1 basis-56">{reachable ? "Following the driver live. You can still continue here if it stops responding." : (shared.takeoverBlockedReason ?? "The driver is offline, but this machine cannot continue yet.")}</p>
+						<p className="min-w-0 flex-1 basis-56">{reachable ? t("Following the driver live. You can still continue here if it stops responding.") : (shared.takeoverBlockedReason ? renderServerText(shared.takeoverBlockedReason, shared.takeoverBlockedI18n) : t("The driver is offline, but this machine cannot continue yet."))}</p>
 						{reachable && shared.lastCheckpoint?.snapshot ? (
 							<Button size="sm" variant="ghost" className="text-danger hover:text-danger" onClick={() => setDialog("force")}>
-								Take over anyway…
+								{t("Take over anyway…")}
 							</Button>
 						) : null}
 					</div>
@@ -251,22 +263,22 @@ function MovedBanner({ session, shared }: { session: AgentSession; shared: Share
 	const rescueUrl = rescue && shared?.repo ? branchUrl(shared.repo.url, rescue) : null;
 	const me = shared?.participants.find((p) => p.nodeStatus === "self");
 	return (
-		<div role="region" aria-label="Moved" className={cn(bar, "bg-warning/10")}>
+		<div role="region" aria-label={t("Moved")} className={cn(bar, "bg-warning/10")}>
 			<div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
 				<ArrowRightFromLine className="size-4 shrink-0 text-warning" aria-hidden />
 				<p className="min-w-0 flex-1 basis-60">
-					<span className="font-semibold">This work continues on {moved.nodeName}.</span> <span className="text-muted-foreground">This copy is read-only — moved {relativeTime(moved.at)}.</span>
+					<span className="font-semibold">{t("This work continues on {name}.", { name: moved.nodeName })}</span> <span className="text-muted-foreground">{t("This copy is read-only — moved {time}.", { time: relativeTime(moved.at) })}</span>
 				</p>
 				{href ? (
 					<Button asChild size="sm" variant="primary">
 						<a href={href} target="_blank" rel="noreferrer noopener">
-							<ExternalLink /> Open on {moved.nodeName}
+							<ExternalLink /> {t("Open on {name}", { name: moved.nodeName })}
 						</a>
 					</Button>
 				) : (
 					<Button asChild size="sm" variant="outline">
 						<Link to="/network/nodes/$peerId" params={{ peerId: moved.nodeId }}>
-							Find {moved.nodeName}
+							{t("Find {name}", { name: moved.nodeName })}
 						</Link>
 					</Button>
 				)}
@@ -274,15 +286,20 @@ function MovedBanner({ session, shared }: { session: AgentSession; shared: Share
 			{rescue ? (
 				<p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
 					<GitBranch className="size-3.5 text-subtle" aria-hidden />
-					Your unsaved changes were kept on branch{" "}
-					{rescueUrl ? (
-						<a href={rescueUrl} target="_blank" rel="noreferrer noopener" className="font-mono text-accent hover:underline">
-							{rescue}
-						</a>
-					) : (
-						<code className="font-mono text-foreground">{rescue}</code>
-					)}
-					.
+					<T
+						text="Your unsaved changes were kept on branch <b>{branch}</b>."
+						params={{ branch: rescue }}
+						tags={{
+							b: (c) =>
+								rescueUrl ? (
+									<a href={rescueUrl} target="_blank" rel="noreferrer noopener" className="font-mono text-accent hover:underline">
+										{c}
+									</a>
+								) : (
+									<code className="font-mono text-foreground">{c}</code>
+								),
+						}}
+					/>
 				</p>
 			) : null}
 			{rescueFiles && shared ? (
@@ -290,11 +307,11 @@ function MovedBanner({ session, shared }: { session: AgentSession; shared: Share
 					<p className="flex min-w-0 flex-1 basis-60 items-start gap-1.5">
 						<FolderSync className="mt-0.5 size-3.5 shrink-0 text-subtle" aria-hidden />
 						<span>
-							Your work after the last checkpoint was saved: {rescueFiles.fileCount} {rescueFiles.fileCount === 1 ? "file" : "files"} ({formatBytes(rescueFiles.size)}), {relativeTime(rescueFiles.at)}.
+							{t("Your work after the last checkpoint was saved: {count, plural, one {# file} other {# files}} ({size}), {time}.", { count: rescueFiles.fileCount, size: formatBytes(rescueFiles.size), time: relativeTime(rescueFiles.at) })}
 						</span>
 					</p>
 					<Button size="sm" variant="outline" onClick={() => setApplying(true)}>
-						<FolderOpen /> Preview &amp; apply
+						<FolderOpen /> {t("Preview & apply")}
 					</Button>
 				</div>
 			) : null}
@@ -303,17 +320,17 @@ function MovedBanner({ session, shared }: { session: AgentSession; shared: Share
 					<RescueApplyDialog shared={shared} onClose={() => setApplying(false)} />
 				</Suspense>
 			) : null}
-			{!href ? <p className="text-xs text-subtle">The address of {moved.nodeName}'s web UI is not known on this machine.</p> : null}
+			{!href ? <p className="text-xs text-subtle">{t("The address of {name}'s web UI is not known on this machine.", { name: moved.nodeName })}</p> : null}
 			<div className="flex flex-wrap items-center gap-2">
 				{mirrorId ? (
 					<Button asChild size="sm" variant="outline">
 						<Link to="/sessions/$sessionId" params={{ sessionId: mirrorId }}>
-							<Eye /> Watch live here
+							<Eye /> {t("Watch live here")}
 						</Link>
 					</Button>
 				) : null}
 				<span className="text-xs text-subtle">
-					{me?.state === "active" ? `This machine's agent stays in the team as a participant${mirrorId ? "" : "; its live view is being set up"}.` : "This machine is no longer part of the team."}
+					{me?.state === "active" ? (mirrorId ? t("This machine's agent stays in the team as a participant.") : t("This machine's agent stays in the team as a participant; its live view is being set up.")) : t("This machine is no longer part of the team.")}
 				</span>
 			</div>
 		</div>
@@ -325,15 +342,19 @@ function ParticipantStrip({ shared, onOpenTeam }: { shared: SharedSession; onOpe
 	const driver = driverOf(shared);
 	const viewId = shared.mirrorSessionId ?? shared.localSessionId;
 	return (
-		<div role="region" aria-label="Shared session" className="animate-fade-in flex shrink-0 items-center gap-x-3 border-b bg-accent-soft/40 px-3 py-1.5 text-xs">
+		<div role="region" aria-label={t("Shared session")} className="animate-fade-in flex shrink-0 items-center gap-x-3 border-b bg-accent-soft/40 px-3 py-1.5 text-xs">
 			<Users className="size-4 shrink-0 text-accent" aria-hidden />
-			<button type="button" onClick={onOpenTeam} className="min-w-0 flex-1 truncate rounded text-left text-muted-foreground outline-none hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:py-3" title="Open the team">
-				Participant session in “{shared.title}”{driver ? <> — driven by <span className="font-medium text-foreground">{participantLabel(driver)}</span></> : null}
+			<button type="button" onClick={onOpenTeam} className="min-w-0 flex-1 truncate rounded text-left text-muted-foreground outline-none hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:py-3" title={t("Open the team")}>
+				{driver ? (
+					<T text="Participant session in “{title}” — driven by <b>{name}</b>" params={{ title: shared.title, name: participantLabel(driver) }} tags={{ b: <span className="font-medium text-foreground" /> }} />
+				) : (
+					t("Participant session in “{title}”", { title: shared.title })
+				)}
 			</button>
 			{viewId ? (
 				<Button asChild size="sm" variant="ghost" className="shrink-0">
 					<Link to="/sessions/$sessionId" params={{ sessionId: viewId }}>
-						<Eye /> <span className="max-sm:sr-only">Live view</span>
+						<Eye /> <span className="max-sm:sr-only">{t("Live view")}</span>
 					</Link>
 				</Button>
 			) : null}
@@ -347,11 +368,11 @@ function TransferStrip({ transfer, onOpen }: { transfer: SharedTransfer; onOpen:
 	return (
 		<div role="status" className={cn("animate-fade-in flex shrink-0 items-center gap-x-3 border-b px-3 py-1.5 text-xs", failed ? "bg-danger/10 text-danger" : "bg-warning/10")}>
 			{failed ? <TriangleAlert className="size-4 shrink-0" aria-hidden /> : <Loader2 className="size-4 shrink-0 animate-spin text-warning" aria-hidden />}
-			<span className="min-w-0 flex-1 truncate" title={transfer.message}>
-				<span className="font-medium">{failed ? `Hand-over to ${transfer.toNodeName} ${transfer.phase === "cancelled" ? "cancelled" : "failed"}` : `Handing over to ${transfer.toNodeName}`}</span> · {failed ? (transfer.error?.message ?? transfer.message) : transfer.message}
+			<span className="min-w-0 flex-1 truncate" title={renderServerText(transfer.message, transfer.i18n)}>
+				<span className="font-medium">{failed ? (transfer.phase === "cancelled" ? t("Hand-over to {name} cancelled", { name: transfer.toNodeName }) : t("Hand-over to {name} failed", { name: transfer.toNodeName })) : t("Handing over to {name}", { name: transfer.toNodeName })}</span> · {failed && transfer.error ? renderServerText(transfer.error.message, transfer.error.i18n) : renderServerText(transfer.message, transfer.i18n)}
 			</span>
 			<Button size="sm" variant="ghost" className="shrink-0" onClick={onOpen}>
-				Details
+				{t("Details")}
 			</Button>
 		</div>
 	);

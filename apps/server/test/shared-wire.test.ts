@@ -378,6 +378,9 @@ describe("mirror frames", () => {
 	it("sync chunks must arrive as 0,1,2...: index 0 resets, a chunk with the wrong index (or of another stream) is refused with mirror_resync", async () => {
 		const { sessionId, shared, onB } = await joined();
 		await whenSettled(pair.a, sessionId);
+		// A's real publisher is detached meanwhile (see the test above): after a settle it still forwards the runtime state in a frame of its own stream,
+		// which would reset the mirror between two of the hand-posted chunks.
+		pair.a.ctx.shared.mirror.unpublish(shared.id);
 		const path_ = `/shared/${shared.id}/mirror`;
 		const chunk = (over: Record<string, unknown>) => post(pair.a, pair.b, path_, { type: "sync", epoch: 1, streamId: "str_chunks", seq: 3, index: 0, final: false, messages: [message("c0", "chunk zero")], ...over });
 		const mirrorId = onB.mirrorSessionId as string;
@@ -404,7 +407,7 @@ describe("mirror frames", () => {
 		// events now follow from seq 4
 		expect((await post(pair.a, pair.b, path_, { type: "events", epoch: 1, streamId: "str_chunks", seq: 4, events: [{ type: "settled" }] })).body).toEqual({ applied: true, lastSeq: 4 });
 
-		pair.a.ctx.shared.mirror.syncPeer(shared.id, pair.bId);
+		pair.a.ctx.shared.mirror.publish(shared.id);
 		const expected = await transcriptTexts(pair.a, sessionId);
 		await eventually(async () => JSON.stringify(await transcriptTexts(pair.b, mirrorId)) === JSON.stringify(expected), "the real conversation back in the mirror");
 	});

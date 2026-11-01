@@ -1,5 +1,6 @@
 import { Users } from "lucide-react";
 import { useMemo, useState } from "react";
+import { t } from "@/i18n";
 import { cn, formatCost } from "@/lib/utils";
 import { EmptyState } from "@/ui/empty-state";
 import { Skeleton } from "@/ui/skeleton";
@@ -39,7 +40,7 @@ export function SubagentsPanel({ store }: { store: OmpStore }) {
 
 	if (!loaded) {
 		return (
-			<div className="flex flex-col gap-3 p-4" aria-busy="true" aria-label="Loading subagents">
+			<div className="flex flex-col gap-3 p-4" aria-busy="true" aria-label={t("Loading subagents")}>
 				{[0, 1].map((i) => (
 					<div key={i} className="flex items-center gap-3">
 						<Skeleton className="size-8 rounded-lg" />
@@ -53,28 +54,28 @@ export function SubagentsPanel({ store }: { store: OmpStore }) {
 		);
 	}
 	if (subagents.length === 0) {
-		return <EmptyState className="h-full" icon={Users} title="No subagents yet" description="When the agent hands work to subagents, they appear here with live progress." />;
+		return <EmptyState className="h-full" icon={Users} title={t("No subagents yet")} description={t("When the agent hands work to subagents, they appear here with live progress.")} />;
 	}
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<div className="flex shrink-0 flex-wrap items-center gap-1 border-b px-2.5 py-2">
 				<FilterChip active={filter === "all"} onClick={() => setFilter("all")} count={subagents.length}>
-					All
+					{t("All")}
 				</FilterChip>
 				<FilterChip active={filter === "running"} onClick={() => setFilter("running")} count={running}>
-					Running
+					{t("Running")}
 				</FilterChip>
 				<FilterChip active={filter === "finished"} onClick={() => setFilter("finished")} count={subagents.length - running}>
-					Finished
+					{t("Finished")}
 				</FilterChip>
 			</div>
-			{!live ? <p className="shrink-0 border-b bg-surface-2/60 px-3 py-1.5 text-2xs text-subtle">The agent is not running: this is the last state it reported.</p> : null}
+			{!live ? <p className="shrink-0 border-b bg-surface-2/60 px-3 py-1.5 text-2xs text-subtle">{t("The agent is not running: this is the last state it reported.")}</p> : null}
 			<div className="scrollbar-thin min-h-0 flex-1 divide-y overflow-y-auto overscroll-contain">
-				{shown.length === 0 ? <p className="px-4 py-6 text-center text-xs text-muted-foreground">Nothing {filter === "running" ? "is running" : "has finished"} yet.</p> : shown.map((s) => <SubagentRow key={s.id} store={store} s={s} />)}
+				{shown.length === 0 ? <p className="px-4 py-6 text-center text-xs text-muted-foreground">{filter === "running" ? t("Nothing is running yet.") : t("Nothing has finished yet.")}</p> : shown.map((s) => <SubagentRow key={s.id} store={store} s={s} />)}
 			</div>
 			{cost > 0 ? (
 				<div className="flex shrink-0 items-center justify-between border-t bg-surface-1 px-3 py-2 text-2xs text-subtle">
-					<span>Total for {subagents.length} {subagents.length === 1 ? "subagent" : "subagents"}</span>
+					<span>{t("{count, plural, one {Total for # subagent} other {Total for # subagents}}", { count: subagents.length })}</span>
 					<span className="tabular font-mono">{formatCost(cost)}</span>
 				</div>
 			) : null}

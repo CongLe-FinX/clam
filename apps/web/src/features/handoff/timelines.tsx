@@ -1,8 +1,9 @@
 import type { Handoff, HandoffEvent, HandoffStep } from "@clam/contracts";
 import { Check, Circle, Loader2, MinusCircle, XCircle } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { type Msg, msg, renderServerText, t, tr } from "@/i18n";
+import { cn, formatTime } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
-import { stateLabel } from "./meta.ts";
+import { stateLabel, stepName } from "./meta.ts";
 
 const STEP_ICON = {
 	pending: { icon: Circle, cls: "text-subtle" },
@@ -12,7 +13,16 @@ const STEP_ICON = {
 	skipped: { icon: MinusCircle, cls: "text-subtle" },
 } as const satisfies Record<HandoffStep["state"], { icon: typeof Circle; cls: string }>;
 
-const time = (iso: string | null): string => (iso ? new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "");
+const SECONDS: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit", second: "2-digit" };
+const time = (iso: string | null): string => (iso ? formatTime(iso, SECONDS) : "");
+
+const STEP_STATE = {
+	pending: msg("Pending"),
+	running: msg("Running"),
+	done: msg("Done"),
+	failed: msg("Failed"),
+	skipped: msg("Skipped"),
+} as const satisfies Record<HandoffStep["state"], Msg>;
 
 /** The ten target steps (docs §4). Source records without steps show nothing. */
 export function StepTimeline({ steps }: { steps: HandoffStep[] }) {
@@ -21,7 +31,7 @@ export function StepTimeline({ steps }: { steps: HandoffStep[] }) {
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle>Restore steps</CardTitle>
+				<CardTitle>{t("Restore steps")}</CardTitle>
 			</CardHeader>
 			<CardContent className="pt-3">
 				<ol className="flex flex-col">
@@ -35,14 +45,14 @@ export function StepTimeline({ steps }: { steps: HandoffStep[] }) {
 									<div className="flex items-baseline justify-between gap-2">
 										<span className={cn("text-[13px]", s.state === "pending" || s.state === "skipped" ? "text-muted-foreground" : "font-medium")}>
 											<span className="mr-1.5 font-mono text-2xs text-subtle">{s.n}</span>
-											{s.name}
+											{stepName(s)}
 										</span>
 										<span className="tabular shrink-0 font-mono text-2xs text-subtle">
-											<span className="sr-only">{s.state}</span>
+											<span className="sr-only">{tr(STEP_STATE[s.state])}</span>
 											{time(s.at)}
 										</span>
 									</div>
-									{s.detail ? <p className={cn("mt-0.5 break-words text-xs", s.state === "failed" ? "text-danger" : "text-subtle")}>{s.detail}</p> : null}
+									{s.detail ? <p className={cn("mt-0.5 break-words text-xs", s.state === "failed" ? "text-danger" : "text-subtle")}>{renderServerText(s.detail, s.i18n)}</p> : null}
 								</div>
 							</li>
 						);
@@ -59,11 +69,11 @@ export function EventTimeline({ events, h }: { events: HandoffEvent[]; h: Handof
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle>Events</CardTitle>
+				<CardTitle>{t("Events")}</CardTitle>
 			</CardHeader>
 			<CardContent className="pt-3">
 				{events.length === 0 ? (
-					<p className="text-[13px] text-subtle">No events yet.</p>
+					<p className="text-[13px] text-subtle">{t("No events yet.")}</p>
 				) : (
 					<ol className="flex flex-col gap-3">
 						{[...events]
@@ -76,10 +86,10 @@ export function EventTimeline({ events, h }: { events: HandoffEvent[]; h: Handof
 											<span className="font-medium">{stateLabel(e.state)}</span>
 											<span className="text-xs text-subtle">{nodeName(e.nodeId)}</span>
 											<time dateTime={e.at} className="tabular ml-auto font-mono text-2xs text-subtle">
-												{new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+												{formatTime(e.at, SECONDS)}
 											</time>
 										</div>
-										<p className="break-words text-xs text-muted-foreground">{e.summary}</p>
+										<p className="break-words text-xs text-muted-foreground">{renderServerText(e.summary, e.i18n)}</p>
 									</div>
 								</li>
 							))}

@@ -3,13 +3,14 @@ import { memo, useEffect, useState } from "react";
 import { type HlLine, highlightLines, resolveLang } from "@/lib/highlight";
 import { cn } from "@/lib/utils";
 import { Tip } from "@/ui/tooltip";
+import { t } from "@/i18n";
 
 export function HlLineView({ line }: { line: HlLine }) {
 	return (
 		<>
-			{line.map((t, i) => (
-				<span key={i} className="hl-tok" style={t.style}>
-					{t.content}
+			{line.map((tok, i) => (
+				<span key={i} className="hl-tok" style={tok.style}>
+					{tok.content}
 				</span>
 			))}
 		</>
@@ -29,7 +30,7 @@ function useHighlighted(code: string, lang: string | null | undefined): HlLine[]
 			return;
 		}
 		let alive = true;
-		const t = setTimeout(() => {
+		const timer = setTimeout(() => {
 			highlightLines(code, lang)
 				.then((l) => {
 					if (cache.size > 200) cache.clear();
@@ -40,24 +41,25 @@ function useHighlighted(code: string, lang: string | null | undefined): HlLine[]
 		}, 140);
 		return () => {
 			alive = false;
-			clearTimeout(t);
+			clearTimeout(timer);
 		};
 	}, [code, lang, key]);
 	return lines;
 }
 
-export function CopyButton({ text, className, label = "Copy" }: { text: string; className?: string; label?: string }) {
+export function CopyButton({ text, className, label }: { text: string; className?: string; label?: string }) {
 	const [done, setDone] = useState(false);
+	const copyLabel = label ?? t("Copy");
 	useEffect(() => {
 		if (!done) return;
-		const t = setTimeout(() => setDone(false), 1500);
-		return () => clearTimeout(t);
+		const timer = setTimeout(() => setDone(false), 1500);
+		return () => clearTimeout(timer);
 	}, [done]);
 	return (
-		<Tip label={done ? "Copied" : label}>
+		<Tip label={done ? t("Copied") : copyLabel}>
 			<button
 				type="button"
-				aria-label={label}
+				aria-label={copyLabel}
 				onClick={() => {
 					void navigator.clipboard?.writeText(text).then(() => setDone(true));
 				}}
@@ -94,10 +96,10 @@ export const CodeBlock = memo(function CodeBlock({
 					{hint ? <span className="truncate italic">{hint}</span> : null}
 				</span>
 				<span className="-mr-2 flex items-center">
-					<Tip label={wrap ? "No wrap" : "Wrap lines"}>
+					<Tip label={wrap ? t("No wrap") : t("Wrap lines")}>
 						<button
 							type="button"
-							aria-label="Wrap lines"
+							aria-label={t("Wrap lines")}
 							aria-pressed={wrap}
 							onClick={() => setWrap((v) => !v)}
 							className={cn("grid size-6 place-items-center rounded-md outline-none transition-colors hover:bg-surface-3 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring coarse:size-10", wrap && "bg-surface-3 text-foreground")}

@@ -2,6 +2,7 @@ import type { BrowserClientMessage, BrowserDevice, BrowserViewport } from "@clam
 import { Keyboard, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 import { type Ref, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { clamp, cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { copyAnswerToClipboard } from "./clipboard.ts";
@@ -351,7 +352,7 @@ export function BrowserViewer({ conn, state, viewport, device, onViewerSize, onF
 					e.preventDefault();
 					const seen = ++clipboardSeen;
 					void copyAnswerToClipboard(conn.copySelection()).then((copied) => {
-						if (seen === clipboardSeen && !copied) toast.message("Nothing selected on the page");
+						if (seen === clipboardSeen && !copied) toast.message(t("Nothing selected on the page"));
 					});
 					return;
 				}
@@ -471,11 +472,11 @@ export function BrowserViewer({ conn, state, viewport, device, onViewerSize, onF
 	return (
 		<div ref={areaRef} data-focused={kbdFocused || undefined} className={cn("group/viewer relative min-h-0 min-w-0 select-none overflow-hidden bg-surface-2", className)}>
 			<div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 overflow-hidden bg-white shadow-pop group-data-[focused]/viewer:shadow-[0_0_0_2px_var(--accent)]" style={{ width: cssWidth, height: cssHeight, opacity: hasFrame ? 1 : 0 }}>
-				<canvas ref={canvasRef} tabIndex={0} aria-label="Remote browser page" className="block size-full cursor-default touch-none outline-none" />
+				<canvas ref={canvasRef} tabIndex={0} aria-label={t("Remote browser page")} className="block size-full cursor-default touch-none outline-none" />
 			</div>
 			<textarea
 				ref={textRef}
-				aria-label="Keyboard input for the remote page"
+				aria-label={t("Keyboard input for the remote page")}
 				autoCapitalize="off"
 				autoCorrect="off"
 				autoComplete="off"
@@ -489,7 +490,7 @@ export function BrowserViewer({ conn, state, viewport, device, onViewerSize, onF
 			<Button
 				variant="secondary"
 				size="icon"
-				aria-label={kbdFocused ? "Hide keyboard" : "Show keyboard"}
+				aria-label={kbdFocused ? t("Hide keyboard") : t("Show keyboard")}
 				className="absolute bottom-3 right-3 hidden rounded-full shadow-pop coarse:inline-flex"
 				onMouseDown={(e) => e.preventDefault()}
 				onClick={() => (document.activeElement === textRef.current ? textRef.current?.blur() : textRef.current?.focus({ preventScroll: true }))}
@@ -515,22 +516,22 @@ function ConnectionOverlay({ state, hasFrame, onRetry }: { state: ConnState; has
 		// With a frame on screen this is a small pill over the last picture; first connect gets a quiet full overlay.
 		return hasFrame ? (
 			<div role="status" className="pointer-events-none absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-2 rounded-full bg-overlay px-3 py-1.5 text-xs text-muted-foreground shadow-pop">
-				<Loader2 className="size-3.5 animate-spin" /> {state === "reconnecting" ? "Reconnecting…" : "Connecting…"}
+				<Loader2 className="size-3.5 animate-spin" /> {state === "reconnecting" ? t("Reconnecting…") : t("Connecting…")}
 			</div>
 		) : (
 			<div role="status" className="pointer-events-none absolute inset-0 grid place-items-center">
 				<div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-					<Loader2 className="size-4 animate-spin" /> Connecting to this machine's browser…
+					<Loader2 className="size-4 animate-spin" /> {t("Connecting to this machine's browser…")}
 				</div>
 			</div>
 		);
 	}
 	const message =
 		state === "tab-closed"
-			? { title: "This tab was closed", body: "Pick another tab or open a new one.", retry: false }
+			? { title: t("This tab was closed"), body: t("Pick another tab or open a new one."), retry: false }
 			: state === "signed-out"
-				? { title: "Session ended", body: "Your sign-in expired or the Browser was switched off for remote access.", retry: true }
-				: { title: "Browser unavailable", body: "The browser on this machine is not running or could not start.", retry: true };
+				? { title: t("Session ended"), body: t("Your sign-in expired or the Browser was switched off for remote access."), retry: true }
+				: { title: t("Browser unavailable"), body: t("The browser on this machine is not running or could not start."), retry: true };
 	return (
 		<div role="alert" className="absolute inset-0 grid place-items-center bg-surface-2/85 p-6 backdrop-blur-[2px]">
 			<div className="flex max-w-xs flex-col items-center gap-2 text-center">
@@ -539,7 +540,7 @@ function ConnectionOverlay({ state, hasFrame, onRetry }: { state: ConnState; has
 				<p className="text-[13px] text-muted-foreground">{message.body}</p>
 				{message.retry ? (
 					<Button size="sm" onClick={onRetry}>
-						<RefreshCw /> Retry
+						<RefreshCw /> {t("Retry")}
 					</Button>
 				) : null}
 			</div>

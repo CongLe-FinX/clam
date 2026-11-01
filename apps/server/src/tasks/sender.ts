@@ -2,7 +2,7 @@ import { ulid, type wire } from "@clam/agent-network";
 import { rm } from "node:fs/promises";
 import { agents, agentSessions, peerAgents, projects, workspaceMembers, workspaces } from "@clam/database";
 import { isTerminalStatus, normalizeRepoUrl } from "@clam/task-engine";
-import type { TaskDeliverAs, TaskStatus } from "@clam/contracts";
+import { i18nMsg, type TaskDeliverAs, type TaskStatus } from "@clam/contracts";
 import { and, eq, isNull } from "drizzle-orm";
 import { ApiError } from "../http/errors.ts";
 import { followExecutor } from "./follow.ts";
@@ -29,9 +29,9 @@ export class TaskSender implements SenderApi {
 		const { db, network, identity } = hub.ctx;
 		const peer = network.peers.row(input.targetNodeId);
 		if (!peer) throw ApiError.notFound("Peer");
-		if (peer.status === "revoked") throw new ApiError(409, "peer_revoked", `${peer.name} is revoked; pair again to delegate tasks to it`);
+		if (peer.status === "revoked") throw new ApiError(409, "peer_revoked", i18nMsg("{name} is revoked; pair again to delegate tasks to it", { name: peer.name }));
 		if (!(peer.receivedCapabilities as string[]).includes("tasks.send")) {
-			throw new ApiError(409, "capability_missing", `${peer.name} has not granted this node tasks.send, so tasks cannot be delegated to it`, { missing: ["tasks.send"] });
+			throw new ApiError(409, "capability_missing", i18nMsg("{name} has not granted this node tasks.send, so tasks cannot be delegated to it", { name: peer.name }), { missing: ["tasks.send"] });
 		}
 
 		const project = input.projectId ? db.select().from(projects).where(eq(projects.id, input.projectId)).get() : undefined;
@@ -39,10 +39,10 @@ export class TaskSender implements SenderApi {
 		const linked = project?.repository ? normalizeRepoUrl(project.repository.htmlUrl) : null;
 		const deliverAs: TaskDeliverAs = input.deliverAs ?? (linked ? "branch" : "files");
 		if (deliverAs === "branch" && !linked) {
-			throw new ApiError(409, "project_not_linked", project ? "Link the project to its GitHub repository first: the other node finds the project by repository (or deliver the result as files)" : "A task delivered as a branch needs a project linked to its GitHub repository (or deliver the result as files)");
+			throw new ApiError(409, "project_not_linked", project ? i18nMsg("Link the project to its GitHub repository first: the other node finds the project by repository (or deliver the result as files)") : i18nMsg("A task delivered as a branch needs a project linked to its GitHub repository (or deliver the result as files)"));
 		}
 		const inputPaths = input.inputPaths ?? [];
-		if (inputPaths.length > 0 && !project) throw ApiError.badRequest("inputPaths need the project they are taken from (projectId)");
+		if (inputPaths.length > 0 && !project) throw ApiError.badRequest(i18nMsg("inputPaths need the project they are taken from (projectId)"));
 		// The other node finds its project by repository for branch/summary tasks; a files task runs in a folder of its own there.
 		const repo = deliverAs === "files" ? null : linked;
 		const workspaceId = this.workspaceFor(input, project?.workspaceId ?? null, peer);
@@ -51,12 +51,12 @@ export class TaskSender implements SenderApi {
 			.from(workspaceMembers)
 			.where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.memberId, peer.id), isNull(workspaceMembers.revokedAt)))
 			.get();
-		if (!member) throw new ApiError(409, "workspace_not_shared", `The task's workspace is not shared with ${peer.name}`);
+		if (!member) throw new ApiError(409, "workspace_not_shared", i18nMsg("The task's workspace is not shared with {name}", { name: peer.name }));
 
 		// The directory cache is only a hint: an empty cache (never fetched) accepts any agent id and the executor decides.
 		const known = db.select().from(peerAgents).where(eq(peerAgents.peerId, peer.id)).all();
 		const targetAgent = input.targetAgentId ? known.find((a) => a.agentId === input.targetAgentId) : undefined;
-		if (input.targetAgentId && known.length > 0 && !targetAgent) throw new ApiError(400, "unknown_agent", `${peer.name} has no agent ${input.targetAgentId}`);
+		if (input.targetAgentId && known.length > 0 && !targetAgent) throw new ApiError(400, "unknown_agent", i18nMsg("{name} has no agent {agentId}", { name: peer.name, agentId: input.targetAgentId }));
 
 		const sender = input.senderSessionId
 			? db
@@ -138,7 +138,7 @@ export class TaskSender implements SenderApi {
 	/** The workspace of a task: the one asked for, else the project's, else the only workspace this node shares with the executor. */
 	private workspaceFor(input: CreateOutgoingInput, projectWorkspaceId: string | null, peer: { id: string; name: string }): string {
 		const { db } = this.hub.ctx;
-		if (input.workspaceId && projectWorkspaceId && input.workspaceId !== projectWorkspaceId) throw ApiError.badRequest("The project belongs to another workspace than workspaceId");
+		if (input.workspaceId && projectWorkspaceId && input.workspaceId !== projectWorkspaceId) throw ApiError.badRequest(i18nMsg("The project belongs to another workspace than workspaceId"));
 		const chosen = input.workspaceId ?? projectWorkspaceId;
 		if (chosen) {
 			if (!db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, chosen)).get()) throw ApiError.notFound("Workspace");
@@ -150,14 +150,14 @@ export class TaskSender implements SenderApi {
 			.where(and(eq(workspaceMembers.memberId, peer.id), isNull(workspaceMembers.revokedAt)))
 			.all();
 		if (shared.length === 1) return (shared[0] as { id: string }).id;
-		throw new ApiError(409, "workspace_required", shared.length === 0 ? `No workspace is shared with ${peer.name}` : `${peer.name} is a member of several workspaces; choose one (workspaceId)`, { workspaces: shared.map((w) => w.id) });
+		throw new ApiError(409, "workspace_required", shared.length === 0 ? i18nMsg("No workspace is shared with {name}", { name: peer.name }) : i18nMsg("{name} is a member of several workspaces; choose one (workspaceId)", { name: peer.name }), { workspaces: shared.map((w) => w.id) });
 	}
 
 	async cancel(taskId: string, reason: string | null): Promise<TaskRow> {
 		const { hub } = this;
 		const { store } = hub;
 		const row = store.get(taskId);
-		if (row.direction !== "outgoing") throw ApiError.conflict("Only the node that delegated a task can cancel it from here");
+		if (row.direction !== "outgoing") throw ApiError.conflict(i18nMsg("Only the node that delegated a task can cancel it from here"));
 		if (isTerminalStatus(row.status as TaskStatus)) return row;
 
 		const queued = store.outboxOfTask(taskId);
@@ -167,7 +167,7 @@ export class TaskSender implements SenderApi {
 			const { event } = hub.ctx.db.transaction(() => {
 				for (const item of queued) {
 					if (item.state !== "pending") continue;
-					store.updateOutbox(item.id, { state: "cancelled", lastError: "Cancelled before delivery" });
+					store.updateOutbox(item.id, { state: "cancelled", lastError: "Cancelled before delivery", lastErrorI18n: i18nMsg("Cancelled before delivery").i18n });
 					if (item.kind === "task.message" && item.refId) store.setMessageDelivery(item.refId, "failed");
 				}
 				return store.transition(taskId, "cancelled", { from: ["offered"], reason });
@@ -177,9 +177,9 @@ export class TaskSender implements SenderApi {
 		}
 
 		const peer = hub.ctx.network.peers.row(row.peerId);
-		if (!peer || peer.status === "revoked") throw new ApiError(409, "peer_unavailable", "The other node of this task is no longer a paired peer");
+		if (!peer || peer.status === "revoked") throw new ApiError(409, "peer_unavailable", i18nMsg("The other node of this task is no longer a paired peer"));
 		if (!(peer.receivedCapabilities as string[]).includes("tasks.cancel")) {
-			throw new ApiError(409, "capability_missing", `${peer.name} has not granted this node tasks.cancel, so the task cannot be cancelled remotely`, { missing: ["tasks.cancel"] });
+			throw new ApiError(409, "capability_missing", i18nMsg("{name} has not granted this node tasks.cancel, so the task cannot be cancelled remotely", { name: peer.name }), { missing: ["tasks.cancel"] });
 		}
 		const body: wire.CancelTaskRequest = { epoch: row.epoch, ...(reason ? { reason: reason.slice(0, 2000) } : {}) };
 		const item = store.enqueue({ peerId: peer.id, taskId, kind: "task.cancel", path: `/tasks/${taskId}/cancel`, body, idempotencyKey: `task.cancel:${taskId}`, correlationId: row.correlationId });
@@ -192,9 +192,9 @@ export class TaskSender implements SenderApi {
 
 	async retry(taskId: string): Promise<TaskRow> {
 		const row = this.hub.store.get(taskId);
-		if (row.direction !== "outgoing") throw ApiError.conflict("Only the node that delegated a task can retry it");
-		if (!RETRYABLE_STATUSES.includes(row.status)) throw ApiError.conflict(`Only a finished task can be retried; this one is ${row.status}`);
-		if (!row.projectId && row.repoUrl) throw ApiError.conflict("The project this task was delegated from no longer exists");
+		if (row.direction !== "outgoing") throw ApiError.conflict(i18nMsg("Only the node that delegated a task can retry it"));
+		if (!RETRYABLE_STATUSES.includes(row.status)) throw ApiError.conflict(i18nMsg("Only a finished task can be retried; this one is {status}", { status: row.status }));
+		if (!row.projectId && row.repoUrl) throw ApiError.conflict(i18nMsg("The project this task was delegated from no longer exists"));
 		return this.create({
 			targetNodeId: row.peerId,
 			targetAgentId: row.executorAgentId,

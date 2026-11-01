@@ -1,4 +1,4 @@
-import type { AskAnswer, AskQuestion, MessagesPage, SessionEvent, TokenTotals, UiBlock, UiMessage, UiRequestOutcome } from "@clam/contracts";
+import { i18nMsg, type AskAnswer, type AskQuestion, type I18nMessage, type MessagesPage, type SessionEvent, type TokenTotals, type UiBlock, type UiMessage, type UiRequestOutcome } from "@clam/contracts";
 import { isRecord, type OmpFrame } from "./frames.ts";
 import { resultText, toAssistantBlock, toTokenTotals, toUiMessage, toolDetailsOf } from "./messages.ts";
 
@@ -55,6 +55,11 @@ const EMPTY: Readonly<MapResult> = { events: [], stateDirty: false };
 
 function asLevel(value: unknown): "info" | "warning" | "error" {
 	return value === "warning" || value === "error" ? value : "info";
+}
+
+/** A notice whose text is ours: English `message` plus its structured twin. */
+function ourNotice(level: "info" | "warning" | "error", say: I18nMessage): SessionEvent {
+	return { type: "notice", level, message: say.text, ...(say.i18n && { i18n: say.i18n }) };
 }
 
 function preview(text: string): string {
@@ -260,17 +265,17 @@ export class OmpEventMapper {
 			case "notice":
 				return typeof frame.message === "string" ? { events: [{ type: "notice", level: asLevel(frame.level), message: frame.message }], stateDirty: false } : EMPTY;
 			case "rpc_frame_error":
-				return { events: [{ type: "notice", level: "warning", message: `RPC frame error: ${typeof frame.error === "string" ? frame.error : "unknown"}` }], stateDirty: false };
+				return { events: [ourNotice("warning", i18nMsg("RPC frame error: {error}", { error: typeof frame.error === "string" ? frame.error : "unknown" }))], stateDirty: false };
 			case "extension_error": {
-				const where = typeof frame.event === "string" ? ` (${frame.event})` : "";
-				return { events: [{ type: "notice", level: "warning", message: `Extension error${where}: ${typeof frame.error === "string" ? frame.error : "unknown"}` }], stateDirty: false };
+				const error = typeof frame.error === "string" ? frame.error : "unknown";
+				return { events: [ourNotice("warning", typeof frame.event === "string" ? i18nMsg("Extension error ({event}): {error}", { event: frame.event, error }) : i18nMsg("Extension error: {error}", { error }))], stateDirty: false };
 			}
 			case "auto_retry_start":
-				return { events: [{ type: "notice", level: "warning", message: `Retrying (${String(frame.attempt)}/${String(frame.maxAttempts)}): ${typeof frame.errorMessage === "string" ? frame.errorMessage : "request failed"}` }], stateDirty: false };
+				return { events: [ourNotice("warning", i18nMsg("Retrying ({attempt}/{max}): {error}", { attempt: String(frame.attempt), max: String(frame.maxAttempts), error: typeof frame.errorMessage === "string" ? frame.errorMessage : "request failed" }))], stateDirty: false };
 			case "auto_compaction_end":
 			case "manual_compaction_end":
 				return {
-					events: typeof frame.errorMessage === "string" && frame.errorMessage ? [{ type: "notice", level: "warning", message: `Compaction: ${frame.errorMessage}` }] : [],
+					events: typeof frame.errorMessage === "string" && frame.errorMessage ? [ourNotice("warning", i18nMsg("Compaction: {error}", { error: frame.errorMessage }))] : [],
 					stateDirty: true,
 				};
 			case "extension_ui_request": {

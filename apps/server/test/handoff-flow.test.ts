@@ -1,12 +1,15 @@
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Handoff, HandoffDetail, Task, TaskDetail } from "@clam/contracts";
 import { sealManifest } from "@clam/handoff-engine";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { HANDOFF_PROMPT_PREFIX } from "../src/handoff/fence.ts";
 import { newHandoffId } from "../src/handoff/store.ts";
 import { writeNodeSettings } from "../src/services/settings.ts";
 import { api, type FullHarness } from "./full-harness.ts";
-import { BLOCK, FINISH, cloneFor, gitOut, handoffFor, linkedProject, makeRepo, managedProject, readProjectFile, startTrio, type Trio, waitForHandoff, waitForHandoffOf, waitForTaskOn, writeProjectFile } from "./handoff-fixtures.ts";
+import { BLOCK, FINISH, cloneFor, gitOut, handoffFor, linkedProject, makeRepo, managedProject, readProjectFile, startTrio, type Trio, waitForHandoff, waitForHandoffOf, waitForTaskOn, whenResumeSettled, writeProjectFile } from "./handoff-fixtures.ts";
+import { expectEventsLocalised, expectI18nMatches } from "./i18n-helpers.ts";
 import { eventually, signedRequest } from "./net-helpers.ts";
 import { type GitConfigIsolation, branchesOf, isolateGitConfig, promptsOf, statusSequence } from "./task-fixtures.ts";
 
@@ -72,10 +75,13 @@ function waitForDetail(node: FullHarness, id: string, predicate: (d: HandoffDeta
 	}, what, timeoutMs);
 }
 
-/** Handoff events are numbered 1..n without gaps. */
+/** Handoff events are numbered 1..n without gaps; every generated summary carries an i18n twin that renders to its English text. */
 function expectGapFree(detail: HandoffDetail): void {
 	expect(detail.events.length).toBeGreaterThan(0);
 	expect(detail.events.map((e) => e.seq)).toEqual(detail.events.map((_, i) => i + 1));
+	expectEventsLocalised(detail.events, false);
+	expect(detail.events.some((e) => e.i18n !== undefined)).toBe(true);
+	if (detail.handoff.failure?.i18n) expectI18nMatches(detail.handoff.failure, detail.handoff.failure.detail);
 }
 
 /** The task row exists exactly once as an executing one: on C only, B is fenced, A mirrors. */
@@ -110,6 +116,7 @@ describe("happy path, git", () => {
 		expect(onC.failure, JSON.stringify(onC.failure)).toBeNull();
 		expect(onC.state).toBe("completed");
 		expect(onC.vcs).toBe("git");
+		await whenResumeSettled(trio.c, task.id);
 		const branch = gitOut(workC, "rev-parse", "--abbrev-ref", "HEAD").trim();
 		expect(branch).toMatch(/^clam\/node-c\//);
 		expect(gitOut(workC, "rev-parse", "HEAD").trim()).toBe(onC.git?.commit);
@@ -147,6 +154,7 @@ describe("happy path, files", () => {
 		const onC = await waitForHandoffOf(trio.c, task.id, "target", (h) => h.state === "completed" || h.state === "failed", "the handoff ends on C");
 		expect(onC.failure, JSON.stringify(onC.failure)).toBeNull();
 		expect(onC).toMatchObject({ vcs: "files", state: "completed" });
+		await whenResumeSettled(trio.c, task.id);
 		const folderC = projectPath(trio.c, task);
 		expect(readProjectFile(folderC, "b-made.txt")).toBe("from-b\n");
 		expect(readProjectFile(folderC, "input/notes.txt")).toBe("alpha\n");
@@ -158,6 +166,42 @@ describe("happy path, files", () => {
 		const preview = await api(trio.a).get<{ files: Array<{ path: string; status: string }> }>(`/tasks/${task.id}/files/preview?projectId=${projectA.id}`);
 		expect(preview.status, JSON.stringify(preview.body)).toBe(200);
 		expect(Object.fromEntries(preview.body.files.map((f) => [f.path, f.status]))).toEqual({ "b-made.txt": "new", "c-made.txt": "new" });
+	});
+
+	/**
+	 * The handed-over brief repeats the task description, so the agent on C replays its `@@fake-sh` lines on the restored folder (an `echo x > f`
+	 * truncates `f` an instant before it writes it). This line holds the replay open at exactly the moment the assertions used to look: it truncates the
+	 * restored copy, then waits for `gate` (or for its directory to go away, so a failed test leaves no shell behind) before it writes the file again.
+	 * B runs the same line on a folder without the file and just writes it.
+	 */
+	it("the folder on C is read only once C's resume turn settled: that turn truncates and rewrites a restored file", async () => {
+		await begin();
+		const gateDir = mkdtempSync(path.join(tmpdir(), "clam-gate-"));
+		const gate = path.join(gateDir, "open");
+		try {
+			const projectA = await managedProject(trio.a, trio.workspace.id, "docs-a");
+			writeProjectFile(projectA.path, "input/notes.txt", "alpha\n");
+			const replay = `if [ -f b-made.txt ]; then : > b-made.txt; until [ -f '${gate}' ] || [ ! -d '${gateDir}' ]; do sleep 0.05; done; fi; echo from-b > b-made.txt`;
+			const task = await delegate("Files replay", `@@fake-sh ${replay}`, { projectId: projectA.id, deliverAs: "files", inputPaths: ["input"] });
+			await handOff(task);
+			const onC = await waitForHandoffOf(trio.c, task.id, "target", (h) => h.state === "completed" || h.state === "failed", "the handoff ends on C");
+			expect(onC.failure, JSON.stringify(onC.failure)).toBeNull();
+			expect(onC.state).toBe("completed");
+
+			// the handoff is completed and the restored file is empty: what a read right after `completed` can see
+			const folderC = projectPath(trio.c, task);
+			await eventually(() => readProjectFile(folderC, "b-made.txt") === "", "C's agent to truncate the restored b-made.txt", 20_000);
+			const during = await api(trio.c).get<{ runtime: { state: string } }>(`/sessions/${onC.target.sessionId}/state`);
+			expect(during.status, JSON.stringify(during.body)).toBe(200);
+			expect(during.body.runtime.state).toBe("busy");
+
+			writeFileSync(gate, "");
+			await whenResumeSettled(trio.c, task.id);
+			expect(readProjectFile(folderC, "b-made.txt")).toBe("from-b\n");
+			expect(readProjectFile(folderC, "input/notes.txt")).toBe("alpha\n");
+		} finally {
+			rmSync(gateDir, { recursive: true, force: true });
+		}
 	});
 });
 
@@ -495,6 +539,43 @@ describe("the sender follows the new executor", () => {
 		expect((await taskOn(trio.a, task.id)).messages.at(-1)).toMatchObject({ delivery: "delivered" });
 	});
 
+	/**
+	 * A's instruction can reach C while C's step 10 is still building and sending the brief: the executor notice goes out when C becomes owner and A
+	 * forwards what it held at once. The brief must be the first thing the new session reads, the instruction must follow it exactly once, and step 10
+	 * must not count it as part of the brief. The brief's prompt is held here right after its thread was read, and the instruction is delivered meanwhile.
+	 */
+	it("an instruction that reaches C while the resume prompt is being sent follows the brief, once, and the brief does not swallow it", async () => {
+		await begin();
+		const sessions = trio.c.ctx.sessions;
+		const send = sessions.prompt.bind(sessions);
+		const held = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		sessions.prompt = async (id, input) => {
+			if (input.clientId.startsWith(HANDOFF_PROMPT_PREFIX)) {
+				held.resolve();
+				await release.promise;
+			}
+			return send(id, input);
+		};
+		const task = await delegate("Mid resume", "Do the work.");
+		await handOff(task);
+		await held.promise;
+		await eventually(async () => (await taskOn(trio.a, task.id)).task.executor.nodeId === trio.ids.c, "A follows C");
+
+		await finishFromA(task.id);
+		await eventually(() => trio.c.ctx.tasks.store.messages(task.id).some((m) => m.text.includes("Please wrap up")), "the instruction reaches C while the brief is held");
+		release.resolve();
+
+		const done = await waitForTaskOn(trio.a, task.id, (t) => t.status === "succeeded", "the task finishes on C", 25_000);
+		expect(done.task.result?.summary).toBe("finished on the new executor");
+		const prompts = promptsOf(trio.c);
+		const briefAt = prompts.findIndex((p) => p.message.includes("# Continuing handed-over work"));
+		const instructionAt = prompts.findIndex((p) => p.message.includes("Please wrap up"));
+		expect(briefAt, "C's agent got the brief").toBeGreaterThanOrEqual(0);
+		expect(instructionAt, "C's agent got the instruction").toBeGreaterThan(briefAt);
+		expect(prompts.filter((p) => p.message.includes("Please wrap up")), "the instruction reached the agent once").toHaveLength(1);
+	});
+
 	it("A's row follows C (executor columns, peer, epoch); its timeline continues without a gap from the seal; a cancel from A cancels the task on C", async () => {
 		await begin();
 		const task = await delegate("Follow me", "@@fake-sh echo x > a.txt");
@@ -652,6 +733,7 @@ describe("return home", () => {
 		const taskA = (await taskOn(trio.a, task.id)).task;
 		expect(taskA).toMatchObject({ direction: "incoming", epoch: 1, executor: { nodeId: trio.ids.a } });
 		expect(trio.b.ctx.tasks.store.get(task.id)).toMatchObject({ status: "handed_off", fenced: true });
+		await whenResumeSettled(trio.a, task.id);
 		expect(readProjectFile(projectPath(trio.a, task), "home.txt")).toBe("home\n");
 
 		// the work is local now: A's person is both sender and executor, so an instruction goes straight into the new session

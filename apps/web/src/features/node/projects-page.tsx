@@ -7,7 +7,8 @@ import { useDebounced } from "@/features/projects/session-list";
 import { errorMessage } from "@/lib/api";
 import { useProjects, useWorkspaces } from "@/lib/queries";
 import { useUi } from "@/lib/store";
-import { relativeTime } from "@/lib/utils";
+import { t } from "@/i18n";
+import { formatNumber, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
@@ -58,11 +59,11 @@ export default function NodeProjectsPage() {
 		<div className="flex h-full min-h-0 flex-col">
 			<div className="mx-auto flex w-full max-w-[1400px] shrink-0 flex-col gap-4 px-4 pt-5 sm:px-6 lg:px-8 lg:pt-7">
 				<PageHeader
-					title="Projects"
-					description="Every project on this machine, across workspaces."
+					title={t("Projects")}
+					description={t("Every project on this machine, across workspaces.")}
 					actions={
 						<Button variant="primary" onClick={() => openDialog({ kind: "create-project" })}>
-							<Plus /> Add project
+							<Plus /> {t("Add project")}
 						</Button>
 					}
 				/>
@@ -71,8 +72,8 @@ export default function NodeProjectsPage() {
 					<input
 						value={search}
 						onChange={(e) => setSearch(e.target.value)}
-						placeholder="Search name, path, workspace or repository"
-						aria-label="Search projects"
+						placeholder={t("Search name, path, workspace or repository")}
+						aria-label={t("Search projects")}
 						className="h-8 w-full rounded-lg bg-surface-1 pl-8 pr-3 text-[13px] shadow-[inset_0_0_0_1px_var(--border-strong)] outline-none placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1px_var(--accent),0_0_0_3px_var(--accent-soft)] coarse:h-11"
 					/>
 				</div>
@@ -89,23 +90,23 @@ export default function NodeProjectsPage() {
 					) : projects.error ? (
 						<EmptyState
 							icon={FolderGit2}
-							title="Could not load projects"
+							title={t("Could not load projects")}
 							description={errorMessage(projects.error)}
 							action={
 								<Button size="sm" variant="outline" onClick={() => void projects.refetch()}>
-									<RefreshCw /> Retry
+									<RefreshCw /> {t("Retry")}
 								</Button>
 							}
 						/>
 					) : visible.length === 0 ? (
 						<EmptyState
 							icon={FolderGit2}
-							title={needle ? "No matching projects" : "No projects yet"}
-							description={needle ? "Try a different search." : "Add a local directory as a project to start running agents in it."}
+							title={needle ? t("No matching projects") : t("No projects yet")}
+							description={needle ? t("Try a different search.") : t("Add a local directory as a project to start running agents in it.")}
 							action={
 								needle ? undefined : (
 									<Button variant="primary" size="sm" onClick={() => openDialog({ kind: "create-project" })}>
-										<Plus /> Add project
+										<Plus /> {t("Add project")}
 									</Button>
 								)
 							}
@@ -163,18 +164,18 @@ function ProjectCard({ project: p, workspaceName }: { project: Project; workspac
 						</Badge>
 					) : p.vcs === "git" ? (
 						<Badge variant="neutral" className="gap-1">
-							<GitBranch /> Local Git
+							<GitBranch /> {t("Local Git")}
 						</Badge>
 					) : (
-						<Badge variant="neutral" className="gap-1" title="No Git repository needed: sessions, tasks and shared sessions work on the folder.">
-							<Folder /> {p.managed ? "Managed folder" : "Plain folder"}
+						<Badge variant="neutral" className="gap-1" title={t("No Git repository needed: sessions, tasks and shared sessions work on the folder.")}>
+							<Folder /> {p.managed ? t("Managed folder") : t("Plain folder")}
 						</Badge>
 					)}
 				</div>
 				<div className="flex shrink-0 items-center gap-3 tabular">
 					<span className="inline-flex items-center gap-1">
 						<MessageSquare className="size-3" />
-						{p.sessionCount}
+						{formatNumber(p.sessionCount)}
 					</span>
 					<span>{p.lastActivityAt ? relativeTime(p.lastActivityAt) : "—"}</span>
 				</div>

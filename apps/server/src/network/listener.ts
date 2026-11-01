@@ -19,7 +19,7 @@ import {
 	wire,
 	type Signer,
 } from "@clam/agent-network";
-import { CAPABILITIES, type Capability } from "@clam/contracts";
+import { CAPABILITIES, type Capability, i18nMsg } from "@clam/contracts";
 import fastify, { LogController, type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import type { ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
@@ -145,7 +145,7 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 	});
 
 	const bodyOf = <T>(schema: { safeParse(v: unknown): { success: true; data: T } | { success: false; error: { issues: Array<{ path: PropertyKey[]; message: string }> } } }, request: FastifyRequest): T => {
-		if (request.body === Symbol.for("clam.invalid-json")) throw ApiError.badRequest("The request body is not valid JSON");
+		if (request.body === Symbol.for("clam.invalid-json")) throw ApiError.badRequest(i18nMsg("The request body is not valid JSON"));
 		const parsed = schema.safeParse(request.body ?? {});
 		if (!parsed.success) {
 			throw ApiError.badRequest(parsed.error.issues.map((i) => `${i.path.join(".") || "(body)"}: ${i.message}`).join("; "));
@@ -159,7 +159,7 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 		const ipWait = net.ipBuckets.take(sourceOf(request));
 		if (ipWait > 0) {
 			reply.header("Retry-After", String(ipWait));
-			throw new ApiError(429, ERROR_CODES.rateLimited, "Too many requests", { retryAfterSeconds: ipWait });
+			throw new ApiError(429, ERROR_CODES.rateLimited, i18nMsg("Too many requests"), { retryAfterSeconds: ipWait });
 		}
 		const raw = request.raw.url ?? request.url;
 		const queryAt = raw.indexOf("?");
@@ -178,14 +178,14 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 		const waitSeconds = net.peerBuckets.take(result.peerId);
 		if (waitSeconds > 0) {
 			reply.header("Retry-After", String(waitSeconds));
-			throw new ApiError(429, ERROR_CODES.rateLimited, "Too many requests", { retryAfterSeconds: waitSeconds });
+			throw new ApiError(429, ERROR_CODES.rateLimited, i18nMsg("Too many requests"), { retryAfterSeconds: waitSeconds });
 		}
 		const peer = net.peers.row(result.peerId);
-		if (!peer || peer.status === "revoked") throw new ApiError(403, ERROR_CODES.peerRevoked, "peer has been revoked");
+		if (!peer || peer.status === "revoked") throw new ApiError(403, ERROR_CODES.peerRevoked, i18nMsg("peer has been revoked"));
 		const granted = peer.grantedCapabilities as Capability[];
 		if (!hasCapabilities(granted, needed)) {
 			const missing = needed.filter((c) => !granted.includes(c));
-			throw new ApiError(403, ERROR_CODES.forbidden, `Missing capability: ${missing.join(", ")}`, { missing });
+			throw new ApiError(403, ERROR_CODES.forbidden, i18nMsg("Missing capability: {missing}", { missing: missing.join(", ") }), { missing });
 		}
 		request.peer = { id: peer.id, capabilities: granted };
 	}
@@ -249,7 +249,7 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 				const wait = net.pairBuckets.take(sourceOf(request));
 				if (wait > 0) {
 					reply.header("Retry-After", String(wait));
-					throw new ApiError(429, ERROR_CODES.rateLimited, "Too many pairing requests", { retryAfterSeconds: wait });
+					throw new ApiError(429, ERROR_CODES.rateLimited, i18nMsg("Too many pairing requests"), { retryAfterSeconds: wait });
 				}
 				const body = bodyOf(wire.PairRequest, request);
 				return net.pairing.handlePair(body);
@@ -263,9 +263,9 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 				const peerId = request.peer?.id as string;
 				const body = bodyOf(wire.AnnounceBody, request);
 				const url = normalizePeerUrl(body.url, { allowLoopbackHttp: base.config.allowLoopbackPeers });
-				if (!url) throw ApiError.badRequest("url must be an https:// URL");
+				if (!url) throw ApiError.badRequest(i18nMsg("url must be an https:// URL"));
 				const peer = net.peers.row(peerId);
-				if (!peer) throw new ApiError(403, ERROR_CODES.peerRevoked, "peer has been revoked");
+				if (!peer) throw new ApiError(403, ERROR_CODES.peerRevoked, i18nMsg("peer has been revoked"));
 				if (url !== peer.url) {
 					// Before ever sending a signed request to an address a peer names, check it really is that peer.
 					try {
@@ -276,7 +276,7 @@ export async function buildNetworkApp(deps: ListenerDeps): Promise<FastifyInstan
 						}
 					} catch (error) {
 						if (error instanceof ApiError) throw error;
-						throw new ApiError(502, "url_unreachable", `The announced address could not be verified: ${errorText(error)}`);
+						throw new ApiError(502, "url_unreachable", i18nMsg("The announced address could not be verified: {error}", { error: errorText(error) }));
 					}
 				}
 				net.peers.applyAnnounce(peerId, { url, name: body.name });

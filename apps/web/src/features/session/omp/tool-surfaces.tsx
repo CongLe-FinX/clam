@@ -1,6 +1,7 @@
 import type { AskAnswer, AskQuestion, TodoPhase } from "@clam/contracts";
 import { Check, ChevronRight, ListChecks, MessageCircleQuestion, Minus, Plus, Play, X } from "lucide-react";
 import { type ComponentType, useMemo, useState } from "react";
+import { msg, t, tr, type Msg } from "@/i18n";
 import { useNode } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -87,28 +88,28 @@ function AskToolCard({ store, rec, status, args }: OmpToolSurfaceProps & { store
 				<span aria-hidden className="grid size-6 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
 					<MessageCircleQuestion className="size-3.5" />
 				</span>
-				<span className="text-[13px] font-semibold">{questions.length > 1 ? `${questions.length} questions` : "Question"}</span>
+				<span className="text-[13px] font-semibold">{questions.length > 1 ? t("{count} questions", { count: questions.length }) : t("Question")}</span>
 				<span className="flex-1" />
 				{state === "pending" ? (
 					<>
 						<span className="inline-flex items-center gap-1.5 rounded-md bg-warning/14 px-1.5 py-0.5 text-2xs font-medium text-warning">
-							<span aria-hidden className="size-1.5 animate-pulse rounded-full bg-warning" /> Waiting for you
+							<span aria-hidden className="size-1.5 animate-pulse rounded-full bg-warning" /> {t("Waiting for you")}
 						</span>
 						{pending ? (
 							<Button size="sm" variant="primary" onClick={store.focusQuestion}>
-								Answer
+								{t("Answer")}
 							</Button>
 						) : null}
 					</>
 				) : state === "answered" ? (
 					<span className="inline-flex items-center gap-1 rounded-md bg-success/12 px-1.5 py-0.5 text-2xs font-medium text-success">
-						<Check className="size-3" aria-hidden /> Answered{ended?.answeredBy ? ` ${answererLabel(ended.answeredBy, selfNodeId)}` : ""}
+						<Check className="size-3" aria-hidden /> {ended?.answeredBy ? t("Answered {who}", { who: answererLabel(ended.answeredBy, selfNodeId) }) : t("Answered")}
 					</span>
 				) : state === "timed_out" ? (
-					<span className="inline-flex items-center gap-1 rounded-md bg-warning/14 px-1.5 py-0.5 text-2xs font-medium text-warning">Timed out · used defaults</span>
+					<span className="inline-flex items-center gap-1 rounded-md bg-warning/14 px-1.5 py-0.5 text-2xs font-medium text-warning">{t("Timed out · used defaults")}</span>
 				) : state === "skipped" ? (
 					<span className="inline-flex items-center gap-1 rounded-md bg-surface-3 px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
-						<X className="size-3" aria-hidden /> Cancelled
+						<X className="size-3" aria-hidden /> {t("Cancelled")}
 					</span>
 				) : null}
 			</div>
@@ -134,13 +135,13 @@ function AskToolCard({ store, rec, status, args }: OmpToolSurfaceProps & { store
 
 // ───────────────────────────── todo ─────────────────────────────
 
-const CHANGE_STYLE: Record<ChangeKind, { Icon: typeof Plus; tone: string; label: string }> = {
-	added: { Icon: Plus, tone: "bg-accent-soft text-accent", label: "Added" },
-	started: { Icon: Play, tone: "bg-accent-soft text-accent", label: "Started" },
-	completed: { Icon: Check, tone: "bg-success/14 text-success", label: "Completed" },
-	dropped: { Icon: Minus, tone: "bg-surface-3 text-subtle", label: "Dropped" },
-	blocked: { Icon: Minus, tone: "bg-warning/14 text-warning", label: "Blocked" },
-	unblocked: { Icon: Play, tone: "bg-accent-soft text-accent", label: "Unblocked" },
+const CHANGE_STYLE: Record<ChangeKind, { Icon: typeof Plus; tone: string; label: Msg }> = {
+	added: { Icon: Plus, tone: "bg-accent-soft text-accent", label: msg("Added") },
+	started: { Icon: Play, tone: "bg-accent-soft text-accent", label: msg("Started") },
+	completed: { Icon: Check, tone: "bg-success/14 text-success", label: msg("Completed") },
+	dropped: { Icon: Minus, tone: "bg-surface-3 text-subtle", label: msg("Dropped") },
+	blocked: { Icon: Minus, tone: "bg-warning/14 text-warning", label: msg("Blocked") },
+	unblocked: { Icon: Play, tone: "bg-accent-soft text-accent", label: msg("Unblocked") },
 };
 
 function phasesOf(details: unknown): TodoPhase[] | null {
@@ -161,7 +162,7 @@ function TodoToolCard({ rec, status, args }: OmpToolSurfaceProps) {
 				<span aria-hidden className="grid size-6 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
 					<ListChecks className="size-3.5" />
 				</span>
-				<span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{running ? "Updating the plan…" : change.title}</span>
+				<span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{running ? t("Updating the plan…") : change.title}</span>
 				{phases ? (
 					<>
 						<span className="tabular shrink-0 font-mono text-2xs text-muted-foreground">
@@ -179,14 +180,14 @@ function TodoToolCard({ rec, status, args }: OmpToolSurfaceProps) {
 						return (
 							// biome-ignore lint/suspicious/noArrayIndexKey: a call can name the same task twice
 							<li key={`${i}:${item.content}`} className="flex items-start gap-2 text-[13px] leading-snug">
-								<span aria-label={label} className={cn("mt-px grid size-4 shrink-0 place-items-center rounded-full", tone)}>
+								<span aria-label={tr(label)} className={cn("mt-px grid size-4 shrink-0 place-items-center rounded-full", tone)}>
 									<Icon className="size-2.5" strokeWidth={3} />
 								</span>
 								<span className={cn("min-w-0 flex-1 break-words", item.kind === "dropped" && "text-subtle line-through", item.kind === "completed" && "text-muted-foreground")}>{item.content}</span>
 							</li>
 						);
 					})}
-					{change.items.length > 12 ? <li className="pl-6 text-2xs text-subtle">+{change.items.length - 12} more</li> : null}
+					{change.items.length > 12 ? <li className="pl-6 text-2xs text-subtle">{t("+{count} more", { count: change.items.length - 12 })}</li> : null}
 				</ul>
 			) : null}
 			{open && phases ? (

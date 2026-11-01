@@ -1,4 +1,5 @@
 import { NetworkError, wire, type RequestResult } from "@clam/agent-network";
+import { i18nMsg } from "@clam/contracts";
 import type { peers } from "@clam/database";
 import { decideAfterFailure, outboxBackoffMs } from "@clam/task-engine";
 import { errorText } from "../network/util.ts";
@@ -228,7 +229,7 @@ export function taskOutboxHandlers(hub: TaskHub): Record<"task.create" | "task.m
 				const failedMessages: TaskMessageRow[] = [];
 				for (const dependent of store.outboxOfTask(item.taskId)) {
 					if (dependent.id === item.id || dependent.state !== "pending") continue;
-					store.updateOutbox(dependent.id, { state: "dead", lastError: "The task could not be delivered" });
+					store.updateOutbox(dependent.id, { state: "dead", lastError: "The task could not be delivered", lastErrorI18n: i18nMsg("The task could not be delivered").i18n });
 					if (dependent.kind === "task.message" && dependent.refId) {
 						store.setMessageDelivery(dependent.refId, "failed");
 						failedMessages.push(...messagesOf(dependent));
@@ -236,7 +237,7 @@ export function taskOutboxHandlers(hub: TaskHub): Record<"task.create" | "task.m
 				}
 				const peerName = hub.ctx.network.peers.row(item.peerId)?.name ?? "the peer";
 				try {
-					const { row, event } = store.transition(item.taskId, "failed", { from: ["offered"], reason: `Could not deliver the task to ${peerName}: ${reason}` });
+					const { row, event } = store.transition(item.taskId, "failed", { from: ["offered"], reason: i18nMsg("Could not deliver the task to {peer}: {reason}", { peer: peerName, reason }) });
 					hub.changed(item.taskId, { events: [event], messages: failedMessages, notifyPeer: false });
 					void hub.injector.injectStatusNote(row);
 				} catch (error) {

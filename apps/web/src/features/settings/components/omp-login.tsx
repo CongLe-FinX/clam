@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, ExternalLink, Terminal, XCircle } from "lucide-react";
 import type { LoginFlow, LoginProvider } from "@clam/contracts";
+import { T, t } from "@/i18n";
 import { qk } from "@/lib/queries";
 import { useTopic } from "@/lib/ws";
 import { Button } from "@/ui/button";
@@ -40,7 +41,7 @@ function PromptForm({ flow, onSubmit, busy }: { flow: LoginFlow; onSubmit: (v: s
 					className="font-mono"
 				/>
 				<Button type="submit" loading={busy} disabled={value.trim() === ""}>
-					Submit
+					{t("Submit")}
 				</Button>
 			</div>
 		</form>
@@ -103,15 +104,15 @@ export function OmpLoginDialog({ provider, onClose }: { provider: LoginProvider 
 		<Dialog open={provider != null} onOpenChange={(o) => !o && close()}>
 			<DialogContent>
 				<DialogHeader>
-					<DialogTitle>Sign in to {provider?.name}</DialogTitle>
-					<DialogDescription>Uses OMP's own login. CL Agent Mesh never sees or stores your provider credentials.</DialogDescription>
+					<DialogTitle>{t("Sign in to {name}", { name: provider?.name ?? "" })}</DialogTitle>
+					<DialogDescription>{t("Uses OMP's own login. CL Agent Mesh never sees or stores your provider credentials.")}</DialogDescription>
 				</DialogHeader>
 
-				{start.isError && <InlineError error={start.error} onRetry={() => provider && begin(provider)} title="Could not start login" />}
+				{start.isError && <InlineError error={start.error} onRetry={() => provider && begin(provider)} title={t("Could not start login")} />}
 				{(start.isPending || flow?.state === "starting") && (
 					<div className="space-y-2">
 						<Skeleton className="h-10" />
-						<p className="text-xs text-muted-foreground">Starting login…</p>
+						<p className="text-xs text-muted-foreground">{t("Starting login…")}</p>
 					</div>
 				)}
 
@@ -120,14 +121,14 @@ export function OmpLoginDialog({ provider, onClose }: { provider: LoginProvider 
 						{flow.instructions && <p className="whitespace-pre-wrap text-sm text-muted-foreground">{flow.instructions}</p>}
 						{flow.url && (
 							<div className="space-y-2 rounded-lg border border-border bg-surface-2 p-3">
-								<div className="text-xs text-muted-foreground">Authorize in your browser:</div>
+								<div className="text-xs text-muted-foreground">{t("Authorize in your browser:")}</div>
 								<code className="block max-h-16 overflow-y-auto break-all font-mono text-[11px]">{flow.url}</code>
 								<div className="flex flex-wrap gap-2">
 									<Button size="sm" onClick={() => window.open(flow.url, "_blank", "noopener,noreferrer")}>
 										<ExternalLink className="size-3.5" />
-										Open sign-in page
+										{t("Open sign-in page")}
 									</Button>
-									<CopyButton value={flow.url} label="Copy link" />
+									<CopyButton value={flow.url} label={t("Copy link")} />
 								</div>
 							</div>
 						)}
@@ -143,14 +144,17 @@ export function OmpLoginDialog({ provider, onClose }: { provider: LoginProvider 
 						{flow.state === "awaiting_browser" && (
 							<div className="flex items-center gap-2 text-xs text-muted-foreground">
 								<span className="size-1.5 animate-pulse rounded-full bg-accent" />
-								Waiting for you to finish in the browser…
+								{t("Waiting for you to finish in the browser…")}
 							</div>
 						)}
 						<div className="flex items-start gap-2 rounded-md border border-border bg-surface-1 p-2.5 text-xs text-muted-foreground">
 							<Terminal className="mt-0.5 size-3.5 shrink-0" />
 							<span>
-								Secret prompts (API keys, tokens) are not accepted here. For those providers run{" "}
-								<code className="font-mono text-foreground">omp login {provider?.id}</code> in a terminal.
+								<T
+									text="Secret prompts (API keys, tokens) are not accepted here. For those providers run <code>omp login {id}</code> in a terminal."
+									params={{ id: provider?.id ?? "" }}
+									tags={{ code: <code className="font-mono text-foreground" /> }}
+								/>
 							</span>
 						</div>
 					</div>
@@ -159,7 +163,7 @@ export function OmpLoginDialog({ provider, onClose }: { provider: LoginProvider 
 				{flow?.state === "success" && (
 					<div className="flex items-center gap-3 rounded-lg border border-success/30 bg-success/10 p-4 text-sm">
 						<CheckCircle2 className="size-5 shrink-0 text-success" />
-						Signed in to {provider?.name}.
+						{t("Signed in to {name}.", { name: provider?.name ?? "" })}
 					</div>
 				)}
 				{(flow?.state === "error" || flow?.state === "cancelled") && (
@@ -167,24 +171,27 @@ export function OmpLoginDialog({ provider, onClose }: { provider: LoginProvider 
 						<div className="flex items-start gap-3 rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm">
 							<XCircle className="mt-0.5 size-5 shrink-0 text-danger" />
 							<div className="min-w-0 break-words">
-								{flow.state === "cancelled" ? "Login was cancelled." : (flow.error ?? "Login failed.")}
+								{flow.state === "cancelled" ? t("Login was cancelled.") : (flow.error ?? t("Login failed."))}
 								{flow.state === "error" && (
 									<p className="mt-2 text-xs text-muted-foreground">
-										If this provider asks for an API key, sign in from a terminal with{" "}
-										<code className="font-mono text-foreground">omp login {provider?.id}</code>.
+										<T
+											text="If this provider asks for an API key, sign in from a terminal with <code>omp login {id}</code>."
+											params={{ id: provider?.id ?? "" }}
+											tags={{ code: <code className="font-mono text-foreground" /> }}
+										/>
 									</p>
 								)}
 							</div>
 						</div>
 						<Button variant="outline" onClick={() => provider && begin(provider)}>
-							Try again
+							{t("Try again")}
 						</Button>
 					</div>
 				)}
 
 				<DialogFooter>
 					<Button variant="ghost" onClick={close}>
-						{active ? "Cancel login" : flow?.state === "success" ? "Done" : "Close"}
+						{active ? t("Cancel login") : flow?.state === "success" ? t("Done") : t("Close")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

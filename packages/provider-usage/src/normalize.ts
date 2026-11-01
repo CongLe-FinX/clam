@@ -160,6 +160,7 @@ function normalizeLimit(l: Obj): QuotaLimit {
 		id: str(l.id) ?? "unknown",
 		label: str(l.label) ?? str(l.id) ?? "Limit",
 		windowLabel: str(window.label),
+		windowMs: numOrNull(window.durationMs),
 		resetsAt: numOrNull(window.resetsAt),
 		used,
 		limit,

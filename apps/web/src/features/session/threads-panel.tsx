@@ -4,7 +4,8 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Archive, FolderTree, MessagesSquare, MoreHorizontal, Pencil, Plus, RefreshCw } from "lucide-react";
 import { type CSSProperties, lazy, type RefObject, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { errorMessage } from "@/lib/api";
+import { msg, t, tr, type Msg } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { useProject, useSessions } from "@/lib/queries";
 import { useUi } from "@/lib/store";
 import { cn, relativeTime } from "@/lib/utils";
@@ -23,6 +24,8 @@ const FileExplorer = lazy(() => import("@/features/projects/file-explorer.tsx").
 /** Above this many threads the list is virtualized (only the rows in view are mounted). */
 const VIRTUALIZE_AFTER = 60;
 
+const STATUS_LABEL: Record<AgentSession["status"], Msg> = { idle: msg("Idle"), running: msg("Running"), error: msg("Error"), stopped: msg("Stopped") };
+
 function ThreadList({ sessions, currentId, scrollRef, onNavigate }: { sessions: AgentSession[]; currentId: string; scrollRef: RefObject<HTMLDivElement | null>; onNavigate?: () => void }) {
 	const virtual = sessions.length > VIRTUALIZE_AFTER;
 	const v = useVirtualizer({
@@ -34,7 +37,7 @@ function ThreadList({ sessions, currentId, scrollRef, onNavigate }: { sessions: 
 	});
 	if (!virtual) {
 		return (
-			<ul className="flex flex-col gap-0.5" aria-label="Threads in this project">
+			<ul className="flex flex-col gap-0.5" aria-label={t("Threads in this project")}>
 				{sessions.map((s) => (
 					<ThreadRow key={s.id} s={s} current={s.id === currentId} onNavigate={onNavigate} />
 				))}
@@ -42,7 +45,7 @@ function ThreadList({ sessions, currentId, scrollRef, onNavigate }: { sessions: 
 		);
 	}
 	return (
-		<ul className="relative w-full" style={{ height: v.getTotalSize() }} aria-label="Threads in this project">
+		<ul className="relative w-full" style={{ height: v.getTotalSize() }} aria-label={t("Threads in this project")}>
 			{v.getVirtualItems().map((item) => {
 				const s = sessions[item.index];
 				if (!s) return null;
@@ -71,7 +74,7 @@ function ThreadRow({ s, current, onNavigate, style, index, rowRef }: { s: AgentS
 		<li ref={rowRef} data-index={index} style={style} className="group/row relative">
 			{editing ? (
 				<div className="flex min-h-9 items-center gap-2 px-2.5 coarse:min-h-12">
-					<StatusDot status={sessionDot(s.status)} label={s.status} />
+					<StatusDot status={sessionDot(s.status)} label={tr(STATUS_LABEL[s.status])} />
 					<input
 						autoFocus
 						value={draft}
@@ -86,7 +89,7 @@ function ThreadRow({ s, current, onNavigate, style, index, rowRef }: { s: AgentS
 							}
 						}}
 						maxLength={120}
-						aria-label="Thread title"
+						aria-label={t("Thread title")}
 						className="h-7 min-w-0 flex-1 rounded-md bg-surface-1 px-2 text-[13px] shadow-[inset_0_0_0_1px_var(--accent)] outline-none coarse:h-10"
 					/>
 				</div>
@@ -104,10 +107,10 @@ function ThreadRow({ s, current, onNavigate, style, index, rowRef }: { s: AgentS
 							current && "bg-surface-3 hover:bg-surface-3",
 						)}
 					>
-						<StatusDot status={sessionDot(s.status)} label={s.status} />
+						<StatusDot status={sessionDot(s.status)} label={tr(STATUS_LABEL[s.status])} />
 						<span className="flex min-w-0 flex-1 flex-col">
 							<span className="flex min-w-0 items-center gap-1.5">
-								<span className={cn("truncate text-[13px]", current ? "font-medium" : "text-foreground/90")}>{s.title || "Untitled session"}</span>
+								<span className={cn("truncate text-[13px]", current ? "font-medium" : "text-foreground/90")}>{s.title || t("Untitled session")}</span>
 								<SessionKindBadge session={s} className="shrink-0" />
 								<PendingBadge session={s} className="shrink-0" />
 							</span>
@@ -121,7 +124,7 @@ function ThreadRow({ s, current, onNavigate, style, index, rowRef }: { s: AgentS
 						<DropdownMenuTrigger asChild>
 							<button
 								type="button"
-								aria-label={`Actions for ${s.title || "thread"}`}
+								aria-label={s.title ? t("Actions for {title}", { title: s.title }) : t("Actions for thread")}
 								className="absolute right-1 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-md text-subtle opacity-0 outline-none transition-opacity hover:bg-surface-3 hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100 data-[state=open]:opacity-100 coarse:size-10 coarse:opacity-100"
 							>
 								<MoreHorizontal className="size-4" />
@@ -135,7 +138,7 @@ function ThreadRow({ s, current, onNavigate, style, index, rowRef }: { s: AgentS
 									setEditing(true);
 								}}
 							>
-								<Pencil /> Rename
+								<Pencil /> {t("Rename")}
 							</DropdownMenuItem>
 							<DropdownMenuItem
 								danger
@@ -144,7 +147,7 @@ function ThreadRow({ s, current, onNavigate, style, index, rowRef }: { s: AgentS
 									if (current) void navigate({ to: "/projects/$projectId", params: { projectId: s.projectId } });
 								}}
 							>
-								<Archive /> Archive
+								<Archive /> {t("Archive")}
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
@@ -196,15 +199,15 @@ export function ThreadsPanel({
 				>
 					<TabsList>
 						<TabsTrigger value="threads">
-							<MessagesSquare /> Threads
+							<MessagesSquare /> {t("Threads")}
 						</TabsTrigger>
 						<TabsTrigger value="files">
-							<FolderTree /> Files
+							<FolderTree /> {t("Files")}
 						</TabsTrigger>
 					</TabsList>
 				</Tabs>
 				{tab === "threads" ? (
-					<Button size="icon-sm" variant="secondary" aria-label="New thread" onClick={() => openDialog({ kind: "create-session", projectId: session.projectId })}>
+					<Button size="icon-sm" variant="secondary" aria-label={t("New thread")} onClick={() => openDialog({ kind: "create-session", projectId: session.projectId })}>
 						<Plus />
 					</Button>
 				) : null}
@@ -220,24 +223,24 @@ export function ThreadsPanel({
 				) : threads.isError ? (
 					<EmptyState
 						icon={RefreshCw}
-						title="Could not load threads"
-						description={errorMessage(threads.error)}
+						title={t("Could not load threads")}
+						description={errorText(threads.error)}
 						className="py-8"
 						action={
 							<Button size="sm" variant="outline" onClick={() => void threads.refetch()}>
-								Retry
+								{t("Retry")}
 							</Button>
 						}
 					/>
 				) : sorted.length === 0 ? (
 					<EmptyState
 						icon={MessagesSquare}
-						title="No threads yet"
-						description="Start a thread to work with an agent in this project."
+						title={t("No threads yet")}
+						description={t("Start a thread to work with an agent in this project.")}
 						className="py-8"
 						action={
 							<Button size="sm" variant="primary" onClick={() => openDialog({ kind: "create-session", projectId: session.projectId })}>
-								<Plus /> New thread
+								<Plus /> {t("New thread")}
 							</Button>
 						}
 					/>

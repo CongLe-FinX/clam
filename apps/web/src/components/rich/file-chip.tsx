@@ -4,6 +4,7 @@ import { fileCategory } from "@/lib/file-kind";
 import { type RichFile } from "./assets.ts";
 import { FileIcon } from "./file-icon.tsx";
 import { LazyLightbox } from "./lazy-lightbox.tsx";
+import { t } from "@/i18n";
 
 const PreviewDialog = lazy(() => import("./preview-dialog.tsx"));
 
@@ -23,7 +24,7 @@ export function FileChip({ file, children }: { file: RichFile; children: ReactNo
 	);
 	if (file.kind === "other" || file.kind === "text") {
 		return (
-			<a className={chip} href={file.downloadUrl} download={file.name} title={`Download ${file.name}`}>
+			<a className={chip} href={file.downloadUrl} download={file.name} title={t("Download {name}", { name: file.name })}>
 				{inner}
 				<Download aria-hidden className="size-3 shrink-0 text-subtle" />
 			</a>

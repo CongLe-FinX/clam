@@ -1,5 +1,6 @@
 import { File, FileArchive, FileAudio, FileCode, FileJson, FileSpreadsheet, FileText, FileVideo, Image, Presentation, type LucideIcon } from "lucide-react";
 import { type FileCategory } from "@/lib/file-kind";
+import { msg, type Msg } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 const ICONS: Record<FileCategory, LucideIcon> = {
@@ -32,19 +33,19 @@ const TONES: Record<FileCategory, string> = {
 	other: "text-muted-foreground bg-surface-3",
 };
 
-export const CATEGORY_LABEL: Record<FileCategory, string> = {
-	image: "Image",
-	video: "Video",
-	audio: "Audio",
-	pdf: "PDF document",
-	spreadsheet: "Spreadsheet",
-	document: "Document",
-	presentation: "Presentation",
-	archive: "Archive",
-	code: "Source file",
-	data: "Data file",
-	text: "Text file",
-	other: "File",
+export const CATEGORY_LABEL: Record<FileCategory, Msg> = {
+	image: msg("Image"),
+	video: msg("Video"),
+	audio: msg("Audio"),
+	pdf: msg("PDF document"),
+	spreadsheet: msg("Spreadsheet"),
+	document: msg("Document"),
+	presentation: msg("Presentation"),
+	archive: msg("Compressed archive"),
+	code: msg("Source file"),
+	data: msg("Data file"),
+	text: msg("Text file"),
+	other: msg("File"),
 };
 
 /** Rounded square badge with the icon for a file family. */

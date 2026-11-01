@@ -8,6 +8,7 @@ import type { FaultOptions } from "../src/handoff/fault.ts";
 import { api, createFullHarness, type FullHarness } from "./full-harness.ts";
 import { eventually, FAST, peerOf } from "./net-helpers.ts";
 import { REPO, git, makeRepo } from "./task-fixtures.ts";
+import { whenSettled } from "./shared-fixtures.ts";
 
 export { REPO, git } from "./task-fixtures.ts";
 
@@ -224,6 +225,18 @@ export async function waitForHandoffOf(node: FullHarness, taskId: string, role: 
 		const found = await handoffFor(node, taskId, role);
 		return found && predicate(found) ? found : undefined;
 	}, what, timeoutMs);
+}
+
+/**
+ * Wait until the agent that now executes a handed-over task on `node` has finished the turn of the handoff's resume prompt. That brief repeats
+ * the task description, so the fake omp replays its `@@fake-sh` lines in the work folder, and `echo x > f` truncates `f` an instant before it
+ * writes it again: a read of the folder while that turn runs can see a restored file empty. The folder is only stable once the turn settled
+ * (the resume prompt is sent before the handoff reaches `resumed`, so from `completed` on the session is busy until then).
+ */
+export async function whenResumeSettled(node: FullHarness, taskId: string, timeoutMs = 30_000): Promise<void> {
+	const sessionId = node.ctx.tasks.store.get(taskId).executorSessionId;
+	if (!sessionId) throw new Error(`task ${taskId} has no executor session on this node`);
+	await whenSettled(node, sessionId, timeoutMs);
 }
 
 /** Write `contents` into the project folder (`dir`), creating parents. */

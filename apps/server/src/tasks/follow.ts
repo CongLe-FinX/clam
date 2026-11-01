@@ -1,5 +1,6 @@
 import type { wire } from "@clam/agent-network";
 import { verifyFencingToken } from "@clam/handoff-engine";
+import { i18nMsg } from "@clam/contracts";
 import { ApiError } from "../http/errors.ts";
 import type { TaskHub } from "./hub.ts";
 import type { TaskRow } from "./store.ts";
@@ -21,17 +22,17 @@ export async function followExecutor(hub: TaskHub, input: { taskId: string; call
 	const first = store.find(taskId);
 	if (!first || first.direction !== "outgoing") throw ApiError.notFound("Task");
 	const peer = hub.ctx.network.peers.row(callerId);
-	if (!peer || peer.status === "revoked") throw new ApiError(403, "forbidden", "The new executor is not a paired peer");
+	if (!peer || peer.status === "revoked") throw new ApiError(403, "forbidden", i18nMsg("The new executor is not a paired peer"));
 
 	// Already following this very change (a replayed notice): answer with the current row.
 	if (first.peerId === callerId && first.epoch === change.epoch) return first;
-	if (change.epoch <= first.epoch) throw new ApiError(409, "stale_epoch", `The task is at epoch ${first.epoch}; the notice carries epoch ${change.epoch}`, { currentEpoch: first.epoch });
+	if (change.epoch <= first.epoch) throw new ApiError(409, "stale_epoch", i18nMsg("The task is at epoch {current}; the notice carries epoch {received}", { current: first.epoch, received: change.epoch }), { currentEpoch: first.epoch });
 	// The caller must have taken the task from the node we know as its executor, unless it skipped hops we never heard of.
 	if (change.fromNodeId !== first.executorNodeId && change.epoch <= first.epoch + 1) {
-		throw new ApiError(409, "executor_mismatch", `The notice says the task came from ${change.fromNodeId}; this node knows ${first.executorNodeId} as its executor`, { currentEpoch: first.epoch, executorNodeId: first.executorNodeId });
+		throw new ApiError(409, "executor_mismatch", i18nMsg("The notice says the task came from {from}; this node knows {executor} as its executor", { from: change.fromNodeId, executor: first.executorNodeId }), { currentEpoch: first.epoch, executorNodeId: first.executorNodeId });
 	}
 	const verdict = verifyFencingToken(change.fencingToken, { publicKey: peer.publicKey, handoffId: change.handoffId, manifestSha256: change.manifestSha256, taskId, epoch: change.epoch });
-	if (!verdict.ok) throw new ApiError(403, "invalid_fencing_token", `The fencing token does not verify (${verdict.reason})`, { reason: verdict.reason });
+	if (!verdict.ok) throw new ApiError(403, "invalid_fencing_token", i18nMsg("The fencing token does not verify ({reason})", { reason: verdict.reason }), { reason: verdict.reason });
 
 	// What the old executor still has (events up to the seal) is worth having; it may well be gone, and that is fine.
 	await input.syncOld();
@@ -41,7 +42,7 @@ export async function followExecutor(hub: TaskHub, input: { taskId: string; call
 		if (row.direction !== "outgoing") throw ApiError.notFound("Task");
 		if (row.peerId === callerId && row.epoch === change.epoch) return row;
 		// Another notice (or an answer from the old executor) moved the task meanwhile.
-		if (change.epoch <= row.epoch) throw new ApiError(409, "stale_epoch", `The task is at epoch ${row.epoch}; the notice carries epoch ${change.epoch}`, { currentEpoch: row.epoch });
+		if (change.epoch <= row.epoch) throw new ApiError(409, "stale_epoch", i18nMsg("The task is at epoch {current}; the notice carries epoch {received}", { current: row.epoch, received: change.epoch }), { currentEpoch: row.epoch });
 		const updated = store.update(taskId, {
 			peerId: callerId,
 			executorNodeId: callerId,

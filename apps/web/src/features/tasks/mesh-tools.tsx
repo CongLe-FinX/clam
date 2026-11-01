@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight } from "lucide-react";
 import type { ReactNode } from "react";
+import { t, tr } from "@/i18n";
 import { Badge } from "@/ui/badge";
 import { KIND_META } from "./format.ts";
 
@@ -32,7 +33,7 @@ const firstLine = (s: string | undefined): string => clip((s ?? "").split("\n").
 function TaskLink({ taskId }: { taskId: string }) {
 	return (
 		<Link to="/tasks/$taskId" params={{ taskId }} className="inline-flex shrink-0 items-center gap-0.5 rounded-md px-1.5 py-0.5 text-2xs font-medium text-accent outline-none hover:bg-accent-soft focus-visible:bg-accent-soft coarse:py-2">
-			Open task <ArrowUpRight className="size-3" aria-hidden />
+			{t("Open task")} <ArrowUpRight className="size-3" aria-hidden />
 		</Link>
 	);
 }
@@ -47,16 +48,23 @@ export function meshSummary(name: string, args: unknown, rec: Rec | undefined): 
 	const result = rec?.result;
 	switch (name) {
 		case "mesh_delegate": {
-			const title = arg(args, "title") ?? "a task";
+			const title = arg(args, "title") ?? t("a task");
 			const m = result ? /task (\S+)(?: to ([^\s,.]+@?[^\s,]*))?/.exec(result) : null;
 			const taskId = !failed && result?.startsWith("Delegated") ? m?.[1] : undefined;
 			const target = m?.[2] ?? [arg(args, "agent", "agentName", "agentId"), arg(args, "node", "nodeName", "nodeId", "target")].filter(Boolean).join("@");
-			const headline = running ? `Delegating ‘${clip(title, 60)}’${target ? ` to ${target}` : ""}…` : failed || !taskId ? `Could not delegate ‘${clip(title, 60)}’` : `Delegated ‘${clip(title, 60)}’ to ${target || "another machine"}`;
+			const shortTitle = clip(title, 60);
+			const headline = running
+				? target
+					? t("Delegating ‘{title}’ to {target}…", { title: shortTitle, target })
+					: t("Delegating ‘{title}’…", { title: shortTitle })
+				: failed || !taskId
+					? t("Could not delegate ‘{title}’", { title: shortTitle })
+					: t("Delegated ‘{title}’ to {target}", { title: shortTitle, target: target || t("another machine") });
 			return {
 				headline,
 				extra: taskId ? (
 					<div className="flex items-center justify-between gap-2 border-t px-3 py-1">
-						<span className="min-w-0 truncate text-2xs text-subtle">The task is tracked on the Tasks board; the executor's messages arrive in this session.</span>
+						<span className="min-w-0 truncate text-2xs text-subtle">{t("The task is tracked on the Tasks board; the executor's messages arrive in this session.")}</span>
 						<TaskLink taskId={taskId} />
 					</div>
 				) : failed || (rec && !taskId) ? (
@@ -70,10 +78,10 @@ export function meshSummary(name: string, args: unknown, rec: Rec | undefined): 
 			const taskId = arg(args, "taskId", "task_id", "task");
 			const meta = kind ? KIND_META[kind] : undefined;
 			return {
-				headline: running ? "Sending a message…" : failed ? "Message not sent" : `Sent ${meta ? meta.label.toLowerCase() : "message"}: ${clip(text, 80)}`,
+				headline: running ? t("Sending a message…") : failed ? t("Message not sent") : meta ? t("Sent {kind}: {text}", { kind: tr(meta.label).toLowerCase(), text: clip(text, 80) }) : t("Sent message: {text}", { text: clip(text, 80) }),
 				extra: (
 					<div className="flex items-start gap-2 border-t px-3 py-1.5">
-						{meta ? <Badge variant={meta.variant}>{meta.label}</Badge> : null}
+						{meta ? <Badge variant={meta.variant}>{tr(meta.label)}</Badge> : null}
 						<p className="line-clamp-2 min-w-0 flex-1 text-xs text-muted-foreground">{failed ? firstLine(result) : clip(text, 240)}</p>
 						{taskId ? <TaskLink taskId={taskId} /> : null}
 					</div>
@@ -85,10 +93,10 @@ export function meshSummary(name: string, args: unknown, rec: Rec | undefined): 
 			const taskId = arg(args, "taskId", "task_id", "task");
 			const variant = outcome === "succeeded" ? "success" : outcome === "blocked" ? "warning" : "danger";
 			return {
-				headline: running ? "Reporting the result…" : failed ? "Could not report the result" : `Finished the task — ${outcome}`,
+				headline: running ? t("Reporting the result…") : failed ? t("Could not report the result") : t("Finished the task — {outcome}", { outcome }),
 				extra: (
 					<div className="flex items-start gap-2 border-t px-3 py-1.5">
-						<Badge variant={failed ? "danger" : variant}>{failed ? "error" : outcome}</Badge>
+						<Badge variant={failed ? "danger" : variant}>{failed ? t("error") : outcome}</Badge>
 						<p className="line-clamp-2 min-w-0 flex-1 text-xs text-muted-foreground">{failed ? firstLine(result) : clip(arg(args, "summary") ?? "", 240)}</p>
 						{taskId ? <TaskLink taskId={taskId} /> : null}
 					</div>
@@ -97,13 +105,13 @@ export function meshSummary(name: string, args: unknown, rec: Rec | undefined): 
 		}
 		case "mesh_agents":
 			return {
-				headline: running ? "Looking up the agent directory…" : failed ? "Could not read the agent directory" : "Looked up the agent directory",
+				headline: running ? t("Looking up the agent directory…") : failed ? t("Could not read the agent directory") : t("Looked up the agent directory"),
 				extra: result && !running ? <p className="line-clamp-2 border-t px-3 py-1.5 text-xs text-muted-foreground">{firstLine(result)}</p> : null,
 			};
 		case "mesh_task": {
 			const taskId = arg(args, "taskId", "task_id", "task");
 			return {
-				headline: running ? "Checking a task…" : failed ? "Could not read the task" : `Checked task ${taskId ? taskId.slice(0, 12) : ""}`.trim(),
+				headline: running ? t("Checking a task…") : failed ? t("Could not read the task") : taskId ? t("Checked task {id}", { id: taskId.slice(0, 12) }) : t("Checked task"),
 				extra:
 					!running && (taskId || result) ? (
 						<div className="flex items-start gap-2 border-t px-3 py-1.5">

@@ -1,4 +1,4 @@
-import { CAPABILITIES, type AddWorkspaceMemberBody, type WorkspaceMember } from "@clam/contracts";
+import { CAPABILITIES, type AddWorkspaceMemberBody, type WorkspaceMember, i18nMsg } from "@clam/contracts";
 import type { ContextMembershipRequest } from "@clam/context-engine";
 import { peers, workspaceMembers, workspaces } from "@clam/database";
 import { and, eq, sql } from "drizzle-orm";
@@ -102,7 +102,7 @@ export class WorkspaceMembers {
 	private requirePeer(nodeId: string): PeerRow {
 		const peer = this.hub.ctx.network.peers.row(nodeId);
 		if (!peer) throw ApiError.notFound("Node (pair with it first)");
-		if (peer.status === "revoked") throw new ApiError(409, "peer_revoked", `${peer.name} has been revoked; pair again to restore access`);
+		if (peer.status === "revoked") throw new ApiError(409, "peer_revoked", i18nMsg("{name} has been revoked; pair again to restore access", { name: peer.name }));
 		return peer;
 	}
 
@@ -140,10 +140,10 @@ export class WorkspaceMembers {
 		const workspace = this.hub.requireWorkspace(workspaceId);
 		const peer = this.requirePeer(body.nodeId);
 		if (!(peer.receivedCapabilities as string[]).includes("context.sync")) {
-			throw new ApiError(409, "capability_missing", `${peer.name} has not granted this node context.sync, so the workspace cannot be shared with it. Ask them to enable it for this node.`, { missing: ["context.sync"] });
+			throw new ApiError(409, "capability_missing", i18nMsg("{name} has not granted this node context.sync, so the workspace cannot be shared with it. Ask them to enable it for this node.", { name: peer.name }), { missing: ["context.sync"] });
 		}
 		const unknown = (body.permissions ?? []).filter((p) => !CAPABILITY_SET.has(p));
-		if (unknown.length > 0) throw ApiError.badRequest(`Unknown permission(s): ${unknown.join(", ")}`);
+		if (unknown.length > 0) throw ApiError.badRequest(i18nMsg("Unknown permission(s): {permissions}", { permissions: unknown.join(", ") }));
 		const permissions = body.permissions ? [...new Set(body.permissions)] : [...(peer.grantedCapabilities as string[])];
 		const existing = this.rows(workspaceId).find((r) => r.memberId === peer.id);
 		const now = nowIso();
@@ -160,7 +160,7 @@ export class WorkspaceMembers {
 	/** Revoke a member for this workspace only (the peer stays paired for everything else) and tell it. */
 	remove(workspaceId: string, nodeId: string): WorkspaceMember[] {
 		const workspace = this.hub.requireWorkspace(workspaceId);
-		if (nodeId === this.hub.nodeId) throw new ApiError(409, "cannot_remove_self", "This node cannot remove itself from its own workspace");
+		if (nodeId === this.hub.nodeId) throw new ApiError(409, "cannot_remove_self", i18nMsg("This node cannot remove itself from its own workspace"));
 		const row = this.rows(workspaceId).find((r) => r.memberId === nodeId);
 		if (!row) throw ApiError.notFound("Member");
 		this.db()
@@ -183,7 +183,7 @@ export class WorkspaceMembers {
 	/** `POST /context/membership` from a paired peer that holds our `context.sync` grant. */
 	receive(peerId: string, request: ContextMembershipRequest): { ok: true } {
 		const peer = this.hub.ctx.network.peers.row(peerId);
-		if (!peer || peer.status === "revoked") throw new ApiError(403, "peer_revoked", "peer has been revoked");
+		if (!peer || peer.status === "revoked") throw new ApiError(403, "peer_revoked", i18nMsg("peer has been revoked"));
 		const { workspaceId } = request;
 		const now = nowIso();
 		if (request.action === "remove") {

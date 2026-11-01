@@ -3,12 +3,14 @@ import { routes } from "@clam/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+import { renderServerText, t, tr } from "@/i18n";
 import { api } from "@/lib/api";
 import { clearInitialPrompt, initialPromptClientId, peekInitialPrompt } from "@/lib/initial-prompt";
 import { qk } from "@/lib/queries";
 import { newClientId } from "@/lib/utils";
 import { ws } from "@/lib/ws";
 import { PAGE_SIZE, takePreloaded } from "./preload.ts";
+import { RUNTIME_STATE_LABEL } from "@/components/session-status";
 
 // ───────────────────────────── public types ─────────────────────────────
 
@@ -633,7 +635,7 @@ export class SessionStream {
 			this.setMeta({ loadingOlder: false, hasOlder: this.cursor !== null, total: page.total });
 		} catch (e) {
 			this.setMeta({ loadingOlder: false });
-			toast.error(`Could not load earlier messages: ${e instanceof Error ? e.message : "request failed"}`);
+			toast.error(t("Could not load earlier messages: {error}", { error: e instanceof Error ? e.message : t("request failed") }));
 		}
 	};
 
@@ -664,7 +666,7 @@ export class SessionStream {
 			this.pushLog({
 				kind: "runtime",
 				level: s === "crashed" ? "error" : s === "ready" ? "success" : "info",
-				text: `Runtime ${prev.runtime.state} → ${s}`,
+				text: t("Runtime {from} → {to}", { from: tr(RUNTIME_STATE_LABEL[prev.runtime.state]), to: tr(RUNTIME_STATE_LABEL[s]) }),
 				detail: s === "crashed" ? (state.runtime.lastError ?? undefined) : undefined,
 			});
 		}
@@ -706,12 +708,12 @@ export class SessionStream {
 			}
 			case "agent_start":
 				this.setMeta({ agentRunning: true });
-				this.pushLog({ kind: "agent", level: "info", text: "Agent started" });
+				this.pushLog({ kind: "agent", level: "info", text: t("Agent started") });
 				break;
 			case "agent_end":
 				this.setMeta({ agentRunning: false, aborting: false });
 				for (const t of [...this.tools.values()]) if (t.status === "running") this.setTool({ ...t, status: "interrupted", endedAt: Date.now() });
-				this.pushLog({ kind: "agent", level: "info", text: "Agent finished" });
+				this.pushLog({ kind: "agent", level: "info", text: t("Agent finished") });
 				this.refreshProjectFiles();
 				this.invalidateSoon();
 				break;
@@ -751,31 +753,34 @@ export class SessionStream {
 				this.pushLog({
 					kind: "prompt",
 					level: e.status === "error" ? "error" : e.status === "aborted" ? "warning" : "success",
-					text: `Prompt ${e.status}`,
+					text: e.status === "error" ? t("Prompt failed") : e.status === "aborted" ? t("Prompt aborted") : t("Prompt completed"),
 					detail: e.error,
 				});
 				if (e.status === "error" && e.error) toast.error(e.error);
 				break;
 			case "settled":
-				this.pushLog({ kind: "agent", level: "info", text: "Session settled" });
+				this.pushLog({ kind: "agent", level: "info", text: t("Session settled") });
 				this.invalidateSoon();
 				break;
 			case "notice":
-				this.pushLog({ kind: "notice", level: e.level === "error" ? "error" : e.level === "warning" ? "warning" : "info", text: e.message });
-				if (e.level === "error") toast.error(e.message);
-				else if (e.level === "warning") toast.warning(e.message);
+				{
+					const text = renderServerText(e.message, e.i18n);
+					this.pushLog({ kind: "notice", level: e.level === "error" ? "error" : e.level === "warning" ? "warning" : "info", text });
+					if (e.level === "error") toast.error(text);
+					else if (e.level === "warning") toast.warning(text);
+				}
 				break;
 			case "ui_request":
 				if (!this.meta.uiRequests.some((r) => r.requestId === e.requestId)) {
 					const rec: UiRequestRec = { requestId: e.requestId, method: e.method, title: e.title, message: e.message, options: e.options, receivedAt: this.now() };
 					this.setMeta({ uiRequests: [...this.meta.uiRequests, rec] });
-					this.pushLog({ kind: "approval", level: "warning", text: `Approval requested: ${e.title}`, detail: e.message });
+					this.pushLog({ kind: "approval", level: "warning", text: t("Approval requested: {title}", { title: e.title }), detail: e.message });
 				}
 				break;
 			case "ui_request_resolved":
 				if (this.meta.uiRequests.some((r) => r.requestId === e.requestId)) {
 					this.setMeta({ uiRequests: this.meta.uiRequests.filter((r) => r.requestId !== e.requestId) });
-					this.pushLog({ kind: "approval", level: "info", text: "Approval resolved" });
+					this.pushLog({ kind: "approval", level: "info", text: t("Approval resolved") });
 				}
 				break;
 			default:
@@ -798,7 +803,7 @@ export class SessionStream {
 		this.put(key, msg, { streaming });
 		if (isNew) this.append(key);
 		if (!start && msg.role === "assistant" && (msg.errorMessage || msg.stopReason === "error")) {
-			this.pushLog({ kind: "notice", level: "error", text: "Assistant error", detail: msg.errorMessage ?? msg.stopReason });
+			this.pushLog({ kind: "notice", level: "error", text: t("Assistant error"), detail: msg.errorMessage ?? msg.stopReason });
 		}
 	}
 
@@ -937,7 +942,7 @@ export class SessionStream {
 
 	setModel = async (selector: string, info?: { provider: string; id: string; name?: string }): Promise<void> => {
 		const prev = this.meta.live;
-		if (!prev) throw new Error("Runtime state is not available yet");
+		if (!prev) throw new Error(t("Runtime state is not available yet"));
 		const slash = selector.indexOf("/");
 		const optimistic = info ?? { provider: slash > 0 ? selector.slice(0, slash) : "", id: slash > 0 ? selector.slice(slash + 1) : selector };
 		this.setMeta({ live: { ...prev, model: optimistic } });
@@ -955,7 +960,7 @@ export class SessionStream {
 
 	setThinking = async (level: string): Promise<void> => {
 		const prev = this.meta.live;
-		if (!prev) throw new Error("Runtime state is not available yet");
+		if (!prev) throw new Error(t("Runtime state is not available yet"));
 		this.setMeta({ live: { ...prev, thinkingLevel: level, thinkingSelector: null } });
 		try {
 			const next = await api.post<SessionLiveState>(routes.sessionThinking(this.sessionId), { level });

@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react";
+import { msg, type Msg } from "@/i18n";
 
 export type ThemePref = "dark" | "light" | "system";
 const KEY = "clam.theme";
@@ -54,7 +55,7 @@ export function cycleTheme(): void {
 	setThemePref(ORDER[(ORDER.indexOf(pref) + 1) % ORDER.length] ?? "system");
 }
 
-export const THEME_LABEL: Record<ThemePref, string> = { system: "System", light: "Light", dark: "Dark" };
+export const THEME_LABEL: Record<ThemePref, Msg> = { system: msg("System"), light: msg("Light"), dark: msg("Dark") };
 
 mq?.addEventListener("change", () => {
 	if (pref === "system") {

@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, Download, Maximize2, Minimize2, X } from "lu
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import type { LightboxProps } from "./lazy-lightbox.tsx";
+import { t } from "@/i18n";
 
 const btn =
 	"grid size-9 place-items-center rounded-lg bg-white/10 text-white outline-none transition-colors hover:bg-white/20 focus-visible:ring-2 focus-visible:ring-ring coarse:size-11";
@@ -35,26 +36,26 @@ export default function Lightbox({ items, index, onIndexChange, onClose }: Light
 					aria-describedby={undefined}
 					className="clam-overlay fixed inset-0 z-[71] flex flex-col outline-none pt-safe pb-safe px-safe"
 				>
-					<D.Title className="sr-only">{item.alt || item.name || "Image"}</D.Title>
+					<D.Title className="sr-only">{item.alt || item.name || t("Image")}</D.Title>
 					<div className="flex items-center gap-2 px-3 py-2 text-white">
 						<span className="min-w-0 flex-1 truncate text-[13px] font-medium">{item.name || item.alt}</span>
 						{count > 1 ? <span className="tabular text-xs text-white/70">{index + 1} / {count}</span> : null}
-						<button type="button" className={btn} aria-label={actual ? "Fit to screen" : "Actual size"} onClick={() => setActual((v) => !v)}>
+						<button type="button" className={btn} aria-label={actual ? t("Fit to screen") : t("Actual size")} onClick={() => setActual((v) => !v)}>
 							{actual ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
 						</button>
 						{item.downloadUrl ? (
-							<a className={btn} href={item.downloadUrl} download={item.name} aria-label="Download image">
+							<a className={btn} href={item.downloadUrl} download={item.name} aria-label={t("Download image")}>
 								<Download className="size-4" />
 							</a>
 						) : null}
-						<D.Close className={btn} aria-label="Close">
+						<D.Close className={btn} aria-label={t("Close")}>
 							<X className="size-4" />
 						</D.Close>
 					</div>
 					<div className="relative flex min-h-0 flex-1 items-center justify-center" onClick={(e) => e.target === e.currentTarget && onClose()}>
 						<div className={cn("scrollbar-thin flex size-full", actual ? "overflow-auto" : "items-center justify-center")} onClick={(e) => e.target === e.currentTarget && onClose()}>
 							{failed ? (
-								<p className="m-auto text-sm text-white/80">This image could not be loaded.</p>
+								<p className="m-auto text-sm text-white/80">{t("This image could not be loaded.")}</p>
 							) : (
 								<img
 									key={item.src}
@@ -69,10 +70,10 @@ export default function Lightbox({ items, index, onIndexChange, onClose }: Light
 						</div>
 						{count > 1 ? (
 							<>
-								<button type="button" aria-label="Previous image" className={cn(btn, "absolute left-2 top-1/2 -translate-y-1/2")} onClick={() => onIndexChange((index - 1 + count) % count)}>
+								<button type="button" aria-label={t("Previous image")} className={cn(btn, "absolute left-2 top-1/2 -translate-y-1/2")} onClick={() => onIndexChange((index - 1 + count) % count)}>
 									<ChevronLeft className="size-5" />
 								</button>
-								<button type="button" aria-label="Next image" className={cn(btn, "absolute right-2 top-1/2 -translate-y-1/2")} onClick={() => onIndexChange((index + 1) % count)}>
+								<button type="button" aria-label={t("Next image")} className={cn(btn, "absolute right-2 top-1/2 -translate-y-1/2")} onClick={() => onIndexChange((index + 1) % count)}>
 									<ChevronRight className="size-5" />
 								</button>
 							</>

@@ -9,7 +9,7 @@ import {
 	checkEpoch,
 	isTerminalStatus,
 	statusAfterCompletion,
-	describeStatusChange,
+	statusChangeMessage,
 	applyMirroredEvents,
 } from "../src/index.ts";
 
@@ -70,11 +70,11 @@ describe("epoch", () => {
 });
 
 describe("events", () => {
-	it("describeStatusChange", () => {
-		expect(describeStatusChange(null, "offered")).toBe("offered");
-		expect(describeStatusChange("accepted", "running")).toBe("accepted → running");
-		expect(describeStatusChange("running", "blocked", "waiting for answer")).toBe("blocked: waiting for answer");
-		expect(describeStatusChange("running", "failed", "boom")).toBe("running → failed: boom");
+	it("statusChangeMessage", () => {
+		expect(statusChangeMessage(null, "offered").text).toBe("offered");
+		expect(statusChangeMessage("accepted", "running").text).toBe("accepted → running");
+		expect(statusChangeMessage("running", "blocked", "waiting for answer").text).toBe("blocked: waiting for answer");
+		expect(statusChangeMessage("running", "failed", "boom").text).toBe("running → failed: boom");
 	});
 	it("applyMirroredEvents", () => {
 		const e = (seq: number) => ({ seq });

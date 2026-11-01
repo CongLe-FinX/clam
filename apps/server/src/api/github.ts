@@ -1,4 +1,4 @@
-import { routes, UpdateGithubConfigBody } from "@clam/contracts";
+import { routes, UpdateGithubConfigBody, i18nMsg } from "@clam/contracts";
 import { GithubError } from "@clam/github-integration";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -56,7 +56,7 @@ export default async function githubRoutes(app: FastifyInstance, { ctx }: RouteP
 	app.get<{ Params: { id: string; owner: string; repo: string } }>(routes.githubRepoCheck(":id", ":owner", ":repo"), (req) =>
 		guard(() => {
 			const { id, owner, repo } = req.params;
-			if (!NAME.test(owner) || !NAME.test(repo)) throw ApiError.badRequest("Invalid repository owner or name.");
+			if (!NAME.test(owner) || !NAME.test(repo)) throw ApiError.badRequest(i18nMsg("Invalid repository owner or name."));
 			return service.checkRepo(id, owner, repo);
 		}),
 	);

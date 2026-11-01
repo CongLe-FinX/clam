@@ -1,4 +1,4 @@
-import type { HandoffEnvironment, HandoffFailureCode, HandoffRole, HandoffState, SetupDecisionBody } from "@clam/contracts";
+import { type HandoffEnvironment, type HandoffFailureCode, type HandoffRole, type HandoffState, type I18nMessage, i18nMsg, plainMsg, type SetupDecisionBody } from "@clam/contracts";
 import { detectEnvironment, type SetupReport } from "@clam/handoff-engine";
 import type { z } from "zod";
 import { ApiError } from "../http/errors.ts";
@@ -152,10 +152,15 @@ export class SessionKindService implements SessionKindApi {
 				meta: { session: meta },
 			});
 			this.store.initTargetSteps(inserted.id);
-			this.store.setStep(inserted.id, 1, "done", input.reason === "transfer" ? `${input.fromNodeName} handed the shared session over` : `${input.fromNodeName} did not hand over; continuing from its last checkpoint`);
+			this.store.setStep(inserted.id, 1, "done", input.reason === "transfer" ? i18nMsg("{name} handed the shared session over", { name: input.fromNodeName }) : i18nMsg("{name} did not hand over; continuing from its last checkpoint", { name: input.fromNodeName }));
 			return inserted;
 		});
-		this.hub.note(row.id, input.reason === "transfer" ? `${input.fromNodeName} handed the shared session "${input.title}" over to this node (epoch ${input.toEpoch - 1} → ${input.toEpoch}).` : `This node continues the shared session "${input.title}" from ${input.fromNodeName}'s last checkpoint (epoch ${input.toEpoch - 1} → ${input.toEpoch}).`);
+		this.hub.note(
+			row.id,
+			input.reason === "transfer"
+				? i18nMsg("{from} handed the shared session \"{title}\" over to this node (epoch {fromEpoch} → {toEpoch}).", { from: input.fromNodeName, title: input.title, fromEpoch: input.toEpoch - 1, toEpoch: input.toEpoch })
+				: i18nMsg("This node continues the shared session \"{title}\" from {from}'s last checkpoint (epoch {fromEpoch} → {toEpoch}).", { title: input.title, from: input.fromNodeName, fromEpoch: input.toEpoch - 1, toEpoch: input.toEpoch }),
+		);
 		return row;
 	}
 
@@ -178,7 +183,7 @@ export class SessionKindService implements SessionKindApi {
 	}
 
 	/** Move the target row forward to `to` (no-op when it is already there or beyond), recording the step it completes. */
-	private move(id: string, to: HandoffState, summary: string, step?: { n: number; state: "done" | "skipped"; detail: string }): HandoffRow {
+	private move(id: string, to: HandoffState, summary: I18nMessage, step?: { n: number; state: "done" | "skipped"; detail: string | I18nMessage }): HandoffRow {
 		const row = this.store.get(id);
 		if (row.state === "failed" || position(row.state) >= position(to)) return row;
 		if (step) this.hub.setStep(id, step.n, step.state, step.detail);
@@ -190,14 +195,14 @@ export class SessionKindService implements SessionKindApi {
 		const row = this.store.get(id);
 		const meta = this.metaOf(row);
 		const epoch = row.toEpoch;
-		this.move(id, "accepted", `Taking the driver role of "${row.title}" (epoch ${epoch})`);
-		this.move(id, "persisted", "The checkpoint snapshot of the shared session is held on this node", { n: 2, state: "done", detail: "Checkpoint snapshot received from the former driver" });
-		this.move(id, "files_restored", row.vcs === "files" ? "The working folder was restored from the checkpoint bundle" : "The working tree was aligned with the shared branch", {
+		this.move(id, "accepted", i18nMsg("Taking the driver role of \"{title}\" (epoch {epoch})", { title: row.title, epoch }));
+		this.move(id, "persisted", i18nMsg("The checkpoint snapshot of the shared session is held on this node"), { n: 2, state: "done", detail: i18nMsg("Checkpoint snapshot received from the former driver") });
+		this.move(id, "files_restored", row.vcs === "files" ? i18nMsg("The working folder was restored from the checkpoint bundle") : i18nMsg("The working tree was aligned with the shared branch"), {
 			n: 3,
 			state: "done",
-			detail: row.vcs === "files" ? `Folder restored from the checkpoint bundle into ${meta.dir}` : `Working tree in ${meta.dir} aligned with the shared branch`,
+			detail: row.vcs === "files" ? i18nMsg("Folder restored from the checkpoint bundle into {dir}", { dir: meta.dir }) : i18nMsg("Working tree in {dir} aligned with the shared branch", { dir: meta.dir }),
 		});
-		this.move(id, "context_restored", "The session snapshot was unpacked into a new local session", { n: 4, state: "done", detail: "Session snapshot unpacked and bound to a new local session" });
+		this.move(id, "context_restored", i18nMsg("The session snapshot was unpacked into a new local session"), { n: 4, state: "done", detail: i18nMsg("Session snapshot unpacked and bound to a new local session") });
 	}
 
 	/** Drive a target row forward (first run, approval, boot): restore, setup + validation, ownership; then release the continuation. */
@@ -230,7 +235,7 @@ export class SessionKindService implements SessionKindApi {
 	private async runSetup(id: string): Promise<"ready" | "waiting" | "failed"> {
 		const row = this.store.get(id);
 		const meta = this.metaOf(row);
-		this.hub.setStep(id, 5, "running", "Checking the project's dependencies");
+		this.hub.setStep(id, 5, "running", i18nMsg("Checking the project's dependencies"));
 		let step = 5;
 		try {
 			const environment: HandoffEnvironment = await detectEnvironment(meta.dir);
@@ -240,19 +245,19 @@ export class SessionKindService implements SessionKindApi {
 				const waitingOn = outcome.pending.length;
 				if (!meta.waitingNoted) {
 					this.patchSession(id, { waitingNoted: true });
-					this.hub.note(id, `Waiting for you to approve ${waitingOn} setup command${waitingOn === 1 ? "" : "s"} before the agent continues`);
+					this.hub.note(id, i18nMsg("Waiting for you to approve {count, plural, one {# setup command} other {# setup commands}} before the agent continues", { count: waitingOn }));
 				}
 				this.hub.changed(id);
 				return "waiting";
 			}
-			this.hub.setStep(id, 5, "done", "Dependencies set up");
+			this.hub.setStep(id, 5, "done", i18nMsg("Dependencies set up"));
 			this.store.patchMeta(id, { setupReport: outcome.report });
 			return "ready";
 		} catch (error) {
 			rethrowFault(error);
 			const code = error instanceof HandoffStepError ? error.code : "deps_failed";
 			if (error instanceof HandoffStepError && error.step !== null) step = error.step;
-			this.fail(id, code, step, errorText(error, 500));
+			this.fail(id, code, step, error instanceof HandoffStepError ? error.detail : plainMsg(errorText(error, 500)));
 			return "failed";
 		}
 	}
@@ -263,25 +268,27 @@ export class SessionKindService implements SessionKindApi {
 		const report = this.reportOf(row);
 		const ran = report.ran.length;
 		const skipped = report.skipped.length;
-		const detail = ran === 0 && skipped === 0 ? "No setup commands were needed" : `${ran} command${ran === 1 ? "" : "s"} ran, ${skipped} skipped`;
-		this.move(id, "deps_ready", `Dependencies ready: ${detail}`, { n: 5, state: "done", detail });
+		const detail = ran === 0 && skipped === 0 ? i18nMsg("No setup commands were needed") : i18nMsg("{ran, plural, one {# command} other {# commands}} ran, {skipped} skipped", { ran, skipped });
+		const ready = ran === 0 && skipped === 0 ? i18nMsg("Dependencies ready: No setup commands were needed") : i18nMsg("Dependencies ready: {ran, plural, one {# command} other {# commands}} ran, {skipped} skipped", { ran, skipped });
+		this.move(id, "deps_ready", ready, { n: 5, state: "done", detail });
 		const validated = report.validation ?? "Workspace validated";
-		this.move(id, "validated", `Workspace validated: ${validated}`, { n: 6, state: "done", detail: validated });
-		this.move(id, "session_created", `Local session ${row.targetSessionId ?? "(none)"} is bound to the shared session`, { n: 7, state: "done", detail: row.targetSessionId ? `Local session ${row.targetSessionId}` : "Local session created" });
-		this.move(id, "acked", `No acknowledgement round: this node announces epoch ${row.toEpoch} to the group itself`, { n: 8, state: "skipped", detail: "Shared sessions need no acknowledgement from the former driver" });
-		this.move(id, "owner", `This node is the driver of the shared session (epoch ${row.toEpoch})`, { n: 9, state: "done", detail: `Epoch ${row.toEpoch} announced to the group` });
+		this.move(id, "validated", i18nMsg("Workspace validated: {result}", { result: validated }), { n: 6, state: "done", detail: validated });
+		this.move(id, "session_created", i18nMsg("Local session {session} is bound to the shared session", { session: row.targetSessionId ?? "(none)" }), { n: 7, state: "done", detail: row.targetSessionId ? i18nMsg("Local session {session}", { session: row.targetSessionId }) : i18nMsg("Local session created") });
+		this.move(id, "acked", i18nMsg("No acknowledgement round: this node announces epoch {epoch} to the group itself", { epoch: row.toEpoch }), { n: 8, state: "skipped", detail: i18nMsg("Shared sessions need no acknowledgement from the former driver") });
+		this.move(id, "owner", i18nMsg("This node is the driver of the shared session (epoch {epoch})", { epoch: row.toEpoch }), { n: 9, state: "done", detail: i18nMsg("Epoch {epoch} announced to the group", { epoch: row.toEpoch }) });
 	}
 
 	/** A failing setup or validation: record `failed(code)`; the continuation prompt still goes out, carrying the failure as a warning. */
-	private fail(id: string, code: HandoffFailureCode, step: number, detail: string): void {
-		if (step === 6) this.hub.setStep(id, 5, "done", "Dependencies set up");
+	private fail(id: string, code: HandoffFailureCode, step: number, detailMsg: I18nMessage): void {
+		const detail = detailMsg.text;
+		if (step === 6) this.hub.setStep(id, 5, "done", i18nMsg("Dependencies set up"));
 		const rows = this.store.setupRows(id);
 		const report = this.setupRowsReport(rows);
 		(report.runtimeIssues ??= []).push(`${code === "validation_failed" ? "Workspace validation" : "Dependency setup"} failed: ${detail}`);
 		report.validation = `FAILED — ${detail}`;
 		this.store.patchMeta(id, { setupReport: report });
-		this.hub.setStep(id, step, "failed", detail);
-		this.hub.transition(id, "failed", { summary: `Dependency setup failed: ${detail}`, failure: { code, detail, step }, notify: false });
+		this.hub.setStep(id, step, "failed", detailMsg);
+		this.hub.transition(id, "failed", { summary: i18nMsg("Dependency setup failed: {detail}", { detail }), failure: { code, detail: detailMsg, step }, notify: false });
 	}
 
 	private setupRowsReport(rows: HandoffSetupRow[]): SetupReport {
@@ -346,9 +353,9 @@ export class SessionKindService implements SessionKindApi {
 			if (!input.error && meta.continuation && meta.continuation.sentAt === null) this.patchSession(row.id, { continuation: { ...meta.continuation, sentAt: new Date().toISOString() } });
 			if (row.state === "failed" || row.state === "cancelled" || row.state === "completed") return;
 			if (position(row.state) < position("owner")) return;
-			const sent = input.error ? `The continuation note could not be sent: ${input.error}` : "The continuation note was sent to the agent; the work goes on in the new session";
-			this.move(row.id, "resumed", sent, input.error ? { n: 10, state: "done", detail: sent } : { n: 10, state: "done", detail: "Continuation note sent to the new session" });
-			this.move(row.id, "completed", `Hand-over of "${row.title}" completed`);
+			const sent = input.error ? i18nMsg("The continuation note could not be sent: {error}", { error: input.error }) : i18nMsg("The continuation note was sent to the agent; the work goes on in the new session");
+			this.move(row.id, "resumed", sent, input.error ? { n: 10, state: "done", detail: sent } : { n: 10, state: "done", detail: i18nMsg("Continuation note sent to the new session") });
+			this.move(row.id, "completed", i18nMsg("Hand-over of \"{title}\" completed", { title: row.title }));
 		} catch (error) {
 			rethrowFault(error);
 			this.hub.log.warn({ err: errorText(error), sharedId: input.sharedSessionId }, "could not complete the shared hand-over record");
@@ -357,8 +364,8 @@ export class SessionKindService implements SessionKindApi {
 
 	async setupDecision(id: string, body: z.infer<typeof SetupDecisionBody>): Promise<HandoffRow> {
 		const row = this.store.get(id);
-		if (row.kind !== "session" || row.role !== "target") throw ApiError.conflict("This is not a shared-session hand-over of this node");
-		if (isTerminalState(row) || position(row.state) >= position("validated")) throw ApiError.conflict(`This hand-over is already ${row.state}; there is nothing left to approve`);
+		if (row.kind !== "session" || row.role !== "target") throw ApiError.conflict(i18nMsg("This is not a shared-session hand-over of this node"));
+		if (isTerminalState(row) || position(row.state) >= position("validated")) throw ApiError.conflict(i18nMsg("This hand-over is already {state}; there is nothing left to approve", { state: row.state }));
 		this.hub.setup.decide(id, body);
 		// Commands may run for minutes: the request returns now, the Handoff Center follows the row.
 		this.track(this.drive(id));
@@ -395,7 +402,12 @@ export class SessionKindService implements SessionKindApi {
 			correlationId: `shared:${input.sharedSessionId}:${input.toEpoch}`,
 			meta: { session: { reason: input.reason } },
 		});
-		this.hub.note(row.id, input.reason === "transfer" ? `The driver role of "${input.title}" was handed over to ${input.toNodeName} (epoch ${input.fromEpoch} → ${input.toEpoch})` : `${input.toNodeName} continued "${input.title}" as driver without a hand-over (epoch ${input.fromEpoch} → ${input.toEpoch})`);
+		this.hub.note(
+			row.id,
+			input.reason === "transfer"
+				? i18nMsg("The driver role of \"{title}\" was handed over to {to} (epoch {fromEpoch} → {toEpoch})", { title: input.title, to: input.toNodeName, fromEpoch: input.fromEpoch, toEpoch: input.toEpoch })
+				: i18nMsg("{to} continued \"{title}\" as driver without a hand-over (epoch {fromEpoch} → {toEpoch})", { to: input.toNodeName, title: input.title, fromEpoch: input.fromEpoch, toEpoch: input.toEpoch }),
+		);
 		return this.completeSource(row.id, input);
 	}
 
@@ -403,12 +415,12 @@ export class SessionKindService implements SessionKindApi {
 	private completeSource(id: string, input: SourceInput): HandoffRow {
 		const to = input.toNodeName;
 		const epoch = input.toEpoch;
-		const walk: Array<[HandoffState, string]> = [
-			["accepted", `${to} took over the driver role`],
-			["awaiting_ack", `Waiting for ${to}'s announcement of epoch ${epoch}`],
-			["acked", `${to}'s announcement of epoch ${epoch} arrived and is the current epoch`],
-			["released", "This node released the driver role: its session is a read-only copy and the work continues on the new driver"],
-			["completed", `This node follows ${to} as a participant`],
+		const walk: Array<[HandoffState, I18nMessage]> = [
+			["accepted", i18nMsg("{to} took over the driver role", { to })],
+			["awaiting_ack", i18nMsg("Waiting for {to}'s announcement of epoch {epoch}", { to, epoch })],
+			["acked", i18nMsg("{to}'s announcement of epoch {epoch} arrived and is the current epoch", { to, epoch })],
+			["released", i18nMsg("This node released the driver role: its session is a read-only copy and the work continues on the new driver")],
+			["completed", i18nMsg("This node follows {to} as a participant", { to })],
 		];
 		let row = this.store.get(id);
 		for (const [state, summary] of walk) row = this.hub.advance(id, state, { summary, notify: false });

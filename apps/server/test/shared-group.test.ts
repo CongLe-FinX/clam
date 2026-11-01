@@ -1,11 +1,12 @@
 import { outbox } from "@clam/database";
 import { wire } from "@clam/agent-network";
-import type { Peer, SharedMessage, SharedSession } from "@clam/contracts";
+import { type Peer, plainMsg, type SharedMessage, type SharedSession } from "@clam/contracts";
 import { compareGroupMessages, parseHlc } from "@clam/task-engine";
 import { and, eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { api, type FullHarness } from "./full-harness.ts";
 import { eventually, peerOf, signedRequest } from "./net-helpers.ts";
+import { expectSystemLinesLocalised } from "./i18n-helpers.ts";
 import {
 	detailOn,
 	isolateGitConfig,
@@ -149,6 +150,8 @@ describe("a replicated log: any online member accepts, partitions heal, one orde
 		expect(lines(pair.a)[0]?.id).toBe(lines(pair.b)[0]?.id);
 		// joins and the creation line are in both logs from the start
 		for (const node of [pair.a, pair.b]) expect(node.ctx.shared.store.messages(shared.id).filter((m) => m.kind === "system" && m.text.includes("joined the shared session"))).toHaveLength(1);
+		// every generated line (created, joined, left) carries an i18n twin that renders to its English text, on both nodes
+		for (const node of [pair.a, pair.b]) expect(expectSystemLinesLocalised(node.ctx.shared.store.messages(shared.id).map((m) => ({ kind: m.kind, text: m.text, i18n: m.i18n ?? undefined })))).toBeGreaterThanOrEqual(3);
 	});
 
 	it("HLC stamps are strictly increasing, and survive a restart even when the wall clock is behind what the node has seen", async () => {
@@ -450,7 +453,7 @@ describe("catching up by pull (POST /shared/:id/messages/sync)", () => {
 		for (let i = 0; i < 6; i++) await say(pair.a, shared.id, `sync ${i}`, NOBODY);
 		await say(pair.b, shared.id, "sync from b", NOBODY);
 		await eventually(() => idsOf(pair.a, shared.id).length === idsOf(pair.b, shared.id).length, "both logs in step");
-		pair.a.ctx.shared.discussion.note(shared.id, "a note for this node only", { local: true });
+		pair.a.ctx.shared.discussion.note(shared.id, plainMsg("a note for this node only"), { local: true });
 		const path_ = `/shared/${shared.id}/messages/sync`;
 		const pull = async (cursor: Record<string, number>, limit?: number) => {
 			const res = await signedRequest(pair.b, pair.a.netUrl, { method: "POST", path: path_, body: { cursor, ...(limit !== undefined && { limit }) } });

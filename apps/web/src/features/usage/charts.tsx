@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { UsagePoint } from "@clam/contracts";
-import { cn } from "@/lib/utils";
-import { fmtCost, fmtDate, fmtTokens } from "./format";
+import { T, t } from "@/i18n";
+import { cn, formatCost, formatDate } from "@/lib/utils";
+import { fmtTokens } from "./format";
 
 function useWidth<T extends HTMLElement>() {
 	const ref = useRef<T>(null);
@@ -51,7 +52,7 @@ export function TrendChart({ points, height = 220 }: { points: UsagePoint[]; hei
 	}, [points, width, height]);
 
 	if (points.length === 0) {
-		return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">No daily history recorded yet.</div>;
+		return <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">{t("No daily history recorded yet.")}</div>;
 	}
 
 	const active = hover != null ? points[hover] : null;
@@ -68,37 +69,37 @@ export function TrendChart({ points, height = 220 }: { points: UsagePoint[]; hei
 	return (
 		<div ref={ref} className="w-full">
 			<div className="mb-2 flex flex-wrap items-baseline gap-x-4 gap-y-1 text-xs">
-				<span className="font-mono text-muted-foreground">{fmtDate(shown.t)}{active ? "" : " (latest)"}</span>
+				<span className="font-mono text-muted-foreground">{active ? formatDate(shown.t) : t("{date} (latest)", { date: formatDate(shown.t) })}</span>
 				<span className="flex items-center gap-1.5">
 					<i className="inline-block size-2 rounded-sm bg-accent" />
-					<span className="font-mono tabular-nums">{fmtTokens(shown.tokens.total)}</span> tokens
+					<T text="<m>{tokens}</m> tokens" params={{ tokens: fmtTokens(shown.tokens.total) }} tags={{ m: <span className="font-mono tabular-nums" /> }} />
 				</span>
 				<span className="flex items-center gap-1.5">
 					<i className="inline-block h-0.5 w-3 rounded bg-warning" />
-					<span className="font-mono tabular-nums">{fmtCost(shown.cost)}</span>
+					<span className="font-mono tabular-nums">{formatCost(shown.cost)}</span>
 				</span>
-				<span className="text-muted-foreground">{shown.requests} requests</span>
+				<span className="text-muted-foreground">{t("{count, plural, one {# request} other {# requests}}", { count: shown.requests })}</span>
 			</div>
 			{width > 0 && (
 				<svg
 					width={width}
 					height={height}
 					role="img"
-					aria-label="Daily token and cost trend"
+					aria-label={t("Daily token and cost trend")}
 					className="touch-pan-y select-none"
 					onPointerMove={(e) => onMove(e.clientX, e.currentTarget.getBoundingClientRect())}
 					onPointerLeave={() => setHover(null)}
 				>
-					{ticks.map((t) => {
-						const y = geom.padT + geom.h - t * geom.h;
+					{ticks.map((tick) => {
+						const y = geom.padT + geom.h - tick * geom.h;
 						return (
-							<g key={t}>
-								<line x1={geom.padL} x2={geom.padL + geom.w} y1={y} y2={y} className="stroke-border" strokeDasharray={t === 0 ? undefined : "2 4"} />
+							<g key={tick}>
+								<line x1={geom.padL} x2={geom.padL + geom.w} y1={y} y2={y} className="stroke-border" strokeDasharray={tick === 0 ? undefined : "2 4"} />
 								<text x={geom.padL - 6} y={y + 3} textAnchor="end" className="fill-muted-foreground font-mono text-[10px]">
-									{fmtTokens(geom.maxTok * t)}
+									{fmtTokens(geom.maxTok * tick)}
 								</text>
 								<text x={geom.padL + geom.w + 6} y={y + 3} className="fill-muted-foreground font-mono text-[10px]">
-									{fmtCost(geom.maxCost * t)}
+									{formatCost(geom.maxCost * tick)}
 								</text>
 							</g>
 						);
@@ -122,7 +123,7 @@ export function TrendChart({ points, height = 220 }: { points: UsagePoint[]; hei
 					{points.map((p, i) =>
 						i % labelEvery === 0 ? (
 							<text key={p.t} x={geom.x(i)} y={height - 6} textAnchor="middle" className="fill-muted-foreground font-mono text-[10px]">
-								{new Date(p.t).toLocaleDateString("en", { month: "short", day: "numeric" })}
+								{formatDate(p.t, { month: "short", day: "numeric" })}
 							</text>
 						) : null,
 					)}
@@ -142,9 +143,9 @@ export interface BarItem {
 }
 
 /** Horizontal ranked bars; width animates via transform (scaleX). */
-export function BarList({ items, empty = "No data." }: { items: BarItem[]; empty?: string }) {
+export function BarList({ items, empty }: { items: BarItem[]; empty?: string }) {
 	const max = Math.max(0, ...items.map((i) => i.value));
-	if (items.length === 0) return <div className="py-6 text-center text-sm text-muted-foreground">{empty}</div>;
+	if (items.length === 0) return <div className="py-6 text-center text-sm text-muted-foreground">{empty ?? t("No data.")}</div>;
 	return (
 		<ul className="space-y-2.5">
 			{items.map((it) => (

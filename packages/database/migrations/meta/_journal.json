@@ -78,6 +78,20 @@
       "when": 1793464144759,
       "tag": "0010_turn_outputs",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793497797755,
+      "tag": "0011_i18n",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1793500135822,
+      "tag": "0012_i18n_twins",
+      "breakpoints": true
     }
   ]
 }

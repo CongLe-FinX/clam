@@ -26,6 +26,7 @@ import {
 import { QueryClient, type QueryKey, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { api, ApiError } from "./api.ts";
 import { useUi } from "./store.ts";
 import { useTopic } from "./ws.ts";
@@ -257,9 +258,9 @@ export function useRealtimeBridge(): void {
 				void qc.invalidateQueries({ queryKey: [...qk.contextsAll, "search"] });
 				if (!prev || prev.version !== c.version) void qc.invalidateQueries({ queryKey: qk.contextVersions(c.id) });
 				if (c.sync.state === "conflict" && prev?.sync.state !== "conflict") {
-					toast.warning(`Context conflict: ${c.title}`, {
+					toast.warning(t("Context conflict: {title}", { title: c.title }), {
 						id: `context-conflict-${c.id}`,
-						description: `${c.sync.conflict?.nodeName ?? "Another machine"} edited it too. Open Shared Context to resolve.`,
+						description: c.sync.conflict?.nodeName ? t("{name} edited it too. Open Shared Context to resolve.", { name: c.sync.conflict.nodeName }) : t("Another machine edited it too. Open Shared Context to resolve."),
 						duration: 15_000,
 					});
 				}

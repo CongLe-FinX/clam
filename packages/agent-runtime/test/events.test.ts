@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { SessionEvent, UiMessage } from "@clam/contracts";
+import { renderI18n, type SessionEvent, type UiMessage } from "@clam/contracts";
 import { OmpEventMapper, type OmpFrame } from "../src/omp/index.ts";
 
 interface RawAssistant {
@@ -318,6 +318,23 @@ describe("hand-built streams", () => {
 		expect(m.handleFrame({ type: "notice", level: "error", message: "boom", source: "x" }).events).toEqual([{ type: "notice", level: "error", message: "boom" }]);
 		expect(m.handleFrame({ type: "rpc_frame_error", error: "too big" }).events).toMatchObject([{ type: "notice", level: "warning" }]);
 		expect(m.handleFrame({ type: "extension_error", event: "tool_call", error: "bad" }).events).toMatchObject([{ type: "notice", level: "warning" }]);
+	});
+
+	it("notices that are our own text carry an i18n twin that renders to the message; OMP's own notice text does not", () => {
+		const m = new OmpEventMapper();
+		const ours = [
+			m.handleFrame({ type: "rpc_frame_error", error: "too big" }).events[0],
+			m.handleFrame({ type: "extension_error", event: "tool_call", error: "bad" }).events[0],
+			m.handleFrame({ type: "extension_error", error: "bad" }).events[0],
+			m.handleFrame({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, errorMessage: "overloaded" }).events[0],
+			m.handleFrame({ type: "auto_compaction_end", errorMessage: "too long" }).events[0],
+		];
+		for (const e of ours) {
+			if (e?.type !== "notice") throw new Error(`expected a notice, got ${JSON.stringify(e)}`);
+			expect(e.i18n, e.message).toBeDefined();
+			expect(renderI18n(e.i18n!.key, e.i18n!.params)).toBe(e.message);
+		}
+		expect(m.handleFrame({ type: "notice", level: "error", message: "boom" }).events[0]).not.toHaveProperty("i18n");
 	});
 
 	it("state-dirty frames and ignored frames", () => {

@@ -2,12 +2,13 @@ import type { AskAnswer, CancelSubagentResult, PendingUiRequest, SessionEvent, S
 import { routes } from "@clam/contracts";
 import { createContext, useContext, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { api, ApiError } from "@/lib/api";
 import { ws } from "@/lib/ws";
 import { preloadMarkdown } from "@/components/lazy-markdown";
 
 /** Who answered, as a phrase: "by you" on the machine that is looking, otherwise "from <machine>". */
-export const answererLabel = (by: UiRequestAnswerer, selfNodeId: string | undefined): string => (by.nodeId === selfNodeId ? "by you" : `from ${by.machine}`);
+export const answererLabel = (by: UiRequestAnswerer, selfNodeId: string | undefined): string => (by.nodeId === selfNodeId ? t("by you") : t("from {machine}", { machine: by.machine }));
 
 /** Option previews are markdown/code: fetch its renderer as the question arrives, so the card never shows them unformatted. */
 function warmPreviews(requests: readonly PendingUiRequest[]): void {
@@ -279,12 +280,12 @@ export class OmpStore {
 		if (e.code === "already_answered") {
 			const details = (e.details ?? {}) as { outcome?: UiRequestOutcome; answeredBy?: UiRequestAnswerer | null };
 			this.dropLocally(requestId, details.outcome ?? "answered", undefined, details.answeredBy ?? undefined);
-			toast.info(details.answeredBy ? `${details.answeredBy.machine} answered first — your answer was not sent.` : "This was already answered — your answer was not sent.");
+			toast.info(details.answeredBy ? t("{machine} answered first — your answer was not sent.", { machine: details.answeredBy.machine }) : t("This was already answered — your answer was not sent."));
 			return true;
 		}
 		if (e.code === "request_closed" || e.code === "stale_epoch" || e.code === "runtime_invalid_state") {
 			this.dropLocally(requestId, "abandoned");
-			toast.info("The agent is not waiting for this answer any more.");
+			toast.info(t("The agent is not waiting for this answer any more."));
 			return true;
 		}
 		return false;

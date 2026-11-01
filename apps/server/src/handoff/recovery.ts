@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
 import { wire } from "@clam/agent-network";
-import { HandoffFailureCode, type HandoffRole, type HandoffState } from "@clam/contracts";
+import { HandoffFailureCode, type HandoffRole, type HandoffState, type I18nMessage, i18nMsg, plainMsg } from "@clam/contracts";
 import { COMPLETED_GRACE_MS, HandoffManifest, hasPassed, type RecoveryDecision, type RecoveryFacts, recoveryAction, type StepStatus, type TargetState, verifyFencingToken } from "@clam/handoff-engine";
 import { isTerminalStatus } from "@clam/task-engine";
 import type { TaskStatus } from "@clam/contracts";
@@ -378,7 +378,7 @@ export class RecoveryService implements RecoveryApi {
 			return { row, decision: { action: "none", reason: "no valid durable ack: the source never releases on silence" } };
 		}
 		if (next && next !== row.state) {
-			const summary = `Recovery: ${decision.reason}`;
+			const summary = i18nMsg("Recovery: {reason}", { reason: decision.reason });
 			const failure = this.failureOf(row, decision, gathered);
 			row = this.hub.advance(row.id, next, {
 				summary,
@@ -389,13 +389,14 @@ export class RecoveryService implements RecoveryApi {
 		return { row, decision };
 	}
 
-	private failureOf(row: HandoffRow, decision: RecoveryDecision, gathered: Gathered): { code: HandoffFailureCode; detail: string; step: number | null } | undefined {
+	private failureOf(row: HandoffRow, decision: RecoveryDecision, gathered: Gathered): { code: HandoffFailureCode; detail: I18nMessage; step: number | null } | undefined {
 		if (decision.nextState !== "failed") return undefined;
-		if (decision.failureCode) return { code: decision.failureCode, detail: decision.reason, step: null };
+		if (decision.failureCode) return { code: decision.failureCode, detail: plainMsg(decision.reason), step: null };
 		// Source side: the target ended the handoff; keep its reason.
 		const reported = HandoffFailureCode.safeParse(gathered.status?.failure?.code);
 		const code: HandoffFailureCode = reported.success ? reported.data : gathered.facts.targetState === "cancelled" ? "cancelled" : "session_failed";
-		return { code, detail: gathered.status?.failure?.detail || decision.reason, step: gathered.status?.failure?.step ?? null };
+		const peer = gathered.status?.failure;
+		return { code, detail: peer?.detail ? { text: peer.detail, i18n: peer.i18n } : plainMsg(decision.reason), step: peer?.step ?? null };
 	}
 
 	// ------------------------------------------------------------------ perform
@@ -430,7 +431,7 @@ export class RecoveryService implements RecoveryApi {
 		switch (decision.action) {
 			case "refetch_manifest":
 				// The offer body is persisted with the row, so a row without a manifest cannot be repaired (no wire call returns it).
-				hub.advance(row.id, "failed", { summary: "Recovery: the manifest was not stored and cannot be fetched again", failure: { code: "manifest_invalid", detail: "Only the offer metadata was stored before the restart; ask the source to offer again.", step: null } });
+				hub.advance(row.id, "failed", { summary: i18nMsg("Recovery: the manifest was not stored and cannot be fetched again"), failure: { code: "manifest_invalid", detail: i18nMsg("Only the offer metadata was stored before the restart; ask the source to offer again."), step: null } });
 				await this.cleanup(row);
 				return;
 			case "reevaluate_acceptance":
@@ -446,7 +447,7 @@ export class RecoveryService implements RecoveryApi {
 				return;
 			case "acquire_after_deadline":
 				// §6.4(b): retried until the deadline, no reclaim seen: the durable hash-bound ack makes this node the owner at the new epoch.
-				hub.note(row.id, "Ack unanswered until the deadline and no reclaim seen: acquiring ownership at the new epoch");
+				hub.note(row.id, i18nMsg("Ack unanswered until the deadline and no reclaim seen: acquiring ownership at the new epoch"));
 				await hub.target.ackConfirmed(row.id);
 				return;
 			case "mark_failed":
@@ -508,7 +509,7 @@ export class RecoveryService implements RecoveryApi {
 				this.hub.log.debug({ handoffId: row.id, err: errorText(error) }, "the fenced task's runtime was already stopped");
 			}
 		}
-		this.hub.note(row.id, `Task continues on ${row.targetNodeName}`);
+		this.hub.note(row.id, i18nMsg("Task continues on {node}", { node: row.targetNodeName }));
 		this.hub.changed(row.id);
 	}
 

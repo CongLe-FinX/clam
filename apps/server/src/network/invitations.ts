@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import { deriveCodeKey, generateInvitationCode, hashInvitationCode, invitationIdFromCode } from "@clam/agent-network";
-import type { Capability, CreateInvitationBody, Invitation } from "@clam/contracts";
+import { i18nMsg, type Capability, type CreateInvitationBody, type Invitation } from "@clam/contracts";
 import { pairingInvitations, workspaces } from "@clam/database";
 import type { ClamDb } from "@clam/database";
 import type { SecretStore } from "@clam/secret-store";
@@ -80,7 +80,7 @@ export class InvitationService {
 			code = generateInvitationCode();
 			id = invitationIdFromCode(code);
 		}
-		if (this.row(id) !== undefined) throw ApiError.unavailable("Could not generate a unique invitation code; try again");
+		if (this.row(id) !== undefined) throw ApiError.unavailable(i18nMsg("Could not generate a unique invitation code; try again"));
 		const now = this.now();
 		this.deps.db
 			.insert(pairingInvitations)
@@ -96,7 +96,7 @@ export class InvitationService {
 			.run();
 		await this.deps.secrets.set(`${CODE_KEY_PREFIX}${id}`, Buffer.from(deriveCodeKey(code, id)).toString("base64"));
 		const row = this.row(id);
-		if (!row) throw ApiError.unavailable("Invitation could not be stored");
+		if (!row) throw ApiError.unavailable(i18nMsg("Invitation could not be stored"));
 		this.publish(id);
 		return this.toInvitation(row, code);
 	}
@@ -144,7 +144,7 @@ export class InvitationService {
 		const row = this.row(id);
 		if (!row) throw ApiError.notFound("Invitation");
 		const state = this.stateOf(row);
-		if (state === "consumed") throw ApiError.conflict("This invitation was already used; revoke the peer instead");
+		if (state === "consumed") throw ApiError.conflict(i18nMsg("This invitation was already used; revoke the peer instead"));
 		if (state !== "pending") return;
 		await this.finish(id, "revoked");
 	}

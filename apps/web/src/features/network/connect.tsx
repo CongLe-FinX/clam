@@ -1,11 +1,12 @@
 import { ArrowRight, LogIn, UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/ui/dialog";
+import { msg, t, tr } from "@/i18n";
 
 const STEPS = [
-	{ n: 1, title: "Invite", body: "One machine creates a one-time code." },
-	{ n: 2, title: "Verify", body: "The other checks the fingerprint, then enters the code." },
-	{ n: 3, title: "Approve", body: "The inviter approves and picks what is shared." },
+	{ n: 1, title: msg("Invite"), body: msg("One machine creates a one-time code.") },
+	{ n: 2, title: msg("Verify"), body: msg("The other checks the fingerprint, then enters the code.") },
+	{ n: 3, title: msg("Approve"), body: msg("The inviter approves and picks what is shared.") },
 ] as const;
 
 function Machine({ x, label, tone }: { x: number; label: string; tone: string }) {
@@ -29,9 +30,9 @@ function Machine({ x, label, tone }: { x: number; label: string; tone: string })
 export function PairingDiagram({ className }: { className?: string }) {
 	return (
 		<div className={cn("flex flex-col gap-4", className)}>
-			<svg viewBox="0 0 400 124" role="img" aria-label="Two machines connected by a signed channel" className="mx-auto h-auto w-full max-w-md">
-				<Machine x={24} label="This machine" tone="var(--accent)" />
-				<Machine x={284} label="Other machine" tone="var(--success)" />
+			<svg viewBox="0 0 400 124" role="img" aria-label={t("Two machines connected by a signed channel")} className="mx-auto h-auto w-full max-w-md">
+				<Machine x={24} label={t("This machine")} tone="var(--accent)" />
+				<Machine x={284} label={t("Other machine")} tone="var(--success)" />
 				<g stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" fill="none">
 					<path d="M128 44h144" strokeDasharray="2 7" />
 					<path d="M262 38l9 6-9 6" />
@@ -41,7 +42,7 @@ export function PairingDiagram({ className }: { className?: string }) {
 					<rect x="168" y="30" width="64" height="28" rx="14" fill="var(--surface-1)" />
 					<rect x="168" y="30" width="64" height="28" rx="14" fill="var(--accent-soft)" stroke="var(--accent)" strokeWidth="1" />
 					<text x="200" y="48.5" textAnchor="middle" className="fill-[var(--accent)] text-[10.5px] font-semibold">
-						signed
+						{t("signed")}
 					</text>
 				</g>
 			</svg>
@@ -50,8 +51,8 @@ export function PairingDiagram({ className }: { className?: string }) {
 					<li key={s.n} className="flex items-start gap-2.5 rounded-xl bg-surface-2 p-3 shadow-[inset_0_0_0_1px_var(--border)]">
 						<span className="grid size-6 shrink-0 place-items-center rounded-full bg-accent-soft font-mono text-2xs font-semibold text-accent">{s.n}</span>
 						<span className="flex flex-col gap-0.5">
-							<span className="text-[13px] font-semibold">{s.title}</span>
-							<span className="text-xs text-muted-foreground">{s.body}</span>
+							<span className="text-[13px] font-semibold">{tr(s.title)}</span>
+							<span className="text-xs text-muted-foreground">{tr(s.body)}</span>
 						</span>
 					</li>
 				))}
@@ -63,8 +64,8 @@ export function PairingDiagram({ className }: { className?: string }) {
 /** The two ways to connect: this machine creates the code, or enters the other one's code. */
 export function ConnectPaths({ onInvite, onJoin, className }: { onInvite: () => void; onJoin: () => void; className?: string }) {
 	const paths = [
-		{ id: "invite", icon: UserPlus, title: "Invite another machine", body: "This machine creates a one-time code. You send it, with this machine's address, to the other one.", cta: "Create an invitation", onClick: onInvite, primary: true },
-		{ id: "join", icon: LogIn, title: "Join another machine", body: "The other machine already gave you an address and a code. Enter them here and approve on its side.", cta: "Enter a code", onClick: onJoin, primary: false },
+		{ id: "invite", icon: UserPlus, title: msg("Invite another machine"), body: msg("This machine creates a one-time code. You send it, with this machine's address, to the other one."), cta: msg("Create an invitation"), onClick: onInvite, primary: true },
+		{ id: "join", icon: LogIn, title: msg("Join another machine"), body: msg("The other machine already gave you an address and a code. Enter them here and approve on its side."), cta: msg("Enter a code"), onClick: onJoin, primary: false },
 	];
 	return (
 		<div className={cn("grid gap-3 md:grid-cols-2", className)}>
@@ -80,11 +81,11 @@ export function ConnectPaths({ onInvite, onJoin, className }: { onInvite: () => 
 						<p.icon className="size-5" />
 					</span>
 					<span className="flex flex-col gap-1">
-						<span className="text-[15px] font-semibold">{p.title}</span>
-						<span className="text-[13px] text-muted-foreground">{p.body}</span>
+						<span className="text-[15px] font-semibold">{tr(p.title)}</span>
+						<span className="text-[13px] text-muted-foreground">{tr(p.body)}</span>
 					</span>
 					<span className="mt-auto inline-flex items-center gap-1 text-[13px] font-medium text-accent">
-						{p.cta} <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
+						{tr(p.cta)} <ArrowRight className="size-4 transition-transform group-hover:translate-x-0.5" />
 					</span>
 				</button>
 			))}
@@ -97,8 +98,8 @@ export function ConnectDialog({ onClose, onInvite, onJoin }: { onClose: () => vo
 		<Dialog open onOpenChange={(o) => !o && onClose()}>
 			<DialogContent className="max-w-2xl" sheetOnMobile>
 				<DialogHeader>
-					<DialogTitle>Connect a machine</DialogTitle>
-					<DialogDescription>Pairing is a one-time handshake. After it, every request between the two machines is signed.</DialogDescription>
+					<DialogTitle>{t("Connect a machine")}</DialogTitle>
+					<DialogDescription>{t("Pairing is a one-time handshake. After it, every request between the two machines is signed.")}</DialogDescription>
 				</DialogHeader>
 				<div className="-mx-1 flex min-h-0 flex-col gap-4 overflow-y-auto px-1">
 					<ConnectPaths onInvite={onInvite} onJoin={onJoin} />

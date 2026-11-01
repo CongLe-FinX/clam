@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { AlertTriangle, Copy, Check } from "lucide-react";
 import { useState } from "react";
-import { errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/ui/card";
@@ -56,11 +57,11 @@ export function InlineError({ error, onRetry, title }: { error: unknown; onRetry
 			<AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
 			<div className="min-w-0 flex-1">
 				{title && <div className="font-medium text-danger">{title}</div>}
-				<div className="break-words text-danger/90">{errorMessage(error)}</div>
+				<div className="break-words text-danger/90">{errorText(error)}</div>
 			</div>
 			{onRetry && (
 				<Button size="sm" variant="outline" onClick={onRetry}>
-					Retry
+					{t("Retry")}
 				</Button>
 			)}
 		</div>
@@ -76,7 +77,7 @@ export function KeyValue({ label, children, mono }: { label: string; children: R
 	);
 }
 
-export function CopyButton({ value, label = "Copy", className }: { value: string; label?: string; className?: string }) {
+export function CopyButton({ value, label, className }: { value: string; label?: string; className?: string }) {
 	const [done, setDone] = useState(false);
 	return (
 		<Button
@@ -94,7 +95,7 @@ export function CopyButton({ value, label = "Copy", className }: { value: string
 			}}
 		>
 			{done ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-			{done ? "Copied" : label}
+			{done ? t("Copied") : (label ?? t("Copy"))}
 		</Button>
 	);
 }

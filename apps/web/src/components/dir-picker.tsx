@@ -4,13 +4,14 @@ import { FolderGit2, GitBranch } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { Input } from "@/ui/input";
+import { t } from "@/i18n";
 
 export function DirPicker({ value, onChange, invalid }: { value: string; onChange: (v: string) => void; invalid?: boolean }) {
 	const [focused, setFocused] = useState(false);
 	const [debounced, setDebounced] = useState(value);
 	useEffect(() => {
-		const t = setTimeout(() => setDebounced(value), 160);
-		return () => clearTimeout(t);
+		const timer = setTimeout(() => setDebounced(value), 160);
+		return () => clearTimeout(timer);
 	}, [value]);
 	const suggestions = useQuery({
 		queryKey: ["local", "fs-suggest", debounced],
@@ -27,7 +28,7 @@ export function DirPicker({ value, onChange, invalid }: { value: string; onChang
 				onChange={(e) => onChange(e.target.value)}
 				onFocus={() => setFocused(true)}
 				onBlur={() => setTimeout(() => setFocused(false), 120)}
-				placeholder="/Users/you/code/my-project"
+				placeholder={t("/Users/you/code/my-project")}
 				spellCheck={false}
 				autoCapitalize="off"
 				autoCorrect="off"

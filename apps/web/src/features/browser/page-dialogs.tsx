@@ -2,17 +2,18 @@ import { type BrowserDialog, routes } from "@clam/contracts";
 import { FileUp } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { msg, t, tr, type Msg } from "@/i18n";
 import { localUrl } from "@/lib/api";
 import { Button } from "@/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
 import { Input } from "@/ui/input";
 import type { FileChooserRequest } from "./connection.ts";
 
-const TITLES: Record<BrowserDialog["kind"], string> = {
-	alert: "This page says",
-	confirm: "This page asks",
-	prompt: "This page asks",
-	beforeunload: "Leave this page?",
+const TITLES: Record<BrowserDialog["kind"], Msg> = {
+	alert: msg("This page says"),
+	confirm: msg("This page asks"),
+	prompt: msg("This page asks"),
+	beforeunload: msg("Leave this page?"),
 };
 
 function hostOf(url: string): string {
@@ -49,10 +50,10 @@ function PageDialogBody({ dialog, onAnswer }: { dialog: BrowserDialog; onAnswer:
 			}}
 		>
 			<DialogHeader>
-				<DialogTitle>{TITLES[dialog.kind]}</DialogTitle>
+				<DialogTitle>{tr(TITLES[dialog.kind])}</DialogTitle>
 				<DialogDescription>{hostOf(dialog.url)}</DialogDescription>
 			</DialogHeader>
-			{leave ? <p className="text-[13px] text-muted-foreground">Changes you made may not be saved.</p> : <p className="scrollbar-thin max-h-[40dvh] overflow-y-auto whitespace-pre-wrap break-words text-sm">{dialog.message}</p>}
+			{leave ? <p className="text-[13px] text-muted-foreground">{t("Changes you made may not be saved.")}</p> : <p className="scrollbar-thin max-h-[40dvh] overflow-y-auto whitespace-pre-wrap break-words text-sm">{dialog.message}</p>}
 			{dialog.kind === "prompt" ? (
 				<form
 					onSubmit={(e) => {
@@ -60,17 +61,17 @@ function PageDialogBody({ dialog, onAnswer }: { dialog: BrowserDialog; onAnswer:
 						accept();
 					}}
 				>
-					<Input value={value} onChange={(e) => setValue(e.target.value)} aria-label="Your answer" autoComplete="off" spellCheck={false} />
+					<Input value={value} onChange={(e) => setValue(e.target.value)} aria-label={t("Your answer")} autoComplete="off" spellCheck={false} />
 				</form>
 			) : null}
 			<DialogFooter>
 				{cancelable ? (
 					<Button variant="outline" size="lg" onClick={() => onAnswer(false)}>
-						{leave ? "Stay" : "Cancel"}
+						{leave ? t("Stay") : t("Cancel")}
 					</Button>
 				) : null}
 				<Button variant={leave ? "danger" : "primary"} size="lg" onClick={accept} autoFocus={dialog.kind !== "prompt"}>
-					{leave ? "Leave" : "OK"}
+					{leave ? t("Leave") : t("OK")}
 				</Button>
 			</DialogFooter>
 		</DialogContent>
@@ -80,7 +81,7 @@ function PageDialogBody({ dialog, onAnswer }: { dialog: BrowserDialog; onAnswer:
 async function uploadAll(uploadId: string, files: File[]): Promise<void> {
 	for (const file of files) {
 		const res = await fetch(localUrl(routes.browserUpload(uploadId), { name: file.name }), { method: "PUT", body: file, headers: { "content-type": "application/octet-stream" } });
-		if (!res.ok) throw new Error(`Uploading ${file.name} failed (${res.status})`);
+		if (!res.ok) throw new Error(t("Uploading {name} failed ({status})", { name: file.name, status: res.status }));
 	}
 }
 
@@ -100,7 +101,7 @@ export function FileChooserDialog({ chooser, answer }: { chooser: FileChooserReq
 			await uploadAll(chooser.uploadId, Array.from(files));
 			answer(chooser.uploadId);
 		} catch (e) {
-			toast.error(e instanceof Error ? e.message : "Upload failed");
+			toast.error(e instanceof Error ? e.message : t("Upload failed"));
 			answer();
 		} finally {
 			setBusy(false);
@@ -111,16 +112,16 @@ export function FileChooserDialog({ chooser, answer }: { chooser: FileChooserReq
 			{chooser ? (
 				<DialogContent hideClose sheetOnMobile className="max-w-md" onInteractOutside={(e) => e.preventDefault()}>
 					<DialogHeader>
-						<DialogTitle>Choose {chooser.multiple ? "files" : "a file"}</DialogTitle>
-						<DialogDescription>The page wants {chooser.multiple ? "files" : "a file"} from this device. They are sent to this machine's browser.</DialogDescription>
+						<DialogTitle>{chooser.multiple ? t("Choose files") : t("Choose a file")}</DialogTitle>
+						<DialogDescription>{chooser.multiple ? t("The page wants files from this device. They are sent to this machine's browser.") : t("The page wants a file from this device. It is sent to this machine's browser.")}</DialogDescription>
 					</DialogHeader>
 					<DialogFooter>
 						<Button variant="outline" size="lg" onClick={cancel} disabled={busy}>
-							Cancel
+							{t("Cancel")}
 						</Button>
 						<Button asChild variant="primary" size="lg" className={busy ? "pointer-events-none opacity-60" : undefined}>
 							<label>
-								<FileUp /> {busy ? "Uploading…" : chooser.multiple ? "Choose files…" : "Choose file…"}
+								<FileUp /> {busy ? t("Uploading…") : chooser.multiple ? t("Choose files…") : t("Choose file…")}
 								<input type="file" multiple={chooser.multiple} className="sr-only" disabled={busy} onChange={(e) => void onPick(e.target.files)} />
 							</label>
 						</Button>

@@ -210,3 +210,33 @@ describe("wire agents, announce, revoke, events, errors", () => {
 		expect(wire.ApiErrorBody.safeParse({ message: "x" }).success).toBe(false);
 	});
 });
+
+describe("additive i18n twins (older nodes ignore them, a malformed one is dropped)", () => {
+	const message = {
+		messageId: "shm_1",
+		epoch: 1,
+		kind: "system",
+		body: "Bob joined the shared session.",
+		author: { kind: "system" },
+		to: { mode: "agents", agents: [] },
+		origin: { nodeId: a.identity.nodeId, nodeName: "A", seq: 1 },
+		hlc: "000001700000000-00000",
+		createdAt: "2026-10-31T05:52:42.212Z",
+	};
+	it("a group message carries i18n through the schema; without it the field is simply absent", () => {
+		const twin = { key: "{name} joined the shared session.", params: { name: "Bob" } };
+		expect(wire.SharedMessageRequest.parse({ ...message, i18n: twin }).i18n).toEqual(twin);
+		expect(wire.SharedMessageRequest.parse(message).i18n).toBeUndefined();
+		expect(wire.SharedMessageRequest.parse({ ...message, i18n: { key: 1 } }).i18n).toBeUndefined();
+	});
+	it("task events, handoff state notices/failures and API errors accept the twin the same way", () => {
+		const twin = { key: "Offered by {peer}", params: { peer: "B" } };
+		expect(wire.TaskEventWire.parse({ seq: 1, type: "status", at: "2026-10-31T05:52:42Z", summary: "Offered by B", i18n: twin }).i18n).toEqual(twin);
+		expect(wire.TaskEventWire.parse({ seq: 1, type: "status", at: "2026-10-31T05:52:42Z", summary: "x" }).i18n).toBeUndefined();
+		const state = wire.HandoffStateRequest.parse({ epoch: 1, state: "failed", summary: "s", summaryI18n: twin, failure: { code: "x", detail: "d", i18n: twin }, at: "2026-10-31T05:52:42Z" });
+		expect(state.summaryI18n).toEqual(twin);
+		expect(state.failure?.i18n).toEqual(twin);
+		expect(wire.ApiErrorBody.parse({ error: { code: "c", message: "m", i18n: twin } }).error.i18n).toEqual(twin);
+		expect(wire.ApiErrorBody.parse({ error: { code: "c", message: "m" } }).error.i18n).toBeUndefined();
+	});
+});

@@ -1,6 +1,7 @@
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { ws } from "@/lib/ws";
 
 /** Sessions currently waiting on a human, by id (drives the tab title). */
@@ -44,10 +45,10 @@ export function usePendingWatch(): void {
 			if (now <= before) return;
 			const here = viewing(route.current.pathname, id) && !document.hidden;
 			if (here) return;
-			const name = title || "A session";
-			toast.warning(`${name} needs your answer`, { id: `pending:${id}`, duration: 12_000, action: { label: "Open", onClick: () => void route.current.navigate({ to: "/sessions/$sessionId", params: { sessionId: id } }) } });
+			const name = title || t("A session");
+			toast.warning(t("{name} needs your answer", { name }), { id: `pending:${id}`, duration: 12_000, action: { label: t("Open"), onClick: () => void route.current.navigate({ to: "/sessions/$sessionId", params: { sessionId: id } }) } });
 			if (document.hidden && typeof Notification !== "undefined" && Notification.permission === "granted") {
-				const note = new Notification(`${name} needs you`, { body: "The agent is waiting for an answer or an approval.", tag: `clam-pending:${id}` });
+				const note = new Notification(t("{name} needs you", { name }), { body: t("The agent is waiting for an answer or an approval."), tag: `clam-pending:${id}` });
 				note.onclick = () => {
 					window.focus();
 					void route.current.navigate({ to: "/sessions/$sessionId", params: { sessionId: id } });

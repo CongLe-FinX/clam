@@ -8,7 +8,8 @@ import {
 } from "@clam/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ApiError, api, errorMessage } from "@/lib/api";
+import { msg, t, tr, type Msg } from "@/i18n";
+import { ApiError, api, errorText } from "@/lib/api";
 import { applyStatus, gk } from "./hooks.ts";
 import { type BusyOp, useGitUi } from "./store.ts";
 
@@ -21,7 +22,7 @@ const ui = () => useGitUi.getState();
 
 async function run<T>(projectId: string, op: BusyOp, fn: () => Promise<T>): Promise<T | undefined> {
 	if (ui().busy[projectId]) {
-		toast.info("Another git operation is still running for this project");
+		toast.info(t("Another git operation is still running for this project"));
 		return undefined;
 	}
 	ui().setBusy(projectId, op);
@@ -34,17 +35,17 @@ async function run<T>(projectId: string, op: BusyOp, fn: () => Promise<T>): Prom
 }
 
 function fail(projectId: string, title: string, e: unknown, extra?: { body?: string; next?: string }): void {
-	const detail = errorMessage(e);
+	const detail = errorText(e);
 	toast.error(title, { description: detail.length > 160 ? `${detail.slice(0, 157)}…` : detail });
 	ui().setNotice(projectId, { tone: "error", title, body: extra?.body, detail, next: extra?.next });
 }
 
-const authNext = "Check the account in Settings → GitHub Accounts (re-verify or reconnect it), then try again.";
+const authNext = () => t("Check the account in Settings → GitHub Accounts (re-verify or reconnect it), then try again.");
 
 function networkHint(e: unknown): { body?: string; next?: string } {
 	if (e instanceof ApiError) {
-		if (/auth|credential|401|403|denied|SSO/i.test(`${e.code} ${e.message}`)) return { next: authNext };
-		if (e.code === "network" || /network|resolve|connect|timed? ?out/i.test(`${e.code} ${e.message}`)) return { next: "Check your connection and try again." };
+		if (/auth|credential|401|403|denied|SSO/i.test(`${e.code} ${e.message}`)) return { next: authNext() };
+		if (e.code === "network" || /network|resolve|connect|timed? ?out/i.test(`${e.code} ${e.message}`)) return { next: t("Check your connection and try again.") };
 	}
 	return {};
 }
@@ -57,37 +58,37 @@ export async function runFetch(qc: QueryClient, projectId: string): Promise<GitS
 			const status = await api.post<GitStatus>(routes.gitFetch(projectId));
 			applyStatus(qc, projectId, status);
 			ui().setNotice(projectId, null);
-			toast.success("Fetched from origin", {
-				description: status.behind > 0 ? `${status.behind} new ${status.behind === 1 ? "commit" : "commits"} on ${status.upstream ?? "upstream"}` : "No new commits upstream",
+			toast.success(t("Fetched from origin"), {
+				description: status.behind > 0 ? t("{count, plural, one {# new commit} other {# new commits}} on {upstream}", { count: status.behind, upstream: status.upstream ?? t("upstream") }) : t("No new commits upstream"),
 			});
 			return status;
 		} catch (e) {
-			fail(projectId, "Fetch failed", e, networkHint(e));
+			fail(projectId, t("Fetch failed"), e, networkHint(e));
 			return undefined;
 		}
 	});
 }
 
-const pullReasons: Record<NonNullable<GitPullResult["reason"]>, { body: string; next: string }> = {
+const pullReasons: Record<NonNullable<GitPullResult["reason"]>, { body: Msg; next: Msg }> = {
 	"dirty-overlap": {
-		body: "Pull refused: these files have uncommitted local changes that the incoming commits also modify. Nothing in your working tree was changed.",
-		next: "Commit your changes, or discard those files, then pull again.",
+		body: msg("Pull refused: these files have uncommitted local changes that the incoming commits also modify. Nothing in your working tree was changed."),
+		next: msg("Commit your changes, or discard those files, then pull again."),
 	},
 	diverged: {
-		body: "Pull refused: your branch and its upstream have both moved on, and a pull here is fast-forward only. Nothing was changed.",
-		next: "Merge or rebase upstream into your branch yourself, or push this work to a new branch and open a pull request.",
+		body: msg("Pull refused: your branch and its upstream have both moved on, and a pull here is fast-forward only. Nothing was changed."),
+		next: msg("Merge or rebase upstream into your branch yourself, or push this work to a new branch and open a pull request."),
 	},
 	"no-upstream": {
-		body: "This branch does not track a remote branch, so there is nothing to pull.",
-		next: "Push the branch first to publish it and set its upstream.",
+		body: msg("This branch does not track a remote branch, so there is nothing to pull."),
+		next: msg("Push the branch first to publish it and set its upstream."),
 	},
 	"operation-in-progress": {
-		body: "A merge, rebase, cherry-pick or revert is in progress in this repository.",
-		next: "Finish or abort that operation first, then pull.",
+		body: msg("A merge, rebase, cherry-pick or revert is in progress in this repository."),
+		next: msg("Finish or abort that operation first, then pull."),
 	},
 	detached: {
-		body: "HEAD is detached, so there is no branch to update.",
-		next: "Check out a branch, then pull.",
+		body: msg("HEAD is detached, so there is no branch to update."),
+		next: msg("Check out a branch, then pull."),
 	},
 };
 
@@ -101,14 +102,14 @@ function reportPull(qc: QueryClient, projectId: string, r: GitPullResult): void 
 	void qc.invalidateQueries({ queryKey: gk.diffRoot(projectId) });
 	if (r.result === "refused" && r.reason) {
 		const why = pullReasons[r.reason];
-		toast.warning("Pull refused", { description: r.paths.length ? `${r.paths.length} local ${r.paths.length === 1 ? "file blocks" : "files block"} the pull.` : why.body });
-		ui().setNotice(projectId, { tone: "warning", title: "Pull refused", body: why.body, paths: r.paths, detail: r.message || undefined, next: why.next });
+		toast.warning(t("Pull refused"), { description: r.paths.length ? t("{count, plural, one {# local file blocks} other {# local files block}} the pull.", { count: r.paths.length }) : tr(why.body) });
+		ui().setNotice(projectId, { tone: "warning", title: t("Pull refused"), body: tr(why.body), paths: r.paths, detail: r.message || undefined, next: tr(why.next) });
 	} else if (r.result === "up-to-date") {
 		ui().setNotice(projectId, null);
-		toast.success("Already up to date");
+		toast.success(t("Already up to date"));
 	} else {
 		ui().setNotice(projectId, null);
-		toast.success("Pulled", { description: r.message || `Fast-forwarded to ${r.status.headSha?.slice(0, 7) ?? "latest"}` });
+		toast.success(t("Pulled"), { description: r.message || t("Fast-forwarded to {sha}", { sha: r.status.headSha?.slice(0, 7) ?? t("latest") }) });
 	}
 }
 
@@ -124,36 +125,36 @@ export async function runPull(qc: QueryClient, projectId: string): Promise<GitPu
 				reportPull(qc, projectId, refused);
 				return refused;
 			}
-			fail(projectId, "Pull failed", e, networkHint(e));
+			fail(projectId, t("Pull failed"), e, networkHint(e));
 			return undefined;
 		}
 	});
 }
 
-const pushReasons: Record<NonNullable<GitPushResult["reason"]>, { body: string; next: string }> = {
+const pushReasons: Record<NonNullable<GitPushResult["reason"]>, { body: Msg; next: Msg }> = {
 	"non-fast-forward": {
-		body: "The remote branch has commits you don't have, so the push was rejected. CL Agent Mesh never force-pushes.",
-		next: "Pull first (fast-forward only), or push this work to a new branch and open a pull request.",
+		body: msg("The remote branch has commits you don't have, so the push was rejected. CL Agent Mesh never force-pushes."),
+		next: msg("Pull first (fast-forward only), or push this work to a new branch and open a pull request."),
 	},
 	"protected-branch": {
-		body: "The remote refused the push because this branch is protected.",
-		next: "Create a new branch from your commits, push it, and open a pull request instead.",
+		body: msg("The remote refused the push because this branch is protected."),
+		next: msg("Create a new branch from your commits, push it, and open a pull request instead."),
 	},
 	permission: {
-		body: "Your GitHub account does not have permission to push to this repository.",
-		next: "Ask for write access, push to a fork, or switch the project to an account that has access (Settings → GitHub Accounts).",
+		body: msg("Your GitHub account does not have permission to push to this repository."),
+		next: msg("Ask for write access, push to a fork, or switch the project to an account that has access (Settings → GitHub Accounts)."),
 	},
 	sso: {
-		body: "The organization requires SAML SSO authorization for this token.",
-		next: "Authorize the token for the organization on GitHub (Settings → Developer settings → Tokens → Configure SSO), then retry.",
+		body: msg("The organization requires SAML SSO authorization for this token."),
+		next: msg("Authorize the token for the organization on GitHub (Settings → Developer settings → Tokens → Configure SSO), then retry."),
 	},
 	auth: {
-		body: "GitHub rejected the stored credentials.",
-		next: authNext,
+		body: msg("GitHub rejected the stored credentials."),
+		next: msg("Check the account in Settings → GitHub Accounts (re-verify or reconnect it), then try again."),
 	},
 	other: {
-		body: "The push was rejected by the remote.",
-		next: "Read the remote's message below for the exact reason.",
+		body: msg("The push was rejected by the remote."),
+		next: msg("Read the remote's message below for the exact reason."),
 	},
 };
 
@@ -161,14 +162,14 @@ function reportPush(qc: QueryClient, projectId: string, r: GitPushResult, quiet?
 	applyStatus(qc, projectId, r.status);
 	if (r.result === "rejected" && r.reason) {
 		const why = pushReasons[r.reason];
-		toast.error("Push rejected", { description: why.body });
-		ui().setNotice(projectId, { tone: "error", title: "Push rejected", body: why.body, detail: r.message || undefined, next: why.next });
+		toast.error(t("Push rejected"), { description: tr(why.body) });
+		ui().setNotice(projectId, { tone: "error", title: t("Push rejected"), body: tr(why.body), detail: r.message || undefined, next: tr(why.next) });
 		return;
 	}
 	ui().setNotice(projectId, null);
 	if (quiet) return;
-	if (r.result === "up-to-date") toast.success("Everything is already pushed");
-	else toast.success(`Pushed ${r.status.branch ?? "branch"}`, { description: r.status.upstream ? `Tracking ${r.status.upstream}` : undefined });
+	if (r.result === "up-to-date") toast.success(t("Everything is already pushed"));
+	else toast.success(t("Pushed {branch}", { branch: r.status.branch ?? t("branch") }), { description: r.status.upstream ? t("Tracking {upstream}", { upstream: r.status.upstream }) : undefined });
 }
 
 export async function runPush(qc: QueryClient, projectId: string, opts: { setUpstream?: boolean; quiet?: boolean } = {}): Promise<GitPushResult | undefined> {
@@ -183,7 +184,7 @@ export async function runPush(qc: QueryClient, projectId: string, opts: { setUps
 				reportPush(qc, projectId, rejected, opts.quiet);
 				return rejected;
 			}
-			fail(projectId, "Push failed", e, networkHint(e));
+			fail(projectId, t("Push failed"), e, networkHint(e));
 			return undefined;
 		}
 	};
@@ -222,7 +223,7 @@ export async function setStaged(qc: QueryClient, projectId: string, paths: strin
 	} catch (e) {
 		if (prev) qc.setQueryData(key, prev);
 		void qc.invalidateQueries({ queryKey: key });
-		toast.error(stage ? "Could not stage" : "Could not unstage", { description: errorMessage(e) });
+		toast.error(stage ? t("Could not stage") : t("Could not unstage"), { description: errorText(e) });
 	}
 }
 
@@ -230,10 +231,10 @@ export async function discardPaths(qc: QueryClient, projectId: string, paths: st
 	try {
 		const next = await api.post<GitStatus>(routes.gitDiscard(projectId), { paths, confirm: true });
 		applyStatus(qc, projectId, next);
-		toast.success(paths.length === 1 ? "Changes discarded" : `Discarded changes in ${paths.length} files`);
+		toast.success(paths.length === 1 ? t("Changes discarded") : t("Discarded changes in {count} files", { count: paths.length }));
 		return true;
 	} catch (e) {
-		toast.error("Could not discard", { description: errorMessage(e) });
+		toast.error(t("Could not discard"), { description: errorText(e) });
 		void qc.invalidateQueries({ queryKey: gk.status(projectId) });
 		return false;
 	}
@@ -257,13 +258,13 @@ export async function commitStaged(
 		} catch (e) {
 			fail(
 				projectId,
-				"Commit failed",
+				t("Commit failed"),
 				e,
-				e instanceof ApiError && e.code === "no_git_identity" ? { next: "Set the commit identity with the pencil icon under the commit box, then commit again." } : undefined,
+				e instanceof ApiError && e.code === "no_git_identity" ? { next: t("Set the commit identity with the pencil icon under the commit box, then commit again.") } : undefined,
 			);
 			return false;
 		}
-		toast.success(`Committed ${commit.shortSha}`, { description: commit.subject });
+		toast.success(t("Committed {sha}", { sha: commit.shortSha }), { description: commit.subject });
 		if (opts.push) {
 			const pushed = await runPush(qc, projectId, { setUpstream: true });
 			return pushed?.result !== "rejected" && pushed !== undefined;
@@ -283,18 +284,18 @@ export async function checkoutBranch(qc: QueryClient, projectId: string, branch:
 			const status = await api.post<GitStatus>(routes.gitCheckout(projectId), { branch });
 			applyStatus(qc, projectId, status);
 			ui().setNotice(projectId, null);
-			toast.success(`Switched to ${status.branch ?? branch}`);
+			toast.success(t("Switched to {branch}", { branch: status.branch ?? branch }));
 			return true;
 		} catch (e) {
-			const msg = errorMessage(e);
-			const refused = overwriteRe.test(`${e instanceof ApiError ? e.code : ""} ${msg}`);
-			toast.error("Could not switch branch", { description: refused ? "Your local changes would be overwritten." : msg });
+			const detail = errorText(e);
+			const refused = overwriteRe.test(`${e instanceof ApiError ? e.code : ""} ${detail}`);
+			toast.error(t("Could not switch branch"), { description: refused ? t("Your local changes would be overwritten.") : detail });
 			ui().setNotice(projectId, {
 				tone: "error",
-				title: `Could not switch to ${branch}`,
-				body: refused ? "Switching was refused because it would overwrite your uncommitted changes. Nothing was changed — CL Agent Mesh never forces a checkout." : undefined,
-				detail: msg,
-				next: refused ? "Commit or discard the conflicting changes, then switch again." : undefined,
+				title: t("Could not switch to {branch}", { branch }),
+				body: refused ? t("Switching was refused because it would overwrite your uncommitted changes. Nothing was changed — CL Agent Mesh never forces a checkout.") : undefined,
+				detail,
+				next: refused ? t("Commit or discard the conflicting changes, then switch again.") : undefined,
 			});
 			return false;
 		}
@@ -308,10 +309,10 @@ export async function createBranch(qc: QueryClient, projectId: string, name: str
 			const status = await api.post<GitStatus>(routes.gitBranches(projectId), { name, from, checkout: true });
 			applyStatus(qc, projectId, status);
 			ui().setNotice(projectId, null);
-			toast.success(`Created and switched to ${name}`);
+			toast.success(t("Created and switched to {name}", { name }));
 			return true;
 		} catch (e) {
-			fail(projectId, `Could not create branch “${name}”`, e);
+			fail(projectId, t("Could not create branch “{name}”", { name }), e);
 			return false;
 		}
 	});
@@ -325,12 +326,12 @@ export async function initClmesh(qc: QueryClient, projectId: string): Promise<Cl
 		try {
 			const r = await api.post<ClmeshInitResult>(routes.clmeshInit(projectId));
 			applyStatus(qc, projectId, r.status);
-			toast.success(r.written.length ? `Wrote ${r.written.length} ${r.written.length === 1 ? "file" : "files"} to .clmesh/` : ".clmesh/ already exists", {
-				description: r.written.length ? "Review them in Changes, then commit." : `${r.skipped.length} existing ${r.skipped.length === 1 ? "file" : "files"} left untouched.`,
+			toast.success(r.written.length ? t("{count, plural, one {Wrote # file} other {Wrote # files}} to .clmesh/", { count: r.written.length }) : t(".clmesh/ already exists"), {
+				description: r.written.length ? t("Review them in Changes, then commit.") : t("{count, plural, one {# existing file} other {# existing files}} left untouched.", { count: r.skipped.length }),
 			});
 			return r;
 		} catch (e) {
-			fail(projectId, "Could not initialize .clmesh", e);
+			fail(projectId, t("Could not initialize .clmesh"), e);
 			return undefined;
 		}
 	});

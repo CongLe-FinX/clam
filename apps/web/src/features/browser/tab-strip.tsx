@@ -1,12 +1,13 @@
 import type { BrowserTab } from "@clam/contracts";
 import { Globe, Loader2, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { Tip } from "@/ui/tooltip";
 
 function tabTitle(tab: BrowserTab): string {
 	if (tab.title) return tab.title;
-	if (!tab.url || tab.url === "about:blank") return "New tab";
+	if (!tab.url || tab.url === "about:blank") return t("New tab");
 	try {
 		return new URL(tab.url).host || tab.url;
 	} catch {
@@ -43,7 +44,7 @@ function TabItem({ tab, active, onSelect, onClose }: { tab: BrowserTab; active: 
 			</button>
 			<button
 				type="button"
-				aria-label={`Close ${title}`}
+				aria-label={t("Close {title}", { title })}
 				onClick={onClose}
 				className={cn(
 					"mr-1 grid size-6 shrink-0 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-border-strong hover:text-foreground coarse:mr-0 coarse:size-11",
@@ -60,15 +61,15 @@ function TabItem({ tab, active, onSelect, onClose }: { tab: BrowserTab; active: 
 export function TabStrip({ tabs, activeId, creating, onSelect, onClose, onNew }: { tabs: BrowserTab[]; activeId: string | null; creating: boolean; onSelect: (id: string) => void; onClose: (id: string) => void; onNew: () => void }) {
 	return (
 		<div className="flex items-center gap-1 border-b bg-surface-1 px-2 py-1">
-			<div role="tablist" aria-label="Browser tabs" className="scrollbar-none flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain">
+			<div role="tablist" aria-label={t("Browser tabs")} className="scrollbar-none flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain">
 				{tabs.map((t) => (
 					<TabItem key={t.id} tab={t} active={t.id === activeId} onSelect={() => onSelect(t.id)} onClose={() => onClose(t.id)} />
 				))}
 			</div>
-			<Tip label="New tab">
+			<Tip label={t("New tab")}>
 				<button
 					type="button"
-					aria-label="New tab"
+					aria-label={t("New tab")}
 					disabled={creating}
 					onClick={onNew}
 					className="grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-surface-2 hover:text-foreground disabled:opacity-50 coarse:size-11 [&_svg]:size-4"

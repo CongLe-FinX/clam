@@ -3,6 +3,7 @@ import { lazy, Suspense } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@/ui/dialog";
 import { Skeleton } from "@/ui/skeleton";
 import type { RichFile } from "./assets.ts";
+import { t } from "@/i18n";
 
 const FilePreview = lazy(() => import("../file-preview.tsx"));
 
@@ -18,7 +19,7 @@ export default function PreviewDialog({ file, onClose }: { file: RichFile; onClo
 						download={file.name}
 						className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-surface-3 px-3 text-[13px] font-medium outline-none hover:bg-border-strong focus-visible:ring-2 focus-visible:ring-ring coarse:h-11"
 					>
-						<Download className="size-4" /> Download
+						<Download className="size-4" /> {t("Download")}
 					</a>
 				</div>
 				<div className="min-h-0 flex-1 overflow-hidden rounded-lg">

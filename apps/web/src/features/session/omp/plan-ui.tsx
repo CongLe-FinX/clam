@@ -2,6 +2,7 @@ import type { TodoPhase } from "@clam/contracts";
 import { Check, ChevronUp, CircleDashed, CircleSlash, ListChecks, X } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
@@ -15,26 +16,26 @@ const taskKey = (phase: string, content: string): string => `${phase}\u0000${con
 function Marker({ status, flash }: { status: string; flash: boolean }) {
 	if (isDone(status)) {
 		return (
-			<span aria-label="Completed" className={cn("mt-px grid size-4 shrink-0 place-items-center rounded-full bg-success text-background", flash && "animate-pop-in")}>
+			<span aria-label={t("Completed")} className={cn("mt-px grid size-4 shrink-0 place-items-center rounded-full bg-success text-background", flash && "animate-pop-in")}>
 				<Check className="size-2.5" strokeWidth={3.5} />
 			</span>
 		);
 	}
 	if (isActive(status)) {
 		return (
-			<span aria-label="In progress" className="relative mt-px grid size-4 shrink-0 place-items-center">
+			<span aria-label={t("In progress")} className="relative mt-px grid size-4 shrink-0 place-items-center">
 				<span aria-hidden className="absolute size-2.5 animate-[clam-pulse-ring_1.8s_ease-out_infinite] rounded-full bg-accent/60" />
 				<span aria-hidden className="relative size-2.5 rounded-full bg-accent shadow-[0_0_0_3px_var(--accent-soft)]" />
 			</span>
 		);
 	}
-	if (isDropped(status)) return <CircleSlash aria-label="Dropped" className="mt-px size-4 shrink-0 text-subtle" />;
-	return <CircleDashed aria-label={status === "blocked" ? "Blocked" : "Pending"} className={cn("mt-px size-4 shrink-0", status === "blocked" ? "text-warning" : "text-subtle")} />;
+	if (isDropped(status)) return <CircleSlash aria-label={t("Dropped")} className="mt-px size-4 shrink-0 text-subtle" />;
+	return <CircleDashed aria-label={status === "blocked" ? t("Blocked") : t("Pending")} className={cn("mt-px size-4 shrink-0", status === "blocked" ? "text-warning" : "text-subtle")} />;
 }
 
 export function PlanBar({ done, total, className }: { done: number; total: number; className?: string }) {
 	return (
-		<div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label="Plan progress" className={cn("h-1.5 w-full overflow-hidden rounded-full bg-surface-3", className)}>
+		<div role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done} aria-label={t("Plan progress")} className={cn("h-1.5 w-full overflow-hidden rounded-full bg-surface-3", className)}>
 			<div className="h-full origin-left rounded-full bg-success transition-transform duration-500 ease-out" style={{ transform: `scaleX(${total === 0 ? 0 : done / total})` }} />
 		</div>
 	);
@@ -72,7 +73,7 @@ export const PlanList = memo(function PlanList({ phases, className }: { phases: 
 					// biome-ignore lint/suspicious/noArrayIndexKey: phases carry no id; names can repeat
 					<section key={`${i}:${p.name}`} className="flex flex-col gap-2">
 						<header className="flex items-center gap-2">
-							<h4 className="min-w-0 flex-1 truncate text-xs font-semibold">{p.name || "Tasks"}</h4>
+							<h4 className="min-w-0 flex-1 truncate text-xs font-semibold">{p.name || t("Tasks")}</h4>
 							<span className="tabular font-mono text-2xs text-subtle">
 								{done}/{counted.length}
 							</span>
@@ -132,12 +133,12 @@ export function PlanChip({ stream, className }: { stream: SessionStream; classNa
 	const mobile = useBreakpoint() === "mobile";
 	if (!phases || stats.total === 0 || dismissed === signature) return null;
 
-	const label = stats.complete ? "Plan complete" : "Plan";
+	const label = stats.complete ? t("Plan complete") : t("Plan");
 	const chip = (
 		<button
 			type="button"
 			aria-expanded={open}
-			aria-label={`${label} ${stats.done} of ${stats.total}${stats.current ? `, now: ${stats.current.content}` : ""}`}
+			aria-label={stats.current ? t("{label} {done} of {total}, now: {task}", { label, done: stats.done, total: stats.total, task: stats.current.content }) : t("{label} {done} of {total}", { label, done: stats.done, total: stats.total })}
 			onClick={() => setOpen((v) => !v)}
 			className={cn(
 				"group/chip animate-slide-up relative flex h-9 min-w-0 max-w-full items-center gap-2 overflow-hidden rounded-full bg-surface-2 pr-3 pl-2.5 text-xs outline-none shadow-[inset_0_0_0_1px_var(--border)] transition-[background-color,transform] duration-150 hover:bg-surface-3 active:scale-[0.98] focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-11",
@@ -173,8 +174,8 @@ export function PlanChip({ stream, className }: { stream: SessionStream; classNa
 					{chip}
 					<Sheet open={open} onOpenChange={setOpen}>
 						<SheetContent side="bottom" className="max-h-[78dvh] p-0" aria-describedby={undefined}>
-							<SheetTitle className="px-4 pt-3 pb-1">Plan</SheetTitle>
-							<SheetDescription className="sr-only">What the agent plans to do and how far it is.</SheetDescription>
+							<SheetTitle className="px-4 pt-3 pb-1">{t("Plan")}</SheetTitle>
+							<SheetDescription className="sr-only">{t("What the agent plans to do and how far it is.")}</SheetDescription>
 							<div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 pt-2 pb-4">
 								<PlanSection phases={phases} />
 							</div>
@@ -187,7 +188,7 @@ export function PlanChip({ stream, className }: { stream: SessionStream; classNa
 					<PopoverContent side="top" align="start" className="w-[min(26rem,calc(100vw-1.5rem))] p-0">
 						<div className="flex items-center gap-2 border-b px-3.5 py-2.5">
 							<ListChecks className="size-4 text-accent" aria-hidden />
-							<span className="text-[13px] font-semibold">Plan</span>
+							<span className="text-[13px] font-semibold">{t("Plan")}</span>
 						</div>
 						<div className="scrollbar-thin max-h-[min(55dvh,26rem)] overflow-y-auto px-3.5 py-3">
 							<PlanSection phases={phases} />
@@ -196,7 +197,7 @@ export function PlanChip({ stream, className }: { stream: SessionStream; classNa
 				</Popover>
 			)}
 			{stats.complete ? (
-				<Button variant="ghost" size="icon-sm" aria-label="Dismiss plan" onClick={() => setDismissed(signature)}>
+				<Button variant="ghost" size="icon-sm" aria-label={t("Dismiss plan")} onClick={() => setDismissed(signature)}>
 					<X />
 				</Button>
 			) : null}

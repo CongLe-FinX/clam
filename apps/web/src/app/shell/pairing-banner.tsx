@@ -3,6 +3,7 @@ import { ShieldQuestion } from "lucide-react";
 import { isAwaitingApproval, usePairingRequests } from "@/lib/queries";
 import { useUi } from "@/lib/store";
 import { Button } from "@/ui/button";
+import { t } from "@/i18n";
 
 /** App-wide card shown while a machine waits for approval, so a request is never missed outside the invite dialog. */
 export default function PairingBanner() {
@@ -19,11 +20,13 @@ export default function PairingBanner() {
 					<ShieldQuestion className="size-5" />
 				</span>
 				<span className="flex min-w-0 flex-1 flex-col text-[13px]">
-					<strong className="truncate font-semibold">{first.remote.name} wants to connect</strong>
-					<span className="text-xs text-muted-foreground">{requests.length > 1 ? `${requests.length} requests need` : "Needs"} your approval</span>
+					<strong className="truncate font-semibold">{t("{name} wants to connect", { name: first.remote.name })}</strong>
+					<span className="text-xs text-muted-foreground">
+						{requests.length > 1 ? t("{count} requests need your approval", { count: requests.length }) : t("Needs your approval")}
+					</span>
 				</span>
 				<Button size="sm" variant="primary" onClick={() => openDialog({ kind: "pairing-requests" })}>
-					Review
+					{t("Review")}
 				</Button>
 			</div>
 		</div>

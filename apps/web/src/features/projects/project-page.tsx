@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyButton } from "@/components/code-block";
 import { useGitStatus } from "@/features/git/hooks";
-import { ApiError, api, errorMessage } from "@/lib/api";
+import { msg, t, T, tr, type Msg } from "@/i18n";
+import { ApiError, api, errorText } from "@/lib/api";
 import { qk, useProject, useSessions } from "@/lib/queries";
 import { useUi } from "@/lib/store";
 import { cn, relativeTime } from "@/lib/utils";
@@ -64,16 +65,16 @@ export default function ProjectPage() {
 			<div className="grid h-full place-items-center">
 				<EmptyState
 					icon={FolderGit2}
-					title={notFound ? "Project not found" : "Could not load project"}
-					description={notFound ? "It may have been deleted from this machine." : errorMessage(project.error)}
+					title={notFound ? t("Project not found") : t("Could not load project")}
+					description={notFound ? t("It may have been deleted from this machine.") : errorText(project.error)}
 					action={
 						notFound ? (
 							<Button asChild variant="outline" size="sm">
-								<Link to="/node/projects">Browse projects</Link>
+								<Link to="/node/projects">{t("Browse projects")}</Link>
 							</Button>
 						) : (
 							<Button variant="outline" size="sm" onClick={() => void project.refetch()}>
-								<RefreshCw /> Retry
+								<RefreshCw /> {t("Retry")}
 							</Button>
 						)
 					}
@@ -106,18 +107,18 @@ export default function ProjectPage() {
 					<Panel id="threads" order={1} defaultSize={30} minSize={22} maxSize={48} className="min-w-0">
 						<ThreadsPane projectId={p.id} />
 					</Panel>
-					<PanelResizeHandle aria-label="Resize threads pane" />
+					<PanelResizeHandle aria-label={t("Resize threads pane")} />
 					<Panel id="files" order={2} minSize={40} className="min-w-0">
 						<PanelGroup direction="horizontal" autoSaveId="clam.project.files" className="h-full">
 							<Panel id="explorer" order={1} defaultSize={32} minSize={20} maxSize={60} className="min-w-0">
 								<FileExplorer projectId={p.id} selectedPath={file ?? null} onOpenFile={openFile} />
 							</Panel>
-							<PanelResizeHandle aria-label="Resize file explorer" />
+							<PanelResizeHandle aria-label={t("Resize file explorer")} />
 							<Panel id="viewer" order={2} minSize={30} className="min-w-0">
 								{file ? (
 									<FileViewer key={file} projectId={p.id} path={file} onClose={closeFile} />
 								) : (
-									<EmptyState icon={FileCode2} title="No file open" description="Pick a file from the tree to view it here. The open file is kept in the URL." className="h-full" />
+									<EmptyState icon={FileCode2} title={t("No file open")} description={t("Pick a file from the tree to view it here. The open file is kept in the URL.")} className="h-full" />
 								)}
 							</Panel>
 						</PanelGroup>
@@ -136,12 +137,12 @@ function ProjectTabs({ projectId, vcs, tab, onChange }: { projectId: string; vcs
 	const status = useGitStatus(projectId, { enabled: vcs === "git" }).data;
 	const dirty = status?.isRepo ? status.files.length : 0;
 	const items = [
-		{ id: "workspace" as const, label: "Workspace", icon: FolderTree },
-		...(vcs === "git" ? [{ id: "git" as const, label: "Git", icon: GitBranch }] : []),
-		{ id: "context" as const, label: "Context", icon: BookMarked },
+		{ id: "workspace" as const, label: t("Workspace"), icon: FolderTree },
+		...(vcs === "git" ? [{ id: "git" as const, label: t("Git"), icon: GitBranch }] : []),
+		{ id: "context" as const, label: t("Context"), icon: BookMarked },
 	];
 	return (
-		<div role="tablist" aria-label="Project views" className="flex shrink-0 items-center gap-1 border-b bg-surface-1/40 px-3 py-1.5 sm:px-4">
+		<div role="tablist" aria-label={t("Project views")} className="flex shrink-0 items-center gap-1 border-b bg-surface-1/40 px-3 py-1.5 sm:px-4">
 			{items.map(({ id, label, icon: Icon }) => (
 				<button
 					key={id}
@@ -171,7 +172,7 @@ function ProjectTabs({ projectId, vcs, tab, onChange }: { projectId: string; vcs
 
 function GitTabSkeleton() {
 	return (
-		<div className="flex h-full flex-col gap-3 p-3" aria-busy aria-label="Loading git">
+		<div className="flex h-full flex-col gap-3 p-3" aria-busy aria-label={t("Loading git")}>
 			<Skeleton className="h-8 w-2/3" />
 			<Skeleton className="h-6" />
 			<Skeleton className="h-6 w-5/6" />
@@ -193,14 +194,14 @@ function CompactLayout({ project, file, onOpenFile, onCloseFile }: { project: Pr
 			<div className="shrink-0 border-b px-3 py-2">
 				<TabsList className="w-full">
 					<TabsTrigger value="threads" className="flex-1">
-						<MessageSquare /> Threads
+						<MessageSquare /> {t("Threads")}
 					</TabsTrigger>
 					<TabsTrigger value="files" className="flex-1">
-						<FolderTree /> Files
+						<FolderTree /> {t("Files")}
 					</TabsTrigger>
 					{file ? (
 						<TabsTrigger value="viewer" className="flex-1">
-							<FileCode2 /> Viewer
+							<FileCode2 /> {t("Viewer")}
 						</TabsTrigger>
 					) : null}
 				</TabsList>
@@ -247,7 +248,7 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 		},
 		onError: (e, _n, ctx) => {
 			if (ctx?.prev) qc.setQueryData(qk.project(project.id), ctx.prev);
-			toast.error("Could not rename project", { description: errorMessage(e) });
+			toast.error(t("Could not rename project"), { description: errorText(e) });
 		},
 		onSuccess: (next) => qc.setQueryData(qk.project(project.id), next),
 		onSettled: () => void qc.invalidateQueries({ queryKey: qk.projectsAll }),
@@ -256,7 +257,7 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 	const del = useMutation({
 		mutationFn: () => api.delete(`${routes.project(project.id)}${project.managed && deleteFiles ? "?deleteFiles=true" : ""}`),
 		onSuccess: () => {
-			toast.success(`Deleted ${project.name}`);
+			toast.success(t("Deleted {name}", { name: project.name }));
 			qc.removeQueries({ queryKey: qk.project(project.id) });
 			void qc.invalidateQueries({ queryKey: qk.projectsAll });
 			void qc.invalidateQueries({ queryKey: qk.workspaces });
@@ -265,7 +266,7 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 		},
 		onError: (e) => {
 			setConfirmDelete(false);
-			toast.error("Could not delete project", { description: errorMessage(e) });
+			toast.error(t("Could not delete project"), { description: errorText(e) });
 		},
 	});
 
@@ -295,19 +296,19 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 									ref={inputRef}
 									value={draft}
 									maxLength={80}
-									aria-label="Project name"
+									aria-label={t("Project name")}
 									onChange={(e) => setDraft(e.target.value)}
 									onKeyDown={onKey}
 									onBlur={commit}
 									className="h-8 min-w-0 flex-1 rounded-md bg-surface-2 px-2 text-lg font-semibold tracking-tight outline-none shadow-[inset_0_0_0_1px_var(--accent)] sm:max-w-md"
 								/>
-								<Button variant="ghost" size="icon-sm" aria-label="Save name" onMouseDown={(e) => e.preventDefault()} onClick={commit}>
+								<Button variant="ghost" size="icon-sm" aria-label={t("Save name")} onMouseDown={(e) => e.preventDefault()} onClick={commit}>
 									<Check />
 								</Button>
 								<Button
 									variant="ghost"
 									size="icon-sm"
-									aria-label="Cancel rename"
+									aria-label={t("Cancel rename")}
 									onMouseDown={(e) => e.preventDefault()}
 									onClick={() => {
 										setEditing(false);
@@ -320,11 +321,11 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 						) : (
 							<>
 								<h1 className="truncate text-lg font-semibold tracking-tight">{project.name}</h1>
-								<Tip label="Rename project">
+								<Tip label={t("Rename project")}>
 									<Button
 										variant="ghost"
 										size="icon-sm"
-										aria-label="Rename project"
+										aria-label={t("Rename project")}
 										onClick={() => {
 											setDraft(project.name);
 											setEditing(true);
@@ -340,15 +341,15 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 						<span className="truncate font-mono text-xs text-muted-foreground" title={project.path}>
 							{project.path}
 						</span>
-						<CopyButton text={project.path} label="Copy path" className="size-6" />
+						<CopyButton text={project.path} label={t("Copy path")} className="size-6" />
 					</div>
 				</div>
 				<div className="flex shrink-0 items-center gap-2">
 					<Button variant="primary" onClick={() => openDialog({ kind: "create-session", projectId: project.id })}>
-						<Plus /> New session
+						<Plus /> {t("New session")}
 					</Button>
-					<Tip label="Open terminal here">
-						<Button asChild variant="outline" size="icon" aria-label="Open terminal here">
+					<Tip label={t("Open terminal here")}>
+						<Button asChild variant="outline" size="icon" aria-label={t("Open terminal here")}>
 							<Link to="/terminal" search={{ project: project.id }}>
 								<Terminal />
 							</Link>
@@ -356,16 +357,16 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 					</Tip>
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
-							<Button variant="outline" size="icon" aria-label="Project actions">
+							<Button variant="outline" size="icon" aria-label={t("Project actions")}>
 								<MoreHorizontal />
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent>
 							<DropdownMenuItem onSelect={() => openDialog({ kind: "delegate-task", projectId: project.id, workspaceId: project.workspaceId })}>
-								<Send /> Delegate a task…
+								<Send /> {t("Delegate a task…")}
 							</DropdownMenuItem>
 							<DropdownMenuItem danger onSelect={() => setConfirmDelete(true)}>
-								<Trash2 /> Delete project…
+								<Trash2 /> {t("Delete project…")}
 							</DropdownMenuItem>
 						</DropdownMenuContent>
 					</DropdownMenu>
@@ -385,30 +386,30 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 							{repo.owner}/{repo.name}
 						</span>
 						{repo.defaultBranch ? <Badge variant="outline">{repo.defaultBranch}</Badge> : null}
-						{repo.accountId ? <span className="hidden font-mono text-2xs text-subtle sm:inline">acct {repo.accountId.slice(0, 8)}</span> : null}
+						{repo.accountId ? <span className="hidden font-mono text-2xs text-subtle sm:inline">{t("acct {id}", { id: repo.accountId.slice(0, 8) })}</span> : null}
 					</a>
 				) : project.vcs === "none" ? (
-					<span className="inline-flex items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1" title="Sessions, tasks and shared sessions work on the files directly; no repository is needed.">
+					<span className="inline-flex items-center gap-1.5 rounded-md bg-surface-2 px-2 py-1" title={t("Sessions, tasks and shared sessions work on the files directly; no repository is needed.")}>
 						<Folder className="size-3.5" />
-						{project.managed ? "Managed folder" : "Plain folder"}
-						<span className="hidden text-subtle sm:inline">· no Git repository</span>
+						{project.managed ? t("Managed folder") : t("Plain folder")}
+						<span className="hidden text-subtle sm:inline">{t("· no Git repository")}</span>
 					</span>
 				) : (
 					<span className="inline-flex items-center gap-1.5 text-subtle">
 						<GitBranch className="size-3.5" />
-						Local Git repository · no GitHub remote linked
+						{t("Local Git repository · no GitHub remote linked")}
 						<span className="hidden sm:inline">
-							· link one from{" "}
-							<Link to="/settings/github" className="text-muted-foreground underline underline-offset-2 hover:text-foreground">
-								Settings → GitHub Accounts
-							</Link>
+							<T
+								text="· link one from <l>Settings → GitHub Accounts</l>"
+								tags={{ l: <Link to="/settings/github" className="text-muted-foreground underline underline-offset-2 hover:text-foreground" /> }}
+							/>
 						</span>
 					</span>
 				)}
 				<span className="tabular">
-					{project.sessionCount} {project.sessionCount === 1 ? "session" : "sessions"}
+					{t("{count, plural, one {# session} other {# sessions}}", { count: project.sessionCount })}
 				</span>
-				<span className="tabular">Last activity {project.lastActivityAt ? relativeTime(project.lastActivityAt) : "—"}</span>
+				<span className="tabular">{t("Last activity {when}", { when: project.lastActivityAt ? relativeTime(project.lastActivityAt) : "—" })}</span>
 			</div>
 
 			<ConfirmDialog
@@ -417,14 +418,18 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 					setConfirmDelete(o);
 					if (!o) setDeleteFiles(false);
 				}}
-				title="Delete project?"
+				title={t("Delete project?")}
 				description={
 					<>
-						<span className="font-medium text-foreground">{project.name}</span> and its {project.sessionCount} {project.sessionCount === 1 ? "session" : "sessions"} will be removed from CL Agent Mesh.{" "}
-						{project.managed ? "The folder CL Agent Mesh created for it is kept unless you tick the box below." : "Files on disk are not touched."}
+						<T
+							text="<b>{name}</b> and its {count, plural, one {# session} other {# sessions}} will be removed from CL Agent Mesh."
+							params={{ name: project.name, count: project.sessionCount }}
+							tags={{ b: <span className="font-medium text-foreground" /> }}
+						/>{" "}
+						{project.managed ? t("The folder CL Agent Mesh created for it is kept unless you tick the box below.") : t("Files on disk are not touched.")}
 					</>
 				}
-				confirmLabel="Delete project"
+				confirmLabel={t("Delete project")}
 				danger
 				loading={del.isPending}
 				onConfirm={() => del.mutate()}
@@ -433,11 +438,11 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 					<label className="flex min-h-[44px] cursor-pointer items-start gap-2.5 rounded-lg bg-danger/10 p-3 text-xs text-foreground">
 						<input type="checkbox" checked={deleteFiles} onChange={(e) => setDeleteFiles(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--danger)]" />
 						<span>
-							Also delete the folder and all its files
+							{t("Also delete the folder and all its files")}
 							<span className="mt-0.5 block font-mono text-2xs text-muted-foreground" title={project.path}>
 								{project.path}
 							</span>
-							<span className="mt-0.5 block text-danger">This cannot be undone.</span>
+							<span className="mt-0.5 block text-danger">{t("This cannot be undone.")}</span>
 						</span>
 					</label>
 				) : null}
@@ -449,10 +454,10 @@ function ProjectHeader({ project, compact }: { project: Project; compact?: boole
 // ───────────────────────────── threads ─────────────────────────────
 
 type ThreadFilter = "all" | "running" | "archived";
-const FILTERS: Array<{ id: ThreadFilter; label: string }> = [
-	{ id: "all", label: "All" },
-	{ id: "running", label: "Running" },
-	{ id: "archived", label: "Archived" },
+const FILTERS: Array<{ id: ThreadFilter; label: Msg }> = [
+	{ id: "all", label: msg("All") },
+	{ id: "running", label: msg("Running") },
+	{ id: "archived", label: msg("Archived") },
 ];
 
 function ThreadsPane({ projectId }: { projectId: string }) {
@@ -470,13 +475,13 @@ function ThreadsPane({ projectId }: { projectId: string }) {
 						<input
 							value={search}
 							onChange={(e) => setSearch(e.target.value)}
-							placeholder="Search threads"
-							aria-label="Search threads"
+							placeholder={t("Search threads")}
+							aria-label={t("Search threads")}
 							className="h-8 w-full rounded-lg bg-surface-2 pl-7 pr-2 text-[13px] outline-none placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1px_var(--accent)] coarse:h-11"
 						/>
 					</div>
 				</div>
-				<div role="group" aria-label="Thread filter" className="flex gap-1">
+				<div role="group" aria-label={t("Thread filter")} className="flex gap-1">
 					{FILTERS.map((f) => (
 						<button
 							key={f.id}
@@ -488,7 +493,7 @@ function ThreadsPane({ projectId }: { projectId: string }) {
 								filter === f.id ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
 							)}
 						>
-							{f.label}
+							{tr(f.label)}
 						</button>
 					))}
 				</div>
@@ -522,11 +527,11 @@ function ThreadsList({ projectId, archived, running, search, onNew }: { projectI
 		return (
 			<EmptyState
 				icon={MessageSquare}
-				title="Could not load threads"
-				description={errorMessage(q.error)}
+				title={t("Could not load threads")}
+				description={errorText(q.error)}
 				action={
 					<Button size="sm" variant="outline" onClick={() => void q.refetch()}>
-						<RefreshCw /> Retry
+						<RefreshCw /> {t("Retry")}
 					</Button>
 				}
 			/>
@@ -539,12 +544,12 @@ function ThreadsList({ projectId, archived, running, search, onNew }: { projectI
 			empty={
 				<EmptyState
 					icon={MessageSquare}
-					title={filtered ? "No matching threads" : archived ? "No archived threads" : "No threads yet"}
-					description={filtered ? "Try a different filter or search." : archived ? "Archived threads show up here." : "Start a session to have an agent work in this project."}
+					title={filtered ? t("No matching threads") : archived ? t("No archived threads") : t("No threads yet")}
+					description={filtered ? t("Try a different filter or search.") : archived ? t("Archived threads show up here.") : t("Start a session to have an agent work in this project.")}
 					action={
 						!archived && !filtered ? (
 							<Button variant="primary" size="sm" onClick={onNew}>
-								<Plus /> New session
+								<Plus /> {t("New session")}
 							</Button>
 						) : undefined
 					}

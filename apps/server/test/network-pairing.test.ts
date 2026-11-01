@@ -148,14 +148,14 @@ describe("pairing", () => {
 		for (let attempt = 1; attempt <= 5; attempt++) {
 			const wrong = await wireHello(a, b, invitation.id, "ZZZZ-ZZZZ");
 			expect(wrong.status).toBe(404);
-			expect(wrong.body).toEqual({ error: { code: "not_found", message: "Not found" } });
+			expect(wrong.body).toEqual({ error: { code: "not_found", message: "Not found", i18n: { key: "Not found" } } });
 			const [listed] = (await api(a).get<Invitation[]>("/network/invitations")).body;
 			expect(listed?.attempts).toBe(attempt);
 			expect(listed?.state).toBe(attempt < 5 ? "pending" : "locked");
 		}
 		// Locked: even the right code is now indistinguishable from an unknown invitation.
 		const correct = await wireHello(a, b, invitation.id, code);
-		expect(correct).toEqual({ status: 404, body: { error: { code: "not_found", message: "Not found" } } });
+		expect(correct).toEqual({ status: 404, body: { error: { code: "not_found", message: "Not found", i18n: { key: "Not found" } } } });
 		expect((await api(a).get<Invitation[]>("/network/invitations")).body[0]?.attempts).toBe(5);
 		expect(await a.ctx.secrets.get(`pairing.codekey.${invitation.id}`)).toBeNull();
 		// Through the UI the joiner just learns that the code was not accepted.
@@ -217,7 +217,7 @@ describe("pairing", () => {
 			expect(viaUi.status).toBe(422);
 		}
 		outcomes.push(await wireHello(a, c, "inv_unknown0000000000000000", "ABCD-EFGH"));
-		for (const outcome of outcomes) expect(outcome).toEqual({ status: 404, body: { error: { code: "not_found", message: "Not found" } } });
+		for (const outcome of outcomes) expect(outcome).toEqual({ status: 404, body: { error: { code: "not_found", message: "Not found", i18n: { key: "Not found" } } } });
 	});
 
 	it("expires a handshake nobody approved in time on both sides and refuses a late approval", async () => {

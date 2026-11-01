@@ -1,6 +1,6 @@
 import { rm } from "node:fs/promises";
 import type { wire } from "@clam/agent-network";
-import type { Checkpoint, SessionEvent } from "@clam/contracts";
+import { type Checkpoint, type SessionEvent, i18nMsg } from "@clam/contracts";
 import { agentSessions, projects } from "@clam/database";
 import { eq } from "drizzle-orm";
 import { ApiError } from "../http/errors.ts";
@@ -143,8 +143,8 @@ export class CheckpointService implements CheckpointApi {
 	/** One checkpoint; the caller holds the per-session lock. */
 	private async take(sharedId: string, options: { note?: string; manual: boolean }): Promise<Checkpoint> {
 		const shared = this.store.get(sharedId);
-		if (shared.state !== "active" || shared.localRole !== "driver") throw new ApiError(409, "not_driver", "Only the driver of a shared session takes checkpoints");
-		if (!shared.localSessionId || !shared.localProjectId) throw ApiError.conflict("The driving session or its project is missing on this node");
+		if (shared.state !== "active" || shared.localRole !== "driver") throw new ApiError(409, "not_driver", i18nMsg("Only the driver of a shared session takes checkpoints"));
+		if (!shared.localSessionId || !shared.localProjectId) throw ApiError.conflict(i18nMsg("The driving session or its project is missing on this node"));
 		const seq = shared.lastCheckpointSeq + 1;
 		const turnsAtStart = shared.meta.turnsSinceCheckpoint ?? 0;
 		const filesMode = shared.vcs === "files";
@@ -183,9 +183,20 @@ export class CheckpointService implements CheckpointApi {
 		this.hub.changed(shared.id, { checkpoints: [row] });
 		// Low noise: a line for a checkpoint someone asked for or that moved the shared branch, not for every automatic one that found nothing new.
 		if (filesMode) {
-			if (options.manual) this.hub.discussion.note(shared.id, `Checkpoint ${seq} taken: ${bundle?.meta ? `folder bundle of ${bundle.meta.fileCount} file(s)` : "no folder bundle"}${snapshot.sha256 ? ", session snapshot saved" : ", no session snapshot"}.`);
+			if (options.manual) {
+				const count = bundle?.meta?.fileCount ?? 0;
+				this.hub.discussion.note(shared.id, bundle?.meta
+					? (snapshot.sha256 ? i18nMsg("Checkpoint {seq} taken: folder bundle of {count} file(s), session snapshot saved.", { seq, count }) : i18nMsg("Checkpoint {seq} taken: folder bundle of {count} file(s), no session snapshot.", { seq, count }))
+					: (snapshot.sha256 ? i18nMsg("Checkpoint {seq} taken: no folder bundle, session snapshot saved.", { seq }) : i18nMsg("Checkpoint {seq} taken: no folder bundle, no session snapshot.", { seq })));
+			}
 		} else if (options.manual || (git.pushed && git.commit !== (shared.meta.lastCheckpointCommit ?? null))) {
-			this.hub.discussion.note(shared.id, `Checkpoint ${seq} taken${git.commit ? `: commit ${git.commit.slice(0, 12)}${git.pushed ? " pushed" : " (not pushed)"}` : ": no new commit"}${snapshot.sha256 ? ", session snapshot saved" : ", no session snapshot"}.`);
+			const saved = Boolean(snapshot.sha256);
+			const commit = git.commit ? git.commit.slice(0, 12) : "";
+			this.hub.discussion.note(shared.id, git.commit
+				? git.pushed
+					? (saved ? i18nMsg("Checkpoint {seq} taken: commit {commit} pushed, session snapshot saved.", { seq, commit }) : i18nMsg("Checkpoint {seq} taken: commit {commit} pushed, no session snapshot.", { seq, commit }))
+					: (saved ? i18nMsg("Checkpoint {seq} taken: commit {commit} (not pushed), session snapshot saved.", { seq, commit }) : i18nMsg("Checkpoint {seq} taken: commit {commit} (not pushed), no session snapshot.", { seq, commit }))
+				: (saved ? i18nMsg("Checkpoint {seq} taken: no new commit, session snapshot saved.", { seq }) : i18nMsg("Checkpoint {seq} taken: no new commit, no session snapshot.", { seq })));
 		}
 		return this.hub.views.checkpoint(row);
 	}
@@ -326,13 +337,13 @@ export class CheckpointService implements CheckpointApi {
 	receiveNotice(peerId: string, sharedId: string, notice: wire.SharedCheckpointNotice): void {
 		const shared = this.store.find(sharedId);
 		if (!shared || shared.state !== "active") throw ApiError.notFound("Shared session");
-		if (notice.epoch < shared.epoch) throw new ApiError(409, "stale_epoch", `The checkpoint carries epoch ${notice.epoch}; the shared session is at epoch ${shared.epoch}`, { currentEpoch: shared.epoch, driverNodeId: shared.driverNodeId });
+		if (notice.epoch < shared.epoch) throw new ApiError(409, "stale_epoch", i18nMsg("The checkpoint carries epoch {epoch}; the shared session is at epoch {current}", { epoch: notice.epoch, current: shared.epoch }), { currentEpoch: shared.epoch, driverNodeId: shared.driverNodeId });
 		if (notice.epoch > shared.epoch) {
 			void this.hub.epochs.reconcilePeer(peerId);
-			throw new ApiError(409, "epoch_unknown", `The checkpoint carries epoch ${notice.epoch}; this node is still at epoch ${shared.epoch} and is asking who drives now`, { currentEpoch: shared.epoch });
+			throw new ApiError(409, "epoch_unknown", i18nMsg("The checkpoint carries epoch {epoch}; this node is still at epoch {current} and is asking who drives now", { epoch: notice.epoch, current: shared.epoch }), { currentEpoch: shared.epoch });
 		}
-		if (shared.localRole === "driver") throw ApiError.conflict("This node drives the shared session; it does not take checkpoints from another driver");
-		if (peerId !== shared.driverNodeId) throw new ApiError(403, "forbidden", "Only the driver of the shared session may announce checkpoints");
+		if (shared.localRole === "driver") throw ApiError.conflict(i18nMsg("This node drives the shared session; it does not take checkpoints from another driver"));
+		if (peerId !== shared.driverNodeId) throw new ApiError(403, "forbidden", i18nMsg("Only the driver of the shared session may announce checkpoints"));
 		const { row, inserted } = this.store.insertCheckpoint({
 			sharedSessionId: sharedId,
 			seq: notice.seq,
@@ -479,7 +490,7 @@ export class CheckpointService implements CheckpointApi {
 		const shared = this.store.find(sharedId);
 		if (!shared || shared.localRole !== "driver") throw ApiError.notFound("Shared session");
 		const participant = this.store.participant(sharedId, peerId);
-		if (!participant || participant.state !== "active") throw new ApiError(403, "forbidden", "Only participants of the shared session may acknowledge snapshots");
+		if (!participant || participant.state !== "active") throw new ApiError(403, "forbidden", i18nMsg("Only participants of the shared session may acknowledge snapshots"));
 		const row = this.store.checkpoint(sharedId, seq);
 		if (!row || (ack.sha256 !== undefined && row.snapshotSha256 !== ack.sha256) || (ack.files !== undefined && row.files?.sha256 !== ack.files.sha256)) throw ApiError.notFound("Checkpoint");
 		if (!row.deliveredTo.includes(peerId)) {
@@ -511,7 +522,7 @@ export class CheckpointService implements CheckpointApi {
 		};
 		const timer = setTimeout(() => {
 			this.waiters.delete(waiter);
-			reject(new ApiError(409, "snapshot_not_delivered", "The other node did not confirm holding the snapshot in time"));
+			reject(new ApiError(409, "snapshot_not_delivered", i18nMsg("The other node did not confirm holding the snapshot in time")));
 		}, timeoutMs);
 		this.waiters.add(waiter);
 		return promise;

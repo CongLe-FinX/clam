@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { ulid, wire } from "@clam/agent-network";
 import type { Capability, Peer, Project, TaskStatus } from "@clam/contracts";
+import { plainMsg } from "@clam/contracts";
 import { agents, projects } from "@clam/database";
 import { makeFencingToken } from "@clam/handoff-engine";
 import { eq } from "drizzle-orm";
@@ -470,8 +471,8 @@ describe("wire: a task that is moving", () => {
 		await grant(env.x, yId(), ["agents.read", "events.read", "tasks.send", "tasks.receive", "tasks.cancel"]);
 		const task = seed(env.x, { peerId: yId(), status: "handed_off", epoch: 1, highestSeenEpoch: 2, fenced: true, lastEventSeq: 2 });
 		tasksX().update(task.id, { lastEventSeq: 0 });
-		tasksX().appendEvent(task.id, { type: "note", summary: "sealed" });
-		tasksX().appendEvent(task.id, { type: "status", summary: "Handed over", payload: { from: "running", to: "running" } });
+		tasksX().appendEvent(task.id, { type: "note", summary: plainMsg("sealed") });
+		tasksX().appendEvent(task.id, { type: "status", summary: plainMsg("Handed over"), payload: { from: "running", to: "running" } });
 
 		const message = await signedRequest(env.y, env.x.netUrl, { method: "POST", path: `/tasks/${task.id}/messages`, body: messageBody(task.id, 1) });
 		expect(message.status).toBe(503);

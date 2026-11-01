@@ -3,9 +3,10 @@ import { Link } from "@tanstack/react-router";
 import { ArrowLeft, ArrowRightLeft, ChevronRight, FolderOpen, MessagesSquare, PanelBottom, PanelLeft, PanelRight, Square, Terminal, UserPlus, WifiOff } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
 import { toast } from "sonner";
-import { runtimeDot, SessionKindBadge } from "@/components/session-status";
+import { RUNTIME_STATE_LABEL, runtimeDot, SessionKindBadge } from "@/components/session-status";
 import { driverOf, NODE_STATUS_LABEL, nodeDot } from "@/features/shared/format";
-import { errorMessage } from "@/lib/api";
+import { t, tr } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { useWsStatus } from "@/lib/ws";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -46,7 +47,7 @@ function InlineTitle({ session, className }: { session: AgentSession; className?
 				autoFocus
 				value={draft}
 				maxLength={120}
-				aria-label="Session title"
+				aria-label={t("Session title")}
 				onFocus={(e) => e.currentTarget.select()}
 				onChange={(e) => setDraft(e.target.value)}
 				onBlur={commit}
@@ -62,7 +63,7 @@ function InlineTitle({ session, className }: { session: AgentSession; className?
 		);
 	}
 	return (
-		<Tip label="Rename thread">
+		<Tip label={t("Rename thread")}>
 			<button
 				type="button"
 				onClick={() => {
@@ -72,7 +73,7 @@ function InlineTitle({ session, className }: { session: AgentSession; className?
 				}}
 				className={cn("min-w-0 truncate rounded-md px-1.5 py-0.5 text-left text-[13px] font-medium outline-none transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 coarse:py-2", className)}
 			>
-				{session.title || "Untitled session"}
+				{session.title || t("Untitled session")}
 			</button>
 		</Tip>
 	);
@@ -121,7 +122,7 @@ export function SessionHeader({
 	const aborting = useStreamMeta(stream, (m) => m.aborting);
 	const approvals = useStreamMeta(stream, (m) => m.uiRequests.length);
 
-	const stateLabel = runtime ? runtime.state : liveStatus === "error" ? "unavailable" : "starting";
+	const stateLabel = runtime ? tr(RUNTIME_STATE_LABEL[runtime.state]) : liveStatus === "error" ? t("Unavailable") : t("Starting");
 	const dot = runtime ? runtimeDot(runtime.state) : liveStatus === "error" ? "crashed" : "starting";
 	const driver = shared ? driverOf(shared) : undefined;
 	const teamUnread = shared?.unreadMessages ?? 0;
@@ -131,8 +132,8 @@ export function SessionHeader({
 
 	return (
 		<header className="flex h-[calc(3rem+env(safe-area-inset-top))] shrink-0 items-center gap-1.5 border-b bg-surface-1/80 px-2 pt-safe backdrop-blur coarse:h-[calc(3.5rem+env(safe-area-inset-top))] sm:px-3">
-			<Tip label={isChat ? "Back to chats" : "Back to project"}>
-				<Button asChild variant="ghost" size="icon" aria-label={isChat ? "Back to chats" : "Back to project"}>
+			<Tip label={isChat ? t("Back to chats") : t("Back to project")}>
+				<Button asChild variant="ghost" size="icon" aria-label={isChat ? t("Back to chats") : t("Back to project")}>
 					{isChat ? (
 						<Link to="/chats">
 							<ArrowLeft />
@@ -145,7 +146,7 @@ export function SessionHeader({
 				</Button>
 			</Tip>
 			{!compact ? (
-				<PanelToggle label="Threads and files" shortcut="[" pressed={panels.showLeft} onClick={panels.onToggleLeft}>
+				<PanelToggle label={t("Threads and files")} shortcut="[" pressed={panels.showLeft} onClick={panels.onToggleLeft}>
 					<PanelLeft />
 				</PanelToggle>
 			) : null}
@@ -156,20 +157,20 @@ export function SessionHeader({
 					<span className="flex items-center gap-1.5 truncate px-1.5 text-2xs text-subtle -mt-0.5">
 						{readOnly ? (
 							<>
-								{driver && session.kind === "mirror" ? <StatusDot status={nodeDot(driver.nodeStatus)} label={NODE_STATUS_LABEL[driver.nodeStatus]} className="size-1.5 [&>span]:size-1.5" /> : null}
-								<span>{session.movedTo ? `Moved to ${session.movedTo.nodeName}` : `Live view${driver ? ` · ${driver.nodeName}` : ""}`}</span>
+								{driver && session.kind === "mirror" ? <StatusDot status={nodeDot(driver.nodeStatus)} label={tr(NODE_STATUS_LABEL[driver.nodeStatus])} className="size-1.5 [&>span]:size-1.5" /> : null}
+								<span>{session.movedTo ? t("Moved to {name}", { name: session.movedTo.nodeName }) : driver ? t("Live view · {name}", { name: driver.nodeName }) : t("Live view")}</span>
 							</>
 						) : (
 							<>
 								<StatusDot status={dot} label={stateLabel} className="size-1.5 [&>span]:size-1.5" />
-								<span className="capitalize">{stateLabel}</span>
+								<span className="first-letter:uppercase">{stateLabel}</span>
 								{project && !isChat ? <span className="truncate">· {project.name}</span> : null}
 							</>
 						)}
 					</span>
 				</div>
 			) : (
-				<nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-0.5 text-[13px] text-muted-foreground">
+				<nav aria-label={t("Breadcrumb")} className="flex min-w-0 flex-1 items-center gap-0.5 text-[13px] text-muted-foreground">
 					{workspace && !isChat ? (
 						<>
 							<Link to="/workspaces/$workspaceId" params={{ workspaceId: workspace.id }} className="hidden max-w-[10rem] truncate rounded-md px-1.5 py-0.5 outline-none transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:bg-surface-2 lg:block">
@@ -191,42 +192,42 @@ export function SessionHeader({
 			)}
 
 			{wsStatus !== "open" ? (
-				<Tip label={wsStatus === "connecting" ? "Connecting to the live event stream…" : "Live updates are disconnected. Reconnecting…"}>
+				<Tip label={wsStatus === "connecting" ? t("Connecting to the live event stream…") : t("Live updates are disconnected. Reconnecting…")}>
 					<span role="status" className="flex h-6 shrink-0 items-center gap-1 rounded-md bg-warning/14 px-1.5 text-2xs font-medium text-warning">
 						<WifiOff className="size-3" aria-hidden />
-						<span className="hidden sm:inline">{wsStatus === "connecting" ? "Connecting" : "Offline"}</span>
+						<span className="hidden sm:inline">{wsStatus === "connecting" ? t("Connecting") : t("Offline")}</span>
 					</span>
 				</Tip>
 			) : null}
 
 			{!compact ? (
 				readOnly ? (
-					<span className="hidden shrink-0 items-center gap-1.5 px-1 text-xs text-muted-foreground md:flex" role="status" aria-label={driver ? `Driver ${NODE_STATUS_LABEL[driver.nodeStatus]}` : "Read-only"}>
-						{driver && session.kind === "mirror" ? <StatusDot status={nodeDot(driver.nodeStatus)} label={NODE_STATUS_LABEL[driver.nodeStatus]} /> : null}
+					<span className="hidden shrink-0 items-center gap-1.5 px-1 text-xs text-muted-foreground md:flex" role="status" aria-label={driver ? t("Driver {status}", { status: tr(NODE_STATUS_LABEL[driver.nodeStatus]) }) : t("Read-only")}>
+						{driver && session.kind === "mirror" ? <StatusDot status={nodeDot(driver.nodeStatus)} label={tr(NODE_STATUS_LABEL[driver.nodeStatus])} /> : null}
 						<SessionKindBadge session={session} />
 					</span>
 				) : (
-					<span className="hidden shrink-0 items-center gap-1.5 px-1 text-xs text-muted-foreground md:flex" role="status" aria-label={`Runtime ${stateLabel}`}>
+					<span className="hidden shrink-0 items-center gap-1.5 px-1 text-xs text-muted-foreground md:flex" role="status" aria-label={t("Runtime {state}", { state: stateLabel })}>
 						<StatusDot status={dot} label={stateLabel} />
-						<span className="hidden capitalize lg:inline">{stateLabel}</span>
+						<span className="hidden first-letter:uppercase lg:inline">{stateLabel}</span>
 					</span>
 				)
 			) : null}
 			{!compact && !readOnly ? <ModelPicker stream={stream} className="hidden lg:inline-flex lg:max-w-[14rem]" /> : null}
 			{!compact && canAdd ? (
-				<Button size="sm" variant="outline" onClick={onAddAgent} className="hidden shrink-0 md:inline-flex" aria-label="Add agent" title="Add agent">
-					<UserPlus /> <span className="hidden xl:inline">Add agent</span>
+				<Button size="sm" variant="outline" onClick={onAddAgent} className="hidden shrink-0 md:inline-flex" aria-label={t("Add agent")} title={t("Add agent")}>
+					<UserPlus /> <span className="hidden xl:inline">{t("Add agent")}</span>
 				</Button>
 			) : null}
 			{!compact && canAdd ? (
-				<Button size="sm" variant="ghost" onClick={onHandover} className="hidden shrink-0 md:inline-flex" aria-label="Hand over" title="Hand over…">
-					<ArrowRightLeft /> <span className="hidden xl:inline">Hand over…</span>
+				<Button size="sm" variant="ghost" onClick={onHandover} className="hidden shrink-0 md:inline-flex" aria-label={t("Hand over")} title={t("Hand over…")}>
+					<ArrowRightLeft /> <span className="hidden xl:inline">{t("Hand over…")}</span>
 				</Button>
 			) : null}
 
 			{!compact && !readOnly ? (
-				<Tip label="Open terminal here">
-					<Button asChild variant="ghost" size="icon" aria-label="Open terminal here" className="hidden shrink-0 md:inline-flex">
+				<Tip label={t("Open terminal here")}>
+					<Button asChild variant="ghost" size="icon" aria-label={t("Open terminal here")} className="hidden shrink-0 md:inline-flex">
 						<Link to="/terminal" search={{ project: session.projectId }}>
 							<Terminal />
 						</Link>
@@ -234,17 +235,17 @@ export function SessionHeader({
 				</Tip>
 			) : null}
 
-			{approvals > 0 && !compact ? <span className="tabular grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-warning px-1 text-2xs font-semibold text-background" title="Approvals waiting">{approvals}</span> : null}
+			{approvals > 0 && !compact ? <span className="tabular grid h-5 min-w-5 shrink-0 place-items-center rounded-full bg-warning px-1 text-2xs font-semibold text-background" title={t("Approvals waiting")}>{approvals}</span> : null}
 
 			{busy && !readOnly && !compact ? (
-				<Tip label={aborting ? "Stopping…" : "Stop the agent"} shortcut="Esc">
+				<Tip label={aborting ? t("Stopping…") : t("Stop the agent")} shortcut="Esc">
 					<Button
 						variant="outline"
 						size="icon"
-						aria-label="Stop the agent"
+						aria-label={t("Stop the agent")}
 						disabled={aborting}
 						className="text-danger"
-						onClick={() => stream.abort().catch((e) => toast.error(`Could not stop the agent: ${errorMessage(e)}`))}
+						onClick={() => stream.abort().catch((e) => toast.error(t("Could not stop the agent: {error}", { error: errorText(e) })))}
 					>
 						<Square className="fill-current" />
 					</Button>
@@ -252,7 +253,7 @@ export function SessionHeader({
 			) : null}
 
 			{compact ? (
-				<PanelToggle label={isChat ? "Files" : "Threads"} pressed={panels.showLeft} onClick={panels.onToggleLeft}>
+				<PanelToggle label={isChat ? t("Files") : t("Threads")} pressed={panels.showLeft} onClick={panels.onToggleLeft}>
 					{isChat ? <FolderOpen /> : <MessagesSquare />}
 				</PanelToggle>
 			) : null}
@@ -272,10 +273,10 @@ export function SessionHeader({
 			) : null}
 			{compact ? null : (
 				<>
-					<PanelToggle label="Runtime log" shortcut="\\" pressed={panels.showLog} onClick={panels.onToggleLog}>
+					<PanelToggle label={t("Runtime log")} shortcut="\\" pressed={panels.showLog} onClick={panels.onToggleLog}>
 						<PanelBottom />
 					</PanelToggle>
-					<PanelToggle label="Context" shortcut="]" pressed={panels.showRight} onClick={panels.onToggleRight}>
+					<PanelToggle label={t("Context")} shortcut="]" pressed={panels.showRight} onClick={panels.onToggleRight}>
 						<PanelRight />
 					</PanelToggle>
 				</>

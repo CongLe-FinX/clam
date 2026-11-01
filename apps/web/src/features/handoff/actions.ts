@@ -2,7 +2,8 @@ import { type Handoff, routes } from "@clam/contracts";
 import { type UseMutationResult, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { api, errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { api, errorText } from "@/lib/api";
 import { hk, putHandoff } from "./api.ts";
 
 /** Body of POST /handoffs as the UI sends it (docs: CreateTaskHandoffBody). */
@@ -36,37 +37,37 @@ export function useHandoffActions(id: string): HandoffActions {
 		void qc.invalidateQueries({ queryKey: hk.detail(id) });
 		toast.success(message);
 	};
-	const fail = (title: string) => (e: unknown) => toast.error(title, { description: errorMessage(e) });
+	const fail = (title: string) => (e: unknown) => toast.error(title, { description: errorText(e) });
 
 	return {
 		decide: useMutation({
 			mutationFn: (body: DecideBody) => api.post<Handoff>(routes.handoffDecide(id), body),
-			onSuccess: (h, v) => done(v.decision === "accept" ? "Handoff accepted. Restoring the work…" : "Handoff rejected")(h),
-			onError: fail("Could not answer the handoff"),
+			onSuccess: (h, v) => done(v.decision === "accept" ? t("Handoff accepted. Restoring the work…") : t("Handoff rejected"))(h),
+			onError: fail(t("Could not answer the handoff")),
 		}),
 		setup: useMutation({
 			mutationFn: (body: { approve: string[]; deny: string[] }) => api.post<Handoff>(routes.handoffSetup(id), body),
-			onSuccess: (h, v) => done(v.deny.length > 0 && v.approve.length === 0 ? "Setup denied" : "Setup approved")(h),
-			onError: fail("Could not save the setup decision"),
+			onSuccess: (h, v) => done(v.deny.length > 0 && v.approve.length === 0 ? t("Setup denied") : t("Setup approved"))(h),
+			onError: fail(t("Could not save the setup decision")),
 		}),
 		retry: useMutation({
 			mutationFn: () => api.post<Handoff>(routes.handoffRetry(id)),
-			onSuccess: done("Retrying"),
-			onError: fail("Could not retry"),
+			onSuccess: done(t("Retrying")),
+			onError: fail(t("Could not retry")),
 		}),
 		extend: useMutation({
 			mutationFn: (minutes: number) => api.post<Handoff>(routes.handoffExtend(id), { minutes }),
-			onSuccess: (h, minutes) => done(`Deadline extended by ${minutes} minutes`)(h),
-			onError: fail("Could not extend the deadline"),
+			onSuccess: (h, minutes) => done(t("{count, plural, one {Deadline extended by # minute} other {Deadline extended by # minutes}}", { count: minutes }))(h),
+			onError: fail(t("Could not extend the deadline")),
 		}),
 		reclaim: useMutation({
 			mutationFn: (override: boolean) => api.post<Handoff>(routes.handoffReclaim(id), { override }),
-			onSuccess: done("Task reclaimed on this machine"),
+			onSuccess: done(t("Task reclaimed on this machine")),
 		}),
 		cancel: useMutation({
 			mutationFn: () => api.delete<Handoff>(routes.handoff(id)),
-			onSuccess: done("Handoff cancelled"),
-			onError: fail("Could not cancel"),
+			onSuccess: done(t("Handoff cancelled")),
+			onError: fail(t("Could not cancel")),
 		}),
 	};
 }
@@ -80,7 +81,7 @@ export function useCreateHandoff() {
 			putHandoff(qc, h);
 			void qc.invalidateQueries({ queryKey: hk.all });
 			void qc.invalidateQueries({ queryKey: ["local", "tasks"] });
-			toast.success(`Handing off “${h.title}” to ${h.target.nodeName}`);
+			toast.success(t("Handing off “{title}” to {name}", { title: h.title, name: h.target.nodeName }));
 			void navigate({ to: "/handoffs/$handoffId", params: { handoffId: h.id } });
 		},
 	});

@@ -5,6 +5,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { errorMessage } from "@/lib/api";
 import { useProjects, useWorkspaces } from "@/lib/queries";
+import { msg, t, tr } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { ContextSearch } from "@/app/router.tsx";
 import { Button } from "@/ui/button";
@@ -43,7 +44,7 @@ function Snippet({ text }: { text: string }) {
 
 function ListSkeleton() {
 	return (
-		<div aria-busy aria-label="Loading contexts" className="flex flex-col gap-2 px-3 py-2">
+		<div aria-busy aria-label={t("Loading contexts")} className="flex flex-col gap-2 px-3 py-2">
 			{[0, 1, 2, 3, 4, 5].map((i) => (
 				<Skeleton key={i} className="h-[72px] rounded-lg" />
 			))}
@@ -155,7 +156,7 @@ export default function ContextPage() {
 
 	const newButton = (
 		<Button variant="primary" onClick={() => go({ new: "1" })}>
-			<Plus /> New
+			<Plus /> {t("New")}
 		</Button>
 	);
 
@@ -164,11 +165,11 @@ export default function ContextPage() {
 	) : source.error ? (
 		<EmptyState
 			icon={BookMarked}
-			title={searching ? "Search failed" : "Could not load contexts"}
+			title={searching ? t("Search failed") : t("Could not load contexts")}
 			description={errorMessage(source.error)}
 			action={
 				<Button size="sm" variant="outline" onClick={() => void source.refetch()}>
-					<RefreshCw /> Retry
+					<RefreshCw /> {t("Retry")}
 				</Button>
 			}
 		/>
@@ -176,8 +177,8 @@ export default function ContextPage() {
 		searching ? (
 			<EmptyState
 				icon={SearchX}
-				title={`No results for “${q}”`}
-				description={filtering ? "Try another search or clear the filters." : "Search covers titles and content of every context you can see."}
+				title={t("No results for “{q}”", { q })}
+				description={filtering ? t("Try another search or clear the filters.") : t("Search covers titles and content of every context you can see.")}
 				action={
 					filtering ? (
 						<Button
@@ -188,7 +189,7 @@ export default function ContextPage() {
 								go({ type: undefined, project: undefined }, true);
 							}}
 						>
-							Clear filters
+							{t("Clear filters")}
 						</Button>
 					) : undefined
 				}
@@ -196,14 +197,14 @@ export default function ContextPage() {
 		) : (list.data ?? []).length === 0 ? (
 			<EmptyState
 				icon={BookMarked}
-				title="No shared context yet"
-				description="Save memories, plans and decisions here so you and your agents don't lose them. Contexts are private to this machine unless you make them shareable."
+				title={t("No shared context yet")}
+				description={t("Save memories, plans and decisions here so you and your agents don't lose them. Contexts are private to this machine unless you make them shareable.")}
 				action={newButton}
 			/>
 		) : (
 			<EmptyState
 				icon={SearchX}
-				title="Nothing matches these filters"
+				title={t("Nothing matches these filters")}
 				action={
 					<Button
 						size="sm"
@@ -213,20 +214,20 @@ export default function ContextPage() {
 							go({ type: undefined, project: undefined }, true);
 						}}
 					>
-						Clear filters
+						{t("Clear filters")}
 					</Button>
 				}
 			/>
 		)
 	) : (
-		<ul aria-label="Contexts" className="flex flex-col gap-0.5 px-2 py-2">
+		<ul aria-label={t("Contexts")} className="flex flex-col gap-0.5 px-2 py-2">
 			{visible.map(({ context: c, snippet }) => (
 				<li key={c.id}>
 					<ContextRow
 						context={c}
 						nodeNames={nodeNames}
 						selected={c.id === selectedId}
-						projectName={c.projectId ? (projectNames.get(c.projectId) ?? "Project") : null}
+						projectName={c.projectId ? (projectNames.get(c.projectId) ?? t("Project")) : null}
 						snippet={snippet ? <Snippet text={snippet} /> : undefined}
 						onSelect={() => go({ id: c.id })}
 					/>
@@ -241,17 +242,17 @@ export default function ContextPage() {
 				<PageHeader
 					eyebrow={
 						<Link to="/workspaces/$workspaceId" params={{ workspaceId }} className="rounded-sm outline-none hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)]">
-							{workspace?.name ?? "Workspace"}
+							{workspace?.name ?? t("Workspace")}
 						</Link>
 					}
-					title="Shared Context"
-					description={<span className="hidden sm:inline">Memories, plans and decisions your team and agents can rely on. Private by default; shareable ones sync to every member machine.</span>}
+					title={t("Shared Context")}
+					description={<span className="hidden sm:inline">{t("Memories, plans and decisions your team and agents can rely on. Private by default; shareable ones sync to every member machine.")}</span>}
 					actions={newButton}
 				/>
 			</div>
 
 			<div className="flex min-h-0 flex-1 border-t">
-				<aside aria-label="Context list" className={cn("flex min-h-0 w-full flex-col lg:w-[360px] lg:shrink-0 lg:border-r", selectedId && "max-lg:hidden")}>
+				<aside aria-label={t("Context list")} className={cn("flex min-h-0 w-full flex-col lg:w-[360px] lg:shrink-0 lg:border-r", selectedId && "max-lg:hidden")}>
 					<div className="flex shrink-0 flex-col gap-2 px-3 pb-2 pt-3">
 						<div className="relative">
 							<Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle" aria-hidden />
@@ -260,14 +261,14 @@ export default function ContextPage() {
 								type="search"
 								value={qInput}
 								onChange={(e) => setQInput(e.target.value)}
-								placeholder="Search memories, plans, decisions…"
-								aria-label="Search contexts"
+								placeholder={t("Search memories, plans, decisions…")}
+								aria-label={t("Search contexts")}
 								className="pl-8 pr-9 [&::-webkit-search-cancel-button]:hidden"
 							/>
 							{qInput ? (
 								<button
 									type="button"
-									aria-label="Clear search"
+									aria-label={t("Clear search")}
 									onClick={() => {
 										setQInput("");
 										lastPushed.current = "";
@@ -281,12 +282,12 @@ export default function ContextPage() {
 							) : null}
 						</div>
 						<Select value={projectFilter ?? "all"} onValueChange={(v) => go({ project: v === "all" ? undefined : v }, true)}>
-							<SelectTrigger aria-label="Filter by scope">
+							<SelectTrigger aria-label={t("Filter by scope")}>
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="all">All scopes</SelectItem>
-								<SelectItem value="workspace">Workspace-wide</SelectItem>
+								<SelectItem value="all">{t("All scopes")}</SelectItem>
+								<SelectItem value="workspace">{t("Workspace-wide")}</SelectItem>
 								{[...projectNames].map(([id, name]) => (
 									<SelectItem key={id} value={id}>
 										{name}
@@ -294,8 +295,8 @@ export default function ContextPage() {
 								))}
 							</SelectContent>
 						</Select>
-						<div role="group" aria-label="Filter by type" className="flex flex-wrap gap-1.5">
-							{[{ id: undefined, label: "All", total: scoped.length }, ...CONTEXT_TYPES.map((t) => ({ id: t.id, label: t.plural, total: counts.get(t.id) ?? 0 }))].map((t) => {
+						<div role="group" aria-label={t("Filter by type")} className="flex flex-wrap gap-1.5">
+							{[{ id: undefined, label: msg("All"), total: scoped.length }, ...CONTEXT_TYPES.map((t) => ({ id: t.id, label: t.plural, total: counts.get(t.id) ?? 0 }))].map((t) => {
 								const active = typeFilter === t.id;
 								return (
 									<button
@@ -308,7 +309,7 @@ export default function ContextPage() {
 											active ? "bg-accent-soft text-accent" : "bg-surface-2 text-muted-foreground hover:text-foreground",
 										)}
 									>
-										{t.label}
+										{tr(t.label)}
 										<span className="tabular font-mono text-2xs">{t.total}</span>
 									</button>
 								);
@@ -326,16 +327,16 @@ export default function ContextPage() {
 							>
 								<TriangleAlert className="size-3.5 shrink-0" aria-hidden />
 								<span className="flex-1">
-									{conflictCount} {conflictCount === 1 ? "context is" : "contexts are"} in conflict
+									{t("{count, plural, one {# context is in conflict} other {# contexts are in conflict}}", { count: conflictCount })}
 								</span>
-								<span className="shrink-0 underline-offset-2">{conflictsOnly ? "Show all" : "Review"}</span>
+								<span className="shrink-0 underline-offset-2">{conflictsOnly ? t("Show all") : t("Review")}</span>
 							</button>
 						) : null}
 					</div>
 					<div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain">{listBody}</div>
 				</aside>
 
-				<section aria-label="Context detail" className={cn("min-h-0 min-w-0 flex-1 flex-col", selectedId ? "flex" : "hidden lg:flex")}>
+				<section aria-label={t("Context detail")} className={cn("min-h-0 min-w-0 flex-1 flex-col", selectedId ? "flex" : "hidden lg:flex")}>
 					{selectedId ? (
 						<ContextDetail
 							key={selectedId}
@@ -350,8 +351,8 @@ export default function ContextPage() {
 						<EmptyState
 							className="m-auto"
 							icon={BookMarked}
-							title="Select a context"
-							description="Pick one from the list to read it, edit it, see its history or resolve a sync conflict — or add a new one."
+							title={t("Select a context")}
+							description={t("Pick one from the list to read it, edit it, see its history or resolve a sync conflict — or add a new one.")}
 							action={newButton}
 						/>
 					)}
@@ -373,9 +374,9 @@ export default function ContextPage() {
 				onOpenChange={(o) => {
 					if (!o) blocker.reset?.();
 				}}
-				title="Discard your unsaved edits?"
-				description="You are in the middle of editing a context. Leaving now loses your changes."
-				confirmLabel="Discard and leave"
+				title={t("Discard your unsaved edits?")}
+				description={t("You are in the middle of editing a context. Leaving now loses your changes.")}
+				confirmLabel={t("Discard and leave")}
 				danger
 				onConfirm={() => {
 					dirtyRef.current = false;

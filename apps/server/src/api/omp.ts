@@ -13,6 +13,7 @@ import {
 	routes,
 	SetModelRoleBody,
 	StartLoginBody,
+	i18nMsg,
 } from "@clam/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
@@ -99,16 +100,16 @@ export default async function ompRoutes(app: FastifyInstance, { ctx }: RoutePlug
 
 	app.put(routes.ompModelRoles, async (req): Promise<ModelRoles> => {
 		const { role, selector } = SetModelRoleBody.parse(req.body);
-		if (!isValidModelRole(role)) throw ApiError.badRequest(`Invalid model role name: ${JSON.stringify(role)}`);
+		if (!isValidModelRole(role)) throw ApiError.badRequest(i18nMsg("Invalid model role name: {role}", { role: JSON.stringify(role) }));
 		if (selector !== null && !isValidModelSelector(selector)) {
-			throw ApiError.badRequest(`Invalid model selector: ${JSON.stringify(selector)} (expected provider/id[:thinking])`);
+			throw ApiError.badRequest(i18nMsg("Invalid model selector: {selector} (expected provider/id[:thinking])", { selector: JSON.stringify(selector) }));
 		}
 		return ctx.ompCli.setModelRole(role, selector);
 	});
 
 	app.post(routes.ompModelTest, async (req): Promise<ModelTestResult> => {
 		const { selector } = ModelTestBody.parse(req.body);
-		if (!isValidModelSelector(selector)) throw ApiError.badRequest(`Invalid model selector: ${JSON.stringify(selector)}`);
+		if (!isValidModelSelector(selector)) throw ApiError.badRequest(i18nMsg("Invalid model selector: {selector}", { selector: JSON.stringify(selector) }));
 		return ctx.ompCli.testModel(selector);
 	});
 }

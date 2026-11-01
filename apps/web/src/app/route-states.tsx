@@ -1,6 +1,7 @@
 import { Link, type ErrorComponentProps } from "@tanstack/react-router";
 import { Compass, TriangleAlert } from "lucide-react";
 import { errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 
@@ -9,11 +10,11 @@ export function NotFound() {
 		<EmptyState
 			className="h-full"
 			icon={Compass}
-			title="Page not found"
-			description="This route does not exist in CL Agent Mesh."
+			title={t("Page not found")}
+			description={t("This route does not exist in CL Agent Mesh.")}
 			action={
 				<Button asChild variant="outline">
-					<Link to="/">Go to Overview</Link>
+					<Link to="/">{t("Go to Overview")}</Link>
 				</Button>
 			}
 		/>
@@ -25,11 +26,11 @@ export function RouteError({ error, reset }: ErrorComponentProps) {
 		<EmptyState
 			className="h-full"
 			icon={TriangleAlert}
-			title="This screen failed to load"
+			title={t("This screen failed to load")}
 			description={errorMessage(error)}
 			action={
 				<Button variant="outline" onClick={reset}>
-					Try again
+					{t("Try again")}
 				</Button>
 			}
 		/>

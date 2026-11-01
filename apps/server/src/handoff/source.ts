@@ -2,7 +2,7 @@ import { readFile, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { NetworkError, ulid, wire } from "@clam/agent-network";
 import type { RuntimeSession } from "@clam/agent-runtime";
-import { type CreateTaskHandoffBody, HandoffFailureCode, type HandoffState } from "@clam/contracts";
+import { type CreateTaskHandoffBody, HandoffFailureCode, type HandoffState, type I18nMessage, i18nMsg, plainMsg } from "@clam/contracts";
 import { peerAgents, projects, workspaceMembers } from "@clam/database";
 import { scanForSecrets } from "@clam/git-engine";
 import { computeDeadlines, detectEnvironment, extendDeadline, type ManifestArtifactRef, restoreDeadlineFrom, sealManifest, verifyFencingToken } from "@clam/handoff-engine";
@@ -128,8 +128,8 @@ export class SourceFlow implements SourceApi {
 				correlationId: ulid(),
 				meta: { setupCommands: body.setupCommands, checkCommand: body.checkCommand ?? null, stopRunning: body.stopRunning },
 			});
-			this.store.appendEvent(id, { state: "draft", summary: `Handoff of "${task.title}" to ${peer.name} created` });
-			row = this.hub.advance(id, "preparing", { summary: `Preparing the handoff package for ${peer.name}` });
+			this.store.appendEvent(id, { state: "draft", summary: i18nMsg("Handoff of \"{title}\" to {peer} created", { title: task.title, peer: peer.name }) });
+			row = this.hub.advance(id, "preparing", { summary: i18nMsg("Preparing the handoff package for {peer}", { peer: peer.name }) });
 		} catch (error) {
 			if (!(error instanceof FaultInjected)) this.hub.fence.unfreeze(task.id, id);
 			throw error;
@@ -140,16 +140,16 @@ export class SourceFlow implements SourceApi {
 
 	private assertHandable(task: TaskRow): void {
 		if (task.direction !== "incoming" || task.executorNodeId !== this.ctx.identity.nodeId) {
-			throw new ApiError(409, "not_executor", "Only the node that executes a task can hand it off");
+			throw new ApiError(409, "not_executor", i18nMsg("Only the node that executes a task can hand it off"));
 		}
 		if (task.status !== "running" && task.status !== "blocked") {
-			throw new ApiError(409, "task_not_active", `The task is ${task.status}; only a running or blocked task can be handed off`, { status: task.status });
+			throw new ApiError(409, "task_not_active", i18nMsg("The task is {status}; only a running or blocked task can be handed off", { status: task.status }), { status: task.status });
 		}
-		if (this.hub.fence.isFenced(task.id)) throw new ApiError(409, "task_fenced", "This node no longer owns the task");
+		if (this.hub.fence.isFenced(task.id)) throw new ApiError(409, "task_fenced", i18nMsg("This node no longer owns the task"));
 		// A handoff whose preparation failed holds nothing: the user may start another one (or retry that one).
 		const live = this.store.bySubject(task.id, "source").find((r) => !isTerminalState(r) && r.state !== "prepare_failed");
 		if (live || this.hub.fence.isFrozen(task.id)) {
-			throw new ApiError(409, "competing_handoff", "Another handoff of this task is already in progress", { holderId: live?.id ?? null });
+			throw new ApiError(409, "competing_handoff", i18nMsg("Another handoff of this task is already in progress"), { holderId: live?.id ?? null });
 		}
 	}
 
@@ -165,7 +165,7 @@ export class SourceFlow implements SourceApi {
 		const missing = [targetId, task.senderNodeId].filter((m) => !members.includes(m));
 		if (missing.length > 0) {
 			const who = missing.map((m) => (m === targetId ? targetName : task.senderNodeName)).join(" and ");
-			throw new ApiError(409, "sender_unreachable", `${who} must be a member of the task's workspace so that ${targetName} can report to ${task.senderNodeName}, who delegated the task`, { missing });
+			throw new ApiError(409, "sender_unreachable", i18nMsg("{who} must be a member of the task's workspace so that {target} can report to {sender}, who delegated the task", { who, target: targetName, sender: task.senderNodeName }), { missing });
 		}
 	}
 
@@ -175,14 +175,14 @@ export class SourceFlow implements SourceApi {
 		const cached = this.ctx.db.select().from(peerAgents).where(eq(peerAgents.peerId, peerId)).all();
 		if (cached.length === 0) return null;
 		const found = cached.find((a) => a.agentId === agentId);
-		if (!found) throw new ApiError(400, "unknown_agent", "The target node does not offer that agent");
+		if (!found) throw new ApiError(400, "unknown_agent", i18nMsg("The target node does not offer that agent"));
 		return found.name;
 	}
 
 	private assertTurnPolicy(task: TaskRow, stopRunning: boolean): void {
 		const sessionId = task.executorSessionId;
 		if (sessionId && !stopRunning && this.ctx.sessions.isTurnRunning(sessionId)) {
-			throw new ApiError(409, "session_busy", "The agent is in the middle of a turn. Let it finish, or hand off with stopRunning to abort the turn first");
+			throw new ApiError(409, "session_busy", i18nMsg("The agent is in the middle of a turn. Let it finish, or hand off with stopRunning to abort the turn first"));
 		}
 	}
 
@@ -201,7 +201,7 @@ export class SourceFlow implements SourceApi {
 		} catch (error) {
 			if (error instanceof FaultInjected) throw error;
 			if (error instanceof PrepareAborted) return;
-			const failure = error instanceof PrepareFailure ? error : new PrepareFailure("manifest_invalid", errorText(error, 500));
+			const failure = error instanceof PrepareFailure ? error : new PrepareFailure("manifest_invalid", plainMsg(errorText(error, 500)));
 			this.hub.log.warn({ handoffId: id, code: failure.code, detail: failure.detail }, "handoff preparation failed");
 			this.failPreparation(id, failure);
 		}
@@ -210,15 +210,15 @@ export class SourceFlow implements SourceApi {
 	private failPreparation(id: string, failure: PrepareFailure): void {
 		const current = this.store.find(id);
 		if (!current || current.state !== "preparing") return;
-		const row = this.hub.transition(id, "prepare_failed", { from: ["preparing"], summary: `Preparation failed: ${failure.detail}`, failure: { code: failure.code, detail: failure.detail, step: null }, notify: false });
-		this.endWithoutRelease(row, `Handoff ${id} was not completed (${failure.detail}); ${row.sourceNodeName} stays the executor`);
+		const row = this.hub.transition(id, "prepare_failed", { from: ["preparing"], summary: i18nMsg("Preparation failed: {detail}", { detail: failure.detail.text }), failure: { code: failure.code, detail: failure.detail, step: null }, notify: false });
+		this.endWithoutRelease(row, i18nMsg("Handoff {id} was not completed ({detail}); {node} stays the executor", { id, detail: failure.detail.text, node: row.sourceNodeName }));
 	}
 
 	private async build(row: HandoffRow): Promise<void> {
 		const id = row.id;
 		let task = this.tasks.store.get(row.subjectId);
 		const peer = this.ctx.network.peers.row(row.peerId);
-		if (!peer || peer.status === "revoked") throw new PrepareFailure("manifest_invalid", "The target node is no longer paired with this node");
+		if (!peer || peer.status === "revoked") throw new PrepareFailure("manifest_invalid", i18nMsg("The target node is no longer paired with this node"));
 		const meta = row.meta;
 		const sessionId = task.executorSessionId;
 
@@ -229,13 +229,13 @@ export class SourceFlow implements SourceApi {
 
 		if (meta.stopRunning === true && sessionId && this.ctx.sessions.isTurnRunning(sessionId)) {
 			await this.ctx.sessions.abort(sessionId);
-			if (!(await this.settle(sessionId, SETTLE_TIMEOUT_MS))) throw new PrepareFailure("timeout", `The agent did not stop within ${SETTLE_TIMEOUT_MS / 1000} s after the abort`);
+			if (!(await this.settle(sessionId, SETTLE_TIMEOUT_MS))) throw new PrepareFailure("timeout", i18nMsg("The agent did not stop within {seconds} s after the abort", { seconds: SETTLE_TIMEOUT_MS / 1000 }));
 		}
 		this.checkpoint(id);
 
 		// The one timeline event of the source: after it the task is frozen and `lastEventSeq` is final.
 		if (typeof this.store.get(id).meta.taskNoteSeq !== "number") {
-			const event = this.tasks.store.appendEvent(task.id, { type: "note", summary: `Handing over to ${peer.name} (handoff ${id})`, payload: { handoffId: id, toNodeId: peer.id } });
+			const event = this.tasks.store.appendEvent(task.id, { type: "note", summary: i18nMsg("Handing over to {peer} (handoff {id})", { peer: peer.name, id }), payload: { handoffId: id, toNodeId: peer.id } });
 			this.store.patchMeta(id, { taskNoteSeq: event.seq });
 			this.tasks.changed(task.id, { events: [event] });
 		}
@@ -320,9 +320,9 @@ export class SourceFlow implements SourceApi {
 		});
 		if (!sealed.ok) {
 			if (sealed.code === "secret_detected") {
-				throw new PrepareFailure("secret_detected", `Possible secrets were found in the handoff package (${sealed.findings.slice(0, 5).map((f) => `${f.rule} at ${f.path}:${f.line}`).join("; ")}); nothing was sent. Remove them from the conversation or files and retry`);
+				throw new PrepareFailure("secret_detected", i18nMsg("Possible secrets were found in the handoff package ({findings}); nothing was sent. Remove them from the conversation or files and retry", { findings: sealed.findings.slice(0, 5).map((f) => `${f.rule} at ${f.path}:${f.line}`).join("; ") }));
 			}
-			throw new PrepareFailure("manifest_invalid", `The handoff package is invalid: ${sealed.issues.slice(0, 5).join("; ")}`);
+			throw new PrepareFailure("manifest_invalid", i18nMsg("The handoff package is invalid: {issues}", { issues: sealed.issues.slice(0, 5).join("; ") }));
 		}
 		this.checkpoint(id);
 
@@ -331,7 +331,7 @@ export class SourceFlow implements SourceApi {
 		const offer: wire.HandoffOfferRequest = { handoffId: id, taskId: task.id, fromEpoch: row.fromEpoch, toEpoch: row.toEpoch, manifest, manifestSha256: sealed.sha256, expiresAt: deadlines.expiresAt };
 		this.hub.transition(id, "offered", {
 			from: ["preparing"],
-			summary: `Offered to ${peer.name} (${outcome.vcs === "git" ? "git" : outcome.vcs === "files" ? "folder bundle" : "summary only"}, manifest ${sealed.sha256.slice(0, 12)})`,
+			summary: i18nMsg("Offered to {peer} ({kind}, manifest {hash})", { peer: peer.name, kind: outcome.vcs === "git" ? "git" : outcome.vcs === "files" ? "folder bundle" : "summary only", hash: sealed.sha256.slice(0, 12) }),
 			patch: {
 				manifest,
 				manifestSha256: sealed.sha256,
@@ -388,7 +388,7 @@ export class SourceFlow implements SourceApi {
 			}
 		}
 		if (!summary) {
-			this.hub.note(id, `The conversation summary was built by CL Agent Mesh from the last assistant messages (${why})`);
+			this.hub.note(id, i18nMsg("The conversation summary was built by CL Agent Mesh from the last assistant messages ({why})", { why }));
 			summary = { text: await this.fallbackSummary(task, why), generatedBy: "clam" };
 		}
 		if (summary.text.length > SUMMARY_MAX_CHARS) summary = { ...summary, text: `${summary.text.slice(0, SUMMARY_MAX_CHARS)}\n\n[summary truncated at ${SUMMARY_MAX_CHARS} characters]` };
@@ -437,7 +437,7 @@ export class SourceFlow implements SourceApi {
 			return await this.preparer.addArtifact(id, target, "session-pack.tar", "session-pack");
 		} catch (error) {
 			await rm(target, { force: true });
-			this.hub.note(id, `The transcript was left out of the handoff: ${errorText(error)}`);
+			this.hub.note(id, i18nMsg("The transcript was left out of the handoff: {error}", { error: errorText(error) }));
 			return null;
 		}
 	}
@@ -451,7 +451,7 @@ export class SourceFlow implements SourceApi {
 		if (state === "offered") {
 			this.hub.transition(id, "accepted", {
 				from: ["offered"],
-				summary: `${row.targetNodeName} accepted the handoff${request.targetAgentName ? ` (agent ${request.targetAgentName})` : ""}`,
+				summary: request.targetAgentName ? i18nMsg("{node} accepted the handoff (agent {agent})", { node: row.targetNodeName, agent: request.targetAgentName }) : i18nMsg("{node} accepted the handoff", { node: row.targetNodeName }),
 				patch: { targetAgentId: request.targetAgentId ?? row.targetAgentId, targetAgentName: request.targetAgentName ?? row.targetAgentName },
 				notify: false,
 			});
@@ -466,7 +466,7 @@ export class SourceFlow implements SourceApi {
 
 	private toAwaitingAck(id: string): wire.HandoffAcceptResponse {
 		const deadlineAt = restoreDeadlineFrom(Date.now(), this.hub.timings.restoreDeadlineMs);
-		const row = this.hub.transition(id, "awaiting_ack", { from: ["accepted"], summary: `Waiting for ${this.store.get(id).targetNodeName} to restore the work and acknowledge`, patch: { deadlineAt }, notify: false });
+		const row = this.hub.transition(id, "awaiting_ack", { from: ["accepted"], summary: i18nMsg("Waiting for {node} to restore the work and acknowledge", { node: this.store.get(id).targetNodeName }), patch: { deadlineAt }, notify: false });
 		return { handoffId: id, state: "accepted", deadlineAt: row.deadlineAt ?? deadlineAt };
 	}
 
@@ -478,7 +478,7 @@ export class SourceFlow implements SourceApi {
 			throw new ApiError(409, "ack_mismatch", "This handoff was already acknowledged with different data");
 		}
 		if (!PRE_ACK_STATES.includes(state)) {
-			if (state === "offered") throw new ApiError(409, "not_accepted", "The handoff was not accepted yet");
+			if (state === "offered") throw new ApiError(409, "not_accepted", i18nMsg("The handoff was not accepted yet"));
 			throw this.staleEpoch(row);
 		}
 		const acked = this.persistAck(row, request);
@@ -493,11 +493,11 @@ export class SourceFlow implements SourceApi {
 		const task = this.tasks.store.find(row.subjectId);
 		if (!task || task.epoch !== row.fromEpoch || task.fenced) throw this.staleEpoch(row);
 		const peer = this.ctx.network.peers.row(row.peerId);
-		if (!peer || peer.status === "revoked") throw new ApiError(403, "forbidden", "The target is no longer a paired peer");
+		if (!peer || peer.status === "revoked") throw new ApiError(403, "forbidden", i18nMsg("The target is no longer a paired peer"));
 		const verdict = verifyFencingToken(ack.fencingToken, { publicKey: peer.publicKey, handoffId: row.id, manifestSha256: row.manifestSha256, taskId: row.subjectId, epoch: row.toEpoch });
 		if (!verdict.ok) throw new ApiError(403, "invalid_fencing_token", `The fencing token of the acknowledgement does not verify (${verdict.reason})`);
 		return this.hub.advance(row.id, "acked", {
-			summary: `${row.targetNodeName} acknowledged: the work is restored and its session ${ack.targetSessionId} is ready`,
+			summary: i18nMsg("{node} acknowledged: the work is restored and its session {session} is ready", { node: row.targetNodeName, session: ack.targetSessionId }),
 			patch: { ackAt: ack.ackedAt, fencingToken: ack.fencingToken, targetSessionId: ack.targetSessionId, meta: { ...row.meta, sourceLastEventSeq: task.lastEventSeq } },
 			notify: false,
 		});
@@ -511,7 +511,7 @@ export class SourceFlow implements SourceApi {
 
 	private staleEpoch(row: HandoffRow): ApiError {
 		const task = this.tasks.store.find(row.subjectId);
-		return new ApiError(409, "stale_epoch", `Handoff ${row.id} is ${row.state} at epoch ${row.toEpoch}; the task is at epoch ${task?.epoch ?? row.fromEpoch}`, { currentEpoch: task?.epoch ?? row.fromEpoch });
+		return new ApiError(409, "stale_epoch", i18nMsg("Handoff {id} is {state} at epoch {epoch}; the task is at epoch {current}", { id: row.id, state: row.state, epoch: row.toEpoch, current: task?.epoch ?? row.fromEpoch }), { currentEpoch: task?.epoch ?? row.fromEpoch });
 	}
 
 	receiveState(peerId: string, id: string, request: wire.HandoffStateRequest): wire.HandoffStateAccepted {
@@ -530,9 +530,9 @@ export class SourceFlow implements SourceApi {
 		if (state === "rejected" || state === "failed" || state === "cancelled") {
 			this.targetEnded(row, request);
 		} else if (PROGRESS_STATES.has(state)) {
-			if (!AFTER_ACK_STATES.includes(row.state as HandoffState) && !this.isEnded(row)) this.hub.note(id, `${who}: ${request.summary ?? state.replaceAll("_", " ")}`);
+			if (!AFTER_ACK_STATES.includes(row.state as HandoffState) && !this.isEnded(row)) this.hub.note(id, i18nMsg("{node}: {summary}", { node: who, summary: request.summary ?? state.replaceAll("_", " ") }));
 		} else if (state === "owner") {
-			this.hub.note(id, `${who}: ${request.summary ?? "it owns the task now"}`);
+			this.hub.note(id, request.summary ? i18nMsg("{node}: {summary}", { node: who, summary: request.summary }) : i18nMsg("{node}: it owns the task now", { node: who }));
 			if (PRE_ACK_STATES.includes(row.state as HandoffState)) this.reconcileLater(peerId);
 		} else if (state === "resumed" || state === "completed") {
 			this.targetResumed(row, request);
@@ -551,9 +551,11 @@ export class SourceFlow implements SourceApi {
 		const state = row.state as HandoffState;
 		const code = HandoffFailureCode.safeParse(request.failure?.code);
 		const cancelled = request.state === "cancelled";
+		const peerText = request.failure?.detail ?? request.summary;
+		const peerI18n = request.failure ? request.failure.i18n : request.summaryI18n;
 		const failure = {
 			code: code.success ? code.data : cancelled ? ("cancelled" as const) : ("validation_failed" as const),
-			detail: request.failure?.detail ?? request.summary ?? `${row.targetNodeName} ${cancelled ? "cancelled" : request.state} the handoff`,
+			detail: peerText !== undefined ? { text: peerText, i18n: peerI18n } : cancelled ? i18nMsg("{node} cancelled the handoff", { node: row.targetNodeName }) : i18nMsg("{node} {state} the handoff", { node: row.targetNodeName, state: request.state }),
 			step: request.failure?.step ?? null,
 		};
 		if (request.state === "failed" && PRE_ACK_STATES.includes(state) && RETRYABLE_TARGET_FAILURES.includes(failure.code)) {
@@ -561,33 +563,33 @@ export class SourceFlow implements SourceApi {
 			const key = `${failure.code}|${request.at}`;
 			if (row.meta.lastRetryableFailure !== key) {
 				this.store.patchMeta(row.id, { lastRetryableFailure: key });
-				this.hub.note(row.id, `${row.targetNodeName} reports ${failure.code}: ${failure.detail}; waiting for it to retry — the restore deadline still applies`);
+				this.hub.note(row.id, i18nMsg("{node} reports {code}: {detail}; waiting for it to retry — the restore deadline still applies", { node: row.targetNodeName, code: failure.code, detail: failure.detail.text }));
 			}
 			return;
 		}
 		let ended: HandoffRow;
 		if (state === "offered") {
-			ended = this.hub.transition(row.id, "rejected", { from: ["offered"], summary: `${row.targetNodeName} refused the handoff: ${failure.detail}`, failure, notify: false });
+			ended = this.hub.transition(row.id, "rejected", { from: ["offered"], summary: i18nMsg("{node} refused the handoff: {detail}", { node: row.targetNodeName, detail: failure.detail.text }), failure, notify: false });
 		} else if (PRE_ACK_STATES.includes(state)) {
-			ended = this.hub.advance(row.id, "failed", { summary: `${row.targetNodeName} could not take over: ${failure.detail}`, failure, notify: false });
+			ended = this.hub.advance(row.id, "failed", { summary: i18nMsg("{node} could not take over: {detail}", { node: row.targetNodeName, detail: failure.detail.text }), failure, notify: false });
 		} else {
-			this.hub.note(row.id, `${row.targetNodeName} reported ${request.state} after the handoff was ${state}: ${failure.detail}`);
+			this.hub.note(row.id, i18nMsg("{node} reported {reported} after the handoff was {state}: {detail}", { node: row.targetNodeName, reported: request.state, state, detail: failure.detail.text }));
 			return;
 		}
-		this.endWithoutRelease(ended, `Handoff ${row.id} ended (${failure.detail}); ${ended.sourceNodeName} stays the executor`);
+		this.endWithoutRelease(ended, i18nMsg("Handoff {id} ended ({detail}); {node} stays the executor", { id: row.id, detail: failure.detail.text, node: ended.sourceNodeName }));
 	}
 
 	private targetResumed(row: HandoffRow, request: wire.HandoffStateRequest): void {
 		const state = row.state as HandoffState;
 		const who = row.targetNodeName;
 		if (state === "released") {
-			this.hub.advance(row.id, "completed", { summary: `${who} resumed the task; the handoff is complete`, nodeId: row.peerId });
+			this.hub.advance(row.id, "completed", { summary: i18nMsg("{node} resumed the task; the handoff is complete", { node: who }), nodeId: row.peerId });
 		} else if (state === "acked") {
 			this.store.patchMeta(row.id, { targetResumed: true });
-			this.hub.note(row.id, `${who}: ${request.summary ?? "resumed the task"}`);
+			this.hub.note(row.id, i18nMsg("{node}: {summary}", { node: who, summary: request.summary ?? "resumed the task" }));
 		} else if (PRE_ACK_STATES.includes(state)) {
 			// The target claims ownership but this node saw no ack: ask it (status + fencing token) instead of trusting a notice.
-			this.hub.note(row.id, `${who} reports it ${request.state} the task; checking its acknowledgement`);
+			this.hub.note(row.id, i18nMsg("{node} reports it {state} the task; checking its acknowledgement", { node: who, state: request.state }));
 			this.reconcileLater(row.peerId);
 		}
 	}
@@ -603,7 +605,7 @@ export class SourceFlow implements SourceApi {
 			const row = this.store.get(id);
 			this.requireSourceRow(row);
 			if (row.state === "released" || row.state === "completed") return;
-			if (row.state !== "acked") throw ApiError.conflict(`The handoff is ${row.state}; the task is released only after a valid acknowledgement`, { state: row.state });
+			if (row.state !== "acked") throw ApiError.conflict(i18nMsg("The handoff is {state}; the task is released only after a valid acknowledgement", { state: row.state }), { state: row.state });
 			const task = this.tasks.store.find(row.subjectId);
 			const sessionId = task?.executorSessionId ?? null;
 			if (task) {
@@ -625,8 +627,8 @@ export class SourceFlow implements SourceApi {
 				this.tasks.executor.released(task.id);
 				if (sessionId) await this.markSessionMoved(id, sessionId, row.targetNodeName);
 			}
-			const released = this.hub.advance(id, "released", { summary: `Released: ${row.targetNodeName} owns the task from epoch ${row.toEpoch}; this node no longer runs it` });
-			if (released.meta.targetResumed === true) this.hub.advance(id, "completed", { summary: `${row.targetNodeName} resumed the task; the handoff is complete` });
+			const released = this.hub.advance(id, "released", { summary: i18nMsg("Released: {node} owns the task from epoch {epoch}; this node no longer runs it", { node: row.targetNodeName, epoch: row.toEpoch }) });
+			if (released.meta.targetResumed === true) this.hub.advance(id, "completed", { summary: i18nMsg("{node} resumed the task; the handoff is complete", { node: row.targetNodeName }) });
 		});
 	}
 
@@ -649,7 +651,7 @@ export class SourceFlow implements SourceApi {
 			if (!file) throw new Error("the session has no conversation file");
 			await this.ctx.ompCli.sessionMoved(file, targetName);
 		} catch (error) {
-			this.hub.note(id, `omp session moved did not run: ${errorText(error)}`);
+			this.hub.note(id, i18nMsg("omp session moved did not run: {error}", { error: errorText(error) }));
 		}
 	}
 
@@ -662,31 +664,31 @@ export class SourceFlow implements SourceApi {
 		if (state === "preparing") {
 			const failed = this.hub.transition(id, "prepare_failed", {
 				from: ["preparing"],
-				summary: "Cancelled while preparing",
-				failure: { code: "cancelled", detail: "Cancelled by the user while the handoff package was being prepared", step: null },
+				summary: i18nMsg("Cancelled while preparing"),
+				failure: { code: "cancelled", detail: i18nMsg("Cancelled by the user while the handoff package was being prepared"), step: null },
 				notify: false,
 			});
-			this.endWithoutRelease(failed, `Handoff ${id} was cancelled; ${failed.sourceNodeName} stays the executor`);
+			this.endWithoutRelease(failed, i18nMsg("Handoff {id} was cancelled; {node} stays the executor", { id, node: failed.sourceNodeName }));
 			return failed;
 		}
 		if (state === "offered" || state === "accepted" || state === "awaiting_ack") {
-			const cancelled = this.hub.advance(id, "cancelled", { summary: state === "awaiting_ack" ? `Cancelled by the user; ${row.targetNodeName} is told to stop restoring` : "Cancelled by the user" });
-			this.endWithoutRelease(cancelled, `Handoff ${id} was cancelled; ${cancelled.sourceNodeName} stays the executor`);
+			const cancelled = this.hub.advance(id, "cancelled", { summary: state === "awaiting_ack" ? i18nMsg("Cancelled by the user; {node} is told to stop restoring", { node: row.targetNodeName }) : i18nMsg("Cancelled by the user") });
+			this.endWithoutRelease(cancelled, i18nMsg("Handoff {id} was cancelled; {node} stays the executor", { id, node: cancelled.sourceNodeName }));
 			return cancelled;
 		}
-		if (state === "ack_timeout") throw ApiError.conflict("The acknowledgement is overdue: extend the deadline or reclaim the task", { state });
-		if (AFTER_ACK_STATES.includes(state)) throw ApiError.conflict("The target already acknowledged the handoff; it cannot be cancelled any more", { state });
-		throw ApiError.conflict(`The handoff is ${state}`, { state });
+		if (state === "ack_timeout") throw ApiError.conflict(i18nMsg("The acknowledgement is overdue: extend the deadline or reclaim the task"), { state });
+		if (AFTER_ACK_STATES.includes(state)) throw ApiError.conflict(i18nMsg("The target already acknowledged the handoff; it cannot be cancelled any more"), { state });
+		throw ApiError.conflict(i18nMsg("The handoff is {state}", { state }), { state });
 	}
 
 	async extend(id: string, minutes: number): Promise<HandoffRow> {
 		const row = this.requireSource(id);
 		const state = row.state as HandoffState;
-		if (state !== "awaiting_ack" && state !== "ack_timeout") throw ApiError.conflict(`Only a handoff that waits for the acknowledgement can be extended, not one that is ${state}`, { state });
+		if (state !== "awaiting_ack" && state !== "ack_timeout") throw ApiError.conflict(i18nMsg("Only a handoff that waits for the acknowledgement can be extended, not one that is {state}", { state }), { state });
 		const deadlineAt = extendDeadline(row.deadlineAt ?? Date.now(), minutes);
-		const summary = `Deadline extended by ${minutes} min, until ${deadlineAt}`;
+		const summary = i18nMsg("Deadline extended by {minutes} min, until {deadline}", { minutes, deadline: deadlineAt });
 		const notice = (current: HandoffRow): HandoffOutboxItem => {
-			const body: wire.HandoffStateRequest = { epoch: current.toEpoch, state: "extended", summary, deadlineAt, at: nowIso() };
+			const body: wire.HandoffStateRequest = { epoch: current.toEpoch, state: "extended", summary: summary.text, summaryI18n: summary.i18n, deadlineAt, at: nowIso() };
 			return { kind: "handoff.state", path: `/handoffs/${current.id}/state`, body, idempotencyKey: `handoff.state:${current.id}:source:extended:${deadlineAt}` };
 		};
 		if (state === "ack_timeout") return this.hub.transition(id, "awaiting_ack", { from: ["ack_timeout"], summary, patch: { deadlineAt }, enqueue: [notice(row)], notify: false });
@@ -703,28 +705,32 @@ export class SourceFlow implements SourceApi {
 		return this.hub.lock.run(id, async () => {
 			let row = this.requireSource(id);
 			if (row.state === "reclaimed") return row;
-			if (row.state !== "ack_timeout") throw ApiError.conflict(`Only a handoff whose acknowledgement is overdue can be reclaimed, not one that is ${row.state}`, { state: row.state });
+			if (row.state !== "ack_timeout") throw ApiError.conflict(i18nMsg("Only a handoff whose acknowledgement is overdue can be reclaimed, not one that is {state}", { state: row.state }), { state: row.state });
 			const probe = await this.queryTarget(row);
 			const status = probe.status;
 			if (status && ACKED_PEER_STATES.has(status.state)) {
 				// The ack arrived but its answer (or the notice) was lost: release instead of reclaiming.
 				if (!status.fencingToken || !status.targetSessionId || !status.manifestSha256) {
-					throw new ApiError(409, "ack_unverified", `${row.targetNodeName} reports it acknowledged the handoff but gave no verifiable proof; reclaiming would risk running the task twice`);
+					throw new ApiError(409, "ack_unverified", i18nMsg("{node} reports it acknowledged the handoff but gave no verifiable proof; reclaiming would risk running the task twice", { node: row.targetNodeName }));
 				}
 				row = this.persistAck(row, { epoch: status.toEpoch, manifestSha256: status.manifestSha256, targetSessionId: status.targetSessionId, fencingToken: status.fencingToken, ackedAt: status.ackAt ?? nowIso() });
 				this.track(this.finishRelease(id));
 				return row;
 			}
 			if (!probe.reachable && !override) {
-				const warning = `${row.targetNodeName} could not be reached, so there is no proof that it did not acknowledge the handoff. If it did, reclaiming makes both nodes run the task. Reclaim only if you accept that risk.`;
-				throw new ApiError(409, "override_required", warning, { warning });
+				const warning = i18nMsg("{node} could not be reached, so there is no proof that it did not acknowledge the handoff. If it did, reclaiming makes both nodes run the task. Reclaim only if you accept that risk.", { node: row.targetNodeName });
+				throw new ApiError(409, "override_required", warning, { warning: warning.text });
 			}
 			// Tombstone epoch: monotonic and never reused, so a late ack of this handoff is refused (stale_epoch).
 			const task = this.tasks.store.find(row.subjectId);
 			if (task && task.epoch < row.toEpoch) this.tasks.store.update(task.id, { epoch: row.toEpoch, highestSeenEpoch: Math.max(task.highestSeenEpoch, row.toEpoch) });
-			const why = probe.reachable ? `${row.targetNodeName} confirmed it did not acknowledge` : "reclaimed on the user's override without reaching the target";
-			const reclaimed = this.hub.transition(id, "reclaimed", { from: ["ack_timeout"], summary: `Reclaimed by the user (${why}); epoch ${row.toEpoch} is retired` });
-			this.endWithoutRelease(reclaimed, `Handoff ${id} was reclaimed; ${reclaimed.sourceNodeName} continues at epoch ${reclaimed.toEpoch}`);
+			const reclaimed = this.hub.transition(id, "reclaimed", {
+				from: ["ack_timeout"],
+				summary: probe.reachable
+					? i18nMsg("Reclaimed by the user ({node} confirmed it did not acknowledge); epoch {epoch} is retired", { node: row.targetNodeName, epoch: row.toEpoch })
+					: i18nMsg("Reclaimed by the user (reclaimed on the user's override without reaching the target); epoch {epoch} is retired", { epoch: row.toEpoch }),
+			});
+			this.endWithoutRelease(reclaimed, i18nMsg("Handoff {id} was reclaimed; {node} continues at epoch {epoch}", { id, node: reclaimed.sourceNodeName, epoch: reclaimed.toEpoch }));
 			return reclaimed;
 		});
 	}
@@ -747,7 +753,7 @@ export class SourceFlow implements SourceApi {
 
 	async retry(id: string): Promise<HandoffRow> {
 		const row = this.requireSource(id);
-		if (row.state !== "prepare_failed") throw ApiError.conflict(`Only a handoff whose preparation failed can be retried, not one that is ${row.state}`, { state: row.state });
+		if (row.state !== "prepare_failed") throw ApiError.conflict(i18nMsg("Only a handoff whose preparation failed can be retried, not one that is {state}", { state: row.state }), { state: row.state });
 		const task = this.tasks.store.get(row.subjectId);
 		this.assertHandable(task);
 		const peer = this.ctx.network.peers.row(row.peerId);
@@ -756,8 +762,8 @@ export class SourceFlow implements SourceApi {
 		this.assertTurnPolicy(task, row.meta.stopRunning === true);
 		this.hub.fence.freeze(task.id, id);
 		try {
-			this.hub.transition(id, "draft", { from: ["prepare_failed"], summary: "Retrying the handoff", patch: { failureCode: null, failureDetail: null, failureStep: null, meta: { ...row.meta, taskNoteSeq: undefined } }, notify: false });
-			const preparing = this.hub.transition(id, "preparing", { from: ["draft"], summary: `Preparing the handoff package for ${peer.name}`, notify: false });
+			this.hub.transition(id, "draft", { from: ["prepare_failed"], summary: i18nMsg("Retrying the handoff"), patch: { failureCode: null, failureDetail: null, failureStep: null, meta: { ...row.meta, taskNoteSeq: undefined } }, notify: false });
+			const preparing = this.hub.transition(id, "preparing", { from: ["draft"], summary: i18nMsg("Preparing the handoff package for {peer}", { peer: peer.name }), notify: false });
 			this.track(this.hub.lock.run(id, () => this.prepare(id)));
 			return preparing;
 		} catch (error) {
@@ -786,7 +792,7 @@ export class SourceFlow implements SourceApi {
 				await this.finishRelease(id);
 				return;
 			case "released":
-				if (row.meta.targetResumed === true) this.hub.advance(id, "completed", { summary: `${row.targetNodeName} resumed the task; the handoff is complete` });
+				if (row.meta.targetResumed === true) this.hub.advance(id, "completed", { summary: i18nMsg("{node} resumed the task; the handoff is complete", { node: row.targetNodeName }) });
 				return;
 			default:
 		}
@@ -809,7 +815,7 @@ export class SourceFlow implements SourceApi {
 	// ------------------------------------------------------------------ shared helpers
 
 	private requireSourceRow(row: HandoffRow): HandoffRow {
-		if (row.role !== "source" || row.kind !== "task") throw ApiError.conflict("This is not a task handoff of this node's source side");
+		if (row.role !== "source" || row.kind !== "task") throw ApiError.conflict(i18nMsg("This is not a task handoff of this node's source side"));
 		return row;
 	}
 
@@ -824,7 +830,7 @@ export class SourceFlow implements SourceApi {
 	 * The handoff ended without moving the task: the task runs here again. Say so on its timeline (only when the sealing note exists), then
 	 * unfreeze it; the executor re-prompts an idle agent whose turn the handoff stopped.
 	 */
-	private endWithoutRelease(row: HandoffRow, why: string): void {
+	private endWithoutRelease(row: HandoffRow, why: I18nMessage): void {
 		const fresh = this.store.get(row.id);
 		if (typeof fresh.meta.taskNoteSeq === "number" && this.tasks.store.find(fresh.subjectId)) {
 			const event = this.tasks.store.appendEvent(fresh.subjectId, { type: "note", summary: why, payload: { handoffId: fresh.id, state: fresh.state } });

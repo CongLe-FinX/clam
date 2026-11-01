@@ -155,7 +155,7 @@ describe("remote UI enabled", () => {
 		const ip = freshIp();
 		const wrong = await send(rn, "POST", "/api/local/access/login", { password: "not the password at all" }, { origin: PUBLIC_ORIGIN, ip });
 		expect(wrong.status).toBe(401);
-		expect(wrong.json?.error).toMatchObject({ code: "invalid_credentials", message: "Invalid password" });
+		expect(wrong.json?.error).toMatchObject({ code: "invalid_credentials", message: "Invalid password", i18n: { key: "Invalid password" } });
 		expect(wrong.cookies).toEqual([]);
 
 		const ok = await send(rn, "POST", "/api/local/access/login", { password: PASSWORD }, { origin: PUBLIC_ORIGIN, ip });

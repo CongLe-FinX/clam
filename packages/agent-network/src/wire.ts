@@ -1,4 +1,4 @@
-import { TaskConstraints, TaskDeliverAs, TaskResult, TaskStatus } from "@clam/contracts";
+import { I18nText, TaskConstraints, TaskDeliverAs, TaskResult, TaskStatus } from "@clam/contracts";
 import { fingerprintOfPublicKey, nodeIdFromFingerprint } from "@clam/node-identity";
 import { z } from "zod";
 import { isValidPublicKey, publicKeyToBase64 } from "./encoding.ts";
@@ -24,6 +24,11 @@ const IsoDate = z.string().min(1).max(64);
 const Name = z.string().min(1).max(128);
 const PeerUrl = z.string().min(1).max(2048);
 const Count = z.number().int().nonnegative();
+/**
+ * Optional structured twin (`I18nText`) of a sentence the sender also sends in English (additive: older nodes strip it).
+ * A malformed value is dropped instead of failing the whole payload: the English text is always enough.
+ */
+const OptionalI18n = I18nText.optional().catch(undefined);
 
 export const HealthStatus = z.enum(["ok", "degraded", "down"]);
 export type HealthStatus = z.infer<typeof HealthStatus>;
@@ -43,7 +48,7 @@ function checkIdentityClaim(claim: { nodeId: string; publicKey: string; fingerpr
 // ---------------------------------------------------------------- errors
 
 export const ApiErrorBody = z.object({
-	error: z.object({ code: z.string(), message: z.string(), details: z.unknown().optional() }),
+	error: z.object({ code: z.string(), message: z.string(), details: z.unknown().optional(), i18n: OptionalI18n }),
 });
 export type ApiErrorBody = z.infer<typeof ApiErrorBody>;
 
@@ -265,6 +270,8 @@ export const TaskRecord = z.object({
 	agentId: z.string().max(128).nullish(),
 	agentName: z.string().max(128).nullish(),
 	reason: z.string().max(5000).nullish(),
+	/** Structured twin of `reason` when the reason is the executor's own text (additive: older nodes strip it). */
+	reasonI18n: OptionalI18n,
 	createdAt: IsoDate,
 	updatedAt: IsoDate,
 	startedAt: IsoDate.nullish(),
@@ -281,6 +288,7 @@ export const TaskEventWire = z.object({
 	type: z.string().min(1).max(32),
 	at: IsoDate,
 	summary: z.string().max(2000),
+	i18n: OptionalI18n,
 	payload: z.unknown().optional(),
 });
 export type TaskEventWire = z.infer<typeof TaskEventWire>;
@@ -399,6 +407,8 @@ export const SharedMessageRequest = z
 		kind: SharedMessageKind,
 		/** Empty only for a message that carries files. */
 		body: z.string().max(20_000),
+		/** Structured twin of `body` for generated `system` lines (localisation); absent from older nodes and on human/agent messages. */
+		i18n: OptionalI18n,
 		author: z.object({ kind: z.enum(["human", "agent", "system"]), agentId: z.string().max(128).nullish(), agentName: z.string().max(128).nullish() }),
 		to: SharedMessageTo,
 		origin: z.object({ nodeId: NodeId, nodeName: Name, seq: z.number().int().positive() }),
@@ -653,7 +663,8 @@ export const HandoffStateRequest = z.object({
 	epoch: z.number().int().nonnegative(),
 	state: z.string().min(1).max(32),
 	summary: z.string().max(2000).optional(),
-	failure: z.object({ code: z.string().max(64), detail: z.string().max(2000), step: z.number().int().nullish() }).optional(),
+	summaryI18n: OptionalI18n,
+	failure: z.object({ code: z.string().max(64), detail: z.string().max(2000), i18n: OptionalI18n, step: z.number().int().nullish() }).optional(),
 	deadlineAt: IsoDate.optional(),
 	targetSessionId: z.string().max(128).nullish(),
 	at: IsoDate,
@@ -679,7 +690,7 @@ export const HandoffStatusResponse = z.object({
 	ackAt: IsoDate.nullish(),
 	targetSessionId: z.string().nullish(),
 	fencingToken: z.string().nullish(),
-	failure: z.object({ code: z.string(), detail: z.string(), step: z.number().int().nullish() }).nullish(),
+	failure: z.object({ code: z.string(), detail: z.string(), i18n: OptionalI18n, step: z.number().int().nullish() }).nullish(),
 	lastEventSeq: z.number().int().nonnegative().nullish(),
 });
 export type HandoffStatusResponse = z.infer<typeof HandoffStatusResponse>;

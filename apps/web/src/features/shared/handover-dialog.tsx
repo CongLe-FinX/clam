@@ -4,8 +4,10 @@ import { ArrowRightLeft, Check, Circle, ExternalLink, Eye, Info, Loader2, Shield
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PeerStatusBadge } from "@/features/network/components";
+import { PEER_STATUS_LABEL } from "@/features/network/format";
 import { useUpdatePeer } from "@/features/network/hooks";
-import { ApiError, errorMessage } from "@/lib/api";
+import { T, msg, renderServerText, t, tr } from "@/i18n";
+import { ApiError, errorText } from "@/lib/api";
 import { useDirectory, usePeers, useProject, useSession } from "@/lib/queries";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -21,6 +23,8 @@ import { useCancelTransfer, useHandover, useNodeUiUrl, useSharedDetail, useShare
 const ANY = "__any__";
 const SHARE: Capability = "sessions.share";
 
+const AGENT_STATUS = { online: msg("Online"), busy: msg("Busy"), offline: msg("Offline") } as const;
+
 const CANCELLABLE: Partial<Record<TransferPhase, true>> = { inviting: true, waiting_accept: true, stopping: true, checkpointing: true, delivering: true };
 
 interface Step {
@@ -28,13 +32,13 @@ interface Step {
 	label: (node: string) => string;
 }
 const STEPS: Step[] = [
-	{ phase: "inviting", label: (n) => `Invite ${n}` },
-	{ phase: "waiting_accept", label: (n) => `${n} accepts the invitation` },
-	{ phase: "stopping", label: () => "Stop the current turn" },
-	{ phase: "checkpointing", label: () => "Commit, push and snapshot all changes" },
-	{ phase: "delivering", label: (n) => `Snapshot delivered to ${n}` },
-	{ phase: "handing_over", label: (n) => `${n} takes over` },
-	{ phase: "continuing", label: (n) => `${n} is continuing` },
+	{ phase: "inviting", label: (n) => t("Invite {name}", { name: n }) },
+	{ phase: "waiting_accept", label: (n) => t("{name} accepts the invitation", { name: n }) },
+	{ phase: "stopping", label: () => t("Stop the current turn") },
+	{ phase: "checkpointing", label: () => t("Commit, push and snapshot all changes") },
+	{ phase: "delivering", label: (n) => t("Snapshot delivered to {name}", { name: n }) },
+	{ phase: "handing_over", label: (n) => t("{name} takes over", { name: n }) },
+	{ phase: "continuing", label: (n) => t("{name} is continuing", { name: n }) },
 ];
 
 function Progress({ transfer, onWhich, files }: { transfer: SharedTransfer; onWhich: number; files: boolean }) {
@@ -42,7 +46,7 @@ function Progress({ transfer, onWhich, files }: { transfer: SharedTransfer; onWh
 	const node = transfer.toNodeName;
 	const failed = transfer.phase === "failed" || transfer.phase === "cancelled";
 	return (
-		<ol className="flex flex-col gap-2.5" aria-label="Hand-over progress">
+		<ol className="flex flex-col gap-2.5" aria-label={t("Hand-over progress")}>
 			{steps.map((s) => {
 				const idx = STEPS.findIndex((x) => x.phase === s.phase);
 				const done = !failed && (idx < onWhich || transfer.phase === "continuing");
@@ -53,7 +57,7 @@ function Progress({ transfer, onWhich, files }: { transfer: SharedTransfer; onWh
 						<span className="grid size-5 shrink-0 place-items-center">
 							{done ? <Check className="size-4 text-success" aria-hidden /> : active ? <Loader2 className="size-4 animate-spin text-accent" aria-hidden /> : broke ? <X className="size-4 text-danger" aria-hidden /> : <Circle className="size-3" aria-hidden />}
 						</span>
-						<span>{s.phase === "checkpointing" && files ? "Bundle the folder and snapshot all changes" : s.label(node)}</span>
+						<span>{s.phase === "checkpointing" && files ? t("Bundle the folder and snapshot all changes") : s.label(node)}</span>
 					</li>
 				);
 			})}
@@ -138,17 +142,17 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 	const watchId = shared?.mirrorSessionId ?? shared?.localSessionId ?? null;
 	const openHref = transfer ? (transfer.newSessionUrl ?? (ui ? remoteSessionUrl(ui, transfer.newSessionId) : null)) : null;
 	const acceptHref = ui ? `${ui.replace(/\/+$/, "")}/shared` : null;
-	const target = transfer?.toNodeName ?? peer?.name ?? "the machine";
+	const target = transfer?.toNodeName ?? peer?.name ?? t("the machine");
 
 	return (
 		<Dialog open onOpenChange={(o) => !o && !handover.isPending && onClose()}>
 			<DialogContent sheetOnMobile className="max-w-lg">
 				<DialogHeader>
-					<DialogTitle>{showProgress ? (done ? `${target} is continuing` : failed ? "Hand-over did not complete" : `Handing over to ${target}…`) : "Hand over this session"}</DialogTitle>
+					<DialogTitle>{showProgress ? (done ? t("{name} is continuing", { name: target }) : failed ? t("Hand-over did not complete") : t("Handing over to {name}…", { name: target })) : t("Hand over this session")}</DialogTitle>
 					<DialogDescription>
 						{showProgress
-							? (transfer?.message ?? "")
-							: HANDOVER_INTRO[mode ?? "unknown"]}
+							? (transfer ? renderServerText(transfer.message, transfer.i18n) : "")
+							: tr(HANDOVER_INTRO[mode ?? "unknown"])}
 					</DialogDescription>
 				</DialogHeader>
 
@@ -160,13 +164,13 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 								<span className="flex items-start gap-2">
 									<Info className="mt-0.5 size-4 shrink-0" aria-hidden />
 									<span>
-										{target} has to accept the invitation — a person there under <strong>Shared sessions</strong>, or automatically if its owner allowed it. Nothing is stopped or moved until it accepts.
+										<T text="{name} has to accept the invitation — a person there under <b>Shared sessions</b>, or automatically if its owner allowed it. Nothing is stopped or moved until it accepts." params={{ name: target }} tags={{ b: <strong /> }} />
 									</span>
 								</span>
 								{acceptHref ? (
 									<Button asChild size="sm" variant="outline" className="self-start">
 										<a href={acceptHref} target="_blank" rel="noreferrer noopener">
-											<ExternalLink /> Open {target} to accept
+											<ExternalLink /> {t("Open {name} to accept", { name: target })}
 										</a>
 									</Button>
 								) : null}
@@ -176,14 +180,14 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 							<p role="alert" className="flex items-start gap-2 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
 								<TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
 								<span>
-									{transfer.error.message} <span className="font-mono text-2xs opacity-70">{transfer.error.code}</span>
+									{renderServerText(transfer.error.message, transfer.error.i18n)} <span className="font-mono text-2xs opacity-70">{transfer.error.code}</span>
 								</span>
 							</p>
 						) : null}
-						{failed && !transfer.error ? <p className="rounded-lg bg-surface-2 px-3 py-2 text-xs text-muted-foreground">The hand-over was cancelled. This session keeps running here.</p> : null}
+						{failed && !transfer.error ? <p className="rounded-lg bg-surface-2 px-3 py-2 text-xs text-muted-foreground">{t("The hand-over was cancelled. This session keeps running here.")}</p> : null}
 						{done ? (
 							<p className="rounded-lg bg-success/10 px-3 py-2 text-xs text-success">
-								{target} now drives this work. This session is a read-only copy; keep talking to the team from it, or watch {target} live.
+								{t("{name} now drives this work. This session is a read-only copy; keep talking to the team from it, or watch {name} live.", { name: target })}
 							</p>
 						) : null}
 					</div>
@@ -199,30 +203,36 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 							<div role="status" className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-[13px] text-muted-foreground">
 								<Info className="mt-0.5 size-4 shrink-0" aria-hidden />
 								<span>
-									No machine is paired with this one yet.{" "}
-									<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "invite-node" })}>
-										Invite a machine
-									</button>{" "}
-									or{" "}
-									<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "join-node" })}>
-										join one
-									</button>
-									.
+									<T
+										text="No machine is paired with this one yet. <invite>Invite a machine</invite> or <join>join one</join>."
+										tags={{
+											invite: (c) => (
+												<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "invite-node" })}>
+													{c}
+												</button>
+											),
+											join: (c) => (
+												<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "join-node" })}>
+													{c}
+												</button>
+											),
+										}}
+									/>
 								</span>
 							</div>
 						) : null}
 						<div className="grid gap-3 sm:grid-cols-2">
-							<Field label="Hand over to">
+							<Field label={t("Hand over to")}>
 								{() => (
 									<Select value={peerId} onValueChange={setPeerId} disabled={noNodes}>
 										<SelectTrigger>
-											<SelectValue placeholder="Choose a machine" />
+											<SelectValue placeholder={t("Choose a machine")} />
 										</SelectTrigger>
 										<SelectContent>
 											{usable.map((p) => (
 												<SelectItem key={p.id} value={p.id}>
 													<span className="inline-flex items-center gap-2">
-														<StatusDot status={p.status === "online" ? "online" : p.status === "degraded" ? "degraded" : "offline"} label={p.status} />
+														<StatusDot status={p.status === "online" ? "online" : p.status === "degraded" ? "degraded" : "offline"} label={tr(PEER_STATUS_LABEL[p.status])} />
 														{p.name}
 													</span>
 												</SelectItem>
@@ -231,20 +241,20 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 									</Select>
 								)}
 							</Field>
-							<Field label="Agent" hint="Leave on “any” to let that machine choose.">
+							<Field label={t("Agent")} hint={t("Leave on “any” to let that machine choose.")}>
 								{() => (
 									<Select value={agentKey} onValueChange={setAgentKey} disabled={!peer}>
 										<SelectTrigger>
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value={ANY}>Any available agent</SelectItem>
+											<SelectItem value={ANY}>{t("Any available agent")}</SelectItem>
 											{agents.map((a) => (
 												<SelectItem key={a.agentId} value={a.agentId}>
 													<span className="inline-flex items-center gap-2">
-														<StatusDot status={a.status} label={a.status} />
+														<StatusDot status={a.status} />
 														{a.name}
-														<span className="text-2xs text-subtle">{a.status}</span>
+														<span className="text-2xs text-subtle">{tr(AGENT_STATUS[a.status])}</span>
 													</span>
 												</SelectItem>
 											))}
@@ -259,28 +269,32 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 							<label className="flex min-h-11 cursor-pointer items-start gap-2.5 rounded-lg bg-warning/10 px-3 py-2.5 text-[13px]">
 								<input type="checkbox" checked={stopRunning} onChange={(e) => setStopRunning(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--accent)] coarse:size-5" />
 								<span className="flex flex-col gap-0.5">
-									<span className="font-medium">Stop the current turn and hand over</span>
-									<span className="text-xs text-muted-foreground">The agent is working right now. It is stopped at a safe point, then {mode === "files" ? "the working folder is bundled" : "all its changes are committed and pushed"} before {peer?.name ?? "the machine"} continues. Untick to wait instead — the hand-over is refused while a turn runs.</span>
+									<span className="font-medium">{t("Stop the current turn and hand over")}</span>
+									<span className="text-xs text-muted-foreground">
+										{mode === "files"
+											? t("The agent is working right now. It is stopped at a safe point, then the working folder is bundled before {name} continues. Untick to wait instead — the hand-over is refused while a turn runs.", { name: peer?.name ?? t("the machine") })
+											: t("The agent is working right now. It is stopped at a safe point, then all its changes are committed and pushed before {name} continues. Untick to wait instead — the hand-over is refused while a turn runs.", { name: peer?.name ?? t("the machine") })}
+									</span>
 								</span>
 							</label>
 						) : null}
 						{busyNotice ? (
 							<p role="status" className="rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
-								A turn started while you were choosing. “Stop the current turn and hand over” is now selected — press Hand over again.
+								{t("A turn started while you were choosing. “Stop the current turn and hand over” is now selected — press Hand over again.")}
 							</p>
 						) : null}
 
 						{offline && peer ? (
 							<p role="status" className="flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
 								<PeerStatusBadge status={peer.status} />
-								{peer.name} is not reachable right now; a hand-over needs it online.
+								{t("{name} is not reachable right now; a hand-over needs it online.", { name: peer.name })}
 							</p>
 						) : null}
 						{peer && !theyAllow ? (
 							<div role="alert" className="flex items-start gap-2 rounded-lg bg-danger/10 px-3 py-2.5 text-xs text-danger">
 								<ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
 								<span>
-									{peer.name} has not allowed this machine to share sessions with it (<code className="font-mono">sessions.share</code>). Ask its owner to grant it; the hand-over will be refused until then.
+									<T text="{name} has not allowed this machine to share sessions with it (<code>sessions.share</code>). Ask its owner to grant it; the hand-over will be refused until then." params={{ name: peer.name }} tags={{ code: <code className="font-mono" /> }} />
 								</span>
 							</div>
 						) : null}
@@ -289,7 +303,7 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 								<span className="flex items-start gap-2">
 									<ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
 									<span>
-										{peer.name} is not allowed to share sessions with this machine yet (<code className="font-mono">sessions.share</code>). It needs that to take over and to send its updates.
+										<T text="{name} is not allowed to share sessions with this machine yet (<code>sessions.share</code>). It needs that to take over and to send its updates." params={{ name: peer.name }} tags={{ code: <code className="font-mono" /> }} />
 									</span>
 								</span>
 								<Button
@@ -298,23 +312,23 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 									variant="outline"
 									className="self-start"
 									loading={updatePeer.isPending}
-									onClick={() => updatePeer.mutate({ id: peer.id, grantedCapabilities: [...peer.grantedCapabilities, SHARE] }, { onSuccess: () => toast.success(`${peer.name} may now share sessions with this machine`) })}
+									onClick={() => updatePeer.mutate({ id: peer.id, grantedCapabilities: [...peer.grantedCapabilities, SHARE] }, { onSuccess: () => toast.success(t("{name} may now share sessions with this machine", { name: peer.name })) })}
 								>
-									Grant sessions.share to {peer.name}
+									{t("Grant sessions.share to {name}", { name: peer.name })}
 								</Button>
 							</div>
 						) : null}
 						{handover.error && !(handover.error instanceof ApiError && handover.error.code === "session_busy") ? (
 							<p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
-								{errorMessage(handover.error)}
+								{errorText(handover.error)}
 							</p>
 						) : null}
 						<DialogFooter className="sticky bottom-0 -mx-1 bg-overlay px-1 pt-1">
 							<Button type="button" variant="ghost" onClick={onClose} disabled={handover.isPending}>
-								Cancel
+								{t("Cancel")}
 							</Button>
 							<Button type="submit" variant="primary" loading={handover.isPending} disabled={!ready}>
-								<ArrowRightLeft /> Hand over
+								<ArrowRightLeft /> {t("Hand over")}
 							</Button>
 						</DialogFooter>
 					</form>
@@ -324,7 +338,7 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 					<DialogFooter className="flex-wrap">
 						{CANCELLABLE[transfer.phase] ? (
 							<Button variant="ghost" loading={cancel.isPending} onClick={() => cancel.mutate()}>
-								Cancel hand-over
+								{t("Cancel hand-over")}
 							</Button>
 						) : null}
 						{failed ? (
@@ -334,10 +348,10 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 									loading={cancel.isPending}
 									onClick={() => cancel.mutate(undefined, { onSuccess: onClose })}
 								>
-									Dismiss
+									{t("Dismiss")}
 								</Button>
 								<Button variant="primary" onClick={() => setAgain(true)}>
-									Try again
+									{t("Try again")}
 								</Button>
 							</>
 						) : null}
@@ -346,7 +360,7 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 								{openHref ? (
 									<Button asChild variant="outline">
 										<a href={openHref} target="_blank" rel="noreferrer noopener">
-											<ExternalLink /> Open on {target}
+											<ExternalLink /> {t("Open on {name}", { name: target })}
 										</a>
 									</Button>
 								) : null}
@@ -358,15 +372,15 @@ export default function HandoverDialog({ sessionId, presetNodeId, onClose }: { s
 											void navigate({ to: "/sessions/$sessionId", params: { sessionId: watchId } });
 										}}
 									>
-										<Eye /> Watch live here
+										<Eye /> {t("Watch live here")}
 									</Button>
 								) : null}
 							</>
 						) : null}
-						{!CANCELLABLE[transfer.phase] && !failed && !done ? <span className="text-xs text-subtle">Finishing the hand-over…</span> : null}
+						{!CANCELLABLE[transfer.phase] && !failed && !done ? <span className="text-xs text-subtle">{t("Finishing the hand-over…")}</span> : null}
 						{!failed ? (
 							<Button variant="ghost" onClick={onClose}>
-								{done ? "Close" : "Hide"}
+								{done ? t("Close") : t("Hide")}
 							</Button>
 						) : null}
 					</DialogFooter>

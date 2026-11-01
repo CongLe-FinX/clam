@@ -2,7 +2,8 @@ import type { Context } from "@clam/contracts";
 import { ChevronDown, GitMerge, Pencil, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
-import { errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { lineDiff } from "@/lib/line-diff";
 import { cn, relativeTime } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -20,7 +21,7 @@ function Side({ heading, meta, body, tone }: { heading: string; meta: string; bo
 				</p>
 			</div>
 			<pre className="scrollbar-thin max-h-72 min-h-16 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-surface-1 p-3 font-mono text-xs leading-relaxed shadow-[inset_0_0_0_1px_var(--border)]">
-				{body || <span className="text-subtle">(empty)</span>}
+				{body || <span className="text-subtle">{t("(empty)")}</span>}
 			</pre>
 		</section>
 	);
@@ -38,18 +39,18 @@ export function ConflictResolver({ context, nodeNames, onResolved }: { context: 
 	const [merged, setMerged] = useState(context.body);
 	const ops = useMemo(() => lineDiff(context.body, remote?.body ?? ""), [context.body, remote?.body]);
 	const pendingKeep = resolve.isPending ? resolve.variables?.body.keep : undefined;
-	const remoteName = remote ? (nodeNames.get(remote.nodeId) ?? remote.nodeName) : "Another machine";
+	const remoteName = remote ? (nodeNames.get(remote.nodeId) ?? remote.nodeName) : t("Another machine");
 
 	const run = (body: ResolveContextInput, done: string) =>
 		resolve.mutate(
 			{ id: context.id, body },
 			{
 				onSuccess: (c) => {
-					toast.success(done, { description: "Both versions stay in History." });
+					toast.success(done, { description: t("Both versions stay in History.") });
 					setMerging(false);
 					onResolved?.(c);
 				},
-				onError: (e) => toast.error("Could not resolve the conflict", { description: errorMessage(e) }),
+				onError: (e) => toast.error(t("Could not resolve the conflict"), { description: errorText(e) }),
 			},
 		);
 
@@ -58,13 +59,13 @@ export function ConflictResolver({ context, nodeNames, onResolved }: { context: 
 			<div className="flex items-start gap-2.5">
 				<TriangleAlert className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden />
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-					<p className="text-[13px] font-semibold text-danger">Sync conflict — {remoteName} changed this at the same time</p>
+					<p className="text-[13px] font-semibold text-danger">{t("Sync conflict — {name} changed this at the same time", { name: remoteName })}</p>
 					<p className="text-xs text-muted-foreground">
-						Nothing was merged automatically. Look at both versions and choose which to keep, or write a merged one. Both versions stay in History.
+						{t("Nothing was merged automatically. Look at both versions and choose which to keep, or write a merged one. Both versions stay in History.")}
 					</p>
 				</div>
 				<Button size="sm" variant="ghost" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="shrink-0">
-					{open ? "Hide" : "Resolve"}
+					{open ? t("Hide") : t("Resolve")}
 					<ChevronDown className={cn("transition-transform duration-150", open && "rotate-180")} aria-hidden />
 				</Button>
 			</div>
@@ -74,13 +75,13 @@ export function ConflictResolver({ context, nodeNames, onResolved }: { context: 
 						<>
 							<div className="grid min-w-0 gap-3 lg:grid-cols-2">
 								<Side
-									heading="Mine (this machine)"
+									heading={t("Mine (this machine)")}
 									meta={`v${context.version} · ${authorLabel(context.author)} · ${relativeTime(context.updatedAt)}`}
 									body={context.body}
 									tone="mine"
 								/>
 								<Side
-									heading={`Theirs (${remoteName})`}
+									heading={t("Theirs ({name})", { name: remoteName })}
 									meta={`v${remote.version} · ${authorLabel(remote.author)} · ${relativeTime(remote.at)}`}
 									body={remote.body}
 									tone="theirs"
@@ -88,36 +89,36 @@ export function ConflictResolver({ context, nodeNames, onResolved }: { context: 
 							</div>
 							<div className="flex min-w-0 flex-col gap-1.5">
 								<div className="flex items-center gap-2 text-xs text-muted-foreground">
-									<span>Differences (mine → theirs)</span>
+									<span>{t("Differences (mine → theirs)")}</span>
 									<DiffStat ops={ops} />
 								</div>
-								<DiffView ops={ops} label="Differences between my version and theirs" />
+								<DiffView ops={ops} label={t("Differences between my version and theirs")} />
 							</div>
 						</>
 					) : (
-						<p className="text-xs text-muted-foreground">The competing version is not available on this machine yet. You can keep your version.</p>
+						<p className="text-xs text-muted-foreground">{t("The competing version is not available on this machine yet. You can keep your version.")}</p>
 					)}
 					{merging ? (
 						<div className="flex min-w-0 flex-col gap-3 rounded-lg bg-surface-1/60 p-3 shadow-[inset_0_0_0_1px_var(--border)]">
-							<p className="text-xs font-medium">Merged text — starts from your version; copy what you need from theirs above.</p>
-							<MarkdownEditor value={merged} onChange={setMerged} disabled={resolve.isPending} aria-label="Merged content (Markdown)" onSubmit={() => run({ keep: "merged", body: merged }, "Merged version saved")} autoFocus />
+							<p className="text-xs font-medium">{t("Merged text — starts from your version; copy what you need from theirs above.")}</p>
+							<MarkdownEditor value={merged} onChange={setMerged} disabled={resolve.isPending} aria-label={t("Merged content (Markdown)")} onSubmit={() => run({ keep: "merged", body: merged }, t("Merged version saved"))} autoFocus />
 							<div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
 								<Button variant="ghost" disabled={resolve.isPending} onClick={() => setMerging(false)}>
-									Cancel
+									{t("Cancel")}
 								</Button>
-								<Button variant="primary" loading={pendingKeep === "merged"} disabled={resolve.isPending} onClick={() => run({ keep: "merged", body: merged }, "Merged version saved")}>
-									<GitMerge /> Save merged version
+								<Button variant="primary" loading={pendingKeep === "merged"} disabled={resolve.isPending} onClick={() => run({ keep: "merged", body: merged }, t("Merged version saved"))}>
+									<GitMerge /> {t("Save merged version")}
 								</Button>
 							</div>
 						</div>
 					) : (
 						<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-							<Button variant="outline" loading={pendingKeep === "local"} disabled={resolve.isPending} onClick={() => run({ keep: "local" }, "Kept your version")}>
-								Keep mine
+							<Button variant="outline" loading={pendingKeep === "local"} disabled={resolve.isPending} onClick={() => run({ keep: "local" }, t("Kept your version"))}>
+								{t("Keep mine")}
 							</Button>
 							{remote ? (
-								<Button variant="outline" loading={pendingKeep === "remote"} disabled={resolve.isPending} onClick={() => run({ keep: "remote" }, `Kept ${remoteName}'s version`)}>
-									Keep theirs
+								<Button variant="outline" loading={pendingKeep === "remote"} disabled={resolve.isPending} onClick={() => run({ keep: "remote" }, t("Kept {name}’s version", { name: remoteName }))}>
+									{t("Keep theirs")}
 								</Button>
 							) : null}
 							<Button
@@ -128,7 +129,7 @@ export function ConflictResolver({ context, nodeNames, onResolved }: { context: 
 									setMerging(true);
 								}}
 							>
-								<Pencil /> Edit merged…
+								<Pencil /> {t("Edit merged…")}
 							</Button>
 						</div>
 					)}

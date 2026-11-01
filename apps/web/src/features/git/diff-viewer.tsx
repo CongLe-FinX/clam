@@ -3,6 +3,7 @@ import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowRight, ChevronRight, FileMinus, FilePlus, FileQuestion, FileWarning, TriangleAlert } from "lucide-react";
 import { memo, type Ref, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { HlLineView } from "@/components/code-block";
+import { t, tr } from "@/i18n";
 import { type HlLine, highlightLines, langFromPath } from "@/lib/highlight";
 import { cn, formatNumber } from "@/lib/utils";
 import {
@@ -18,7 +19,7 @@ import {
 	ROW_H,
 	rowHeight,
 } from "./diff-model.ts";
-import { KIND_LETTER, KIND_TONE, splitPath } from "./status-utils.ts";
+import { KIND_LABEL, KIND_LETTER, KIND_TONE, splitPath } from "./status-utils.ts";
 
 export interface DiffViewerHandle {
 	next(): void;
@@ -73,7 +74,7 @@ function useHighlights(files: readonly DiffFile[], visible: readonly number[], c
 				.catch(() => hlCache.set(h, { old: null, new: null }))
 				.finally(() => {
 					hlPending.delete(h);
-					if (alive) setTick((t) => t + 1);
+					if (alive) setTick((n) => n + 1);
 				});
 		}
 		return () => {
@@ -129,14 +130,17 @@ const Half = memo(function Half({ lref, side, tokens, width }: { lref: LineRef |
 });
 
 const noteText: Record<NoteKind, { icon: typeof FileQuestion; text: (f: DiffFile) => string }> = {
-	binary: { icon: FileQuestion, text: () => "Binary file — contents are not shown." },
+	binary: { icon: FileQuestion, text: () => t("Binary file — contents are not shown.") },
 	"too-large": {
 		icon: FileWarning,
-		text: (f) => `Diff too large to display${f.additions + f.deletions ? ` (${formatNumber(f.additions + f.deletions)} changed lines)` : ""}. Open the file or inspect it with git.`,
+		text: (f) =>
+			f.additions + f.deletions
+				? t("Diff too large to display ({count} changed lines). Open the file or inspect it with git.", { count: formatNumber(f.additions + f.deletions) })
+				: t("Diff too large to display. Open the file or inspect it with git."),
 	},
-	empty: { icon: FilePlus, text: () => "Empty file." },
-	rename: { icon: ArrowRight, text: (f) => `Renamed${f.oldPath ? ` from ${f.oldPath}` : ""} — no content changes.` },
-	"no-hunks": { icon: FileMinus, text: () => "No textual changes (file mode or whitespace only)." },
+	empty: { icon: FilePlus, text: () => t("Empty file.") },
+	rename: { icon: ArrowRight, text: (f) => (f.oldPath ? t("Renamed from {path} — no content changes.", { path: f.oldPath }) : t("Renamed — no content changes.")) },
+	"no-hunks": { icon: FileMinus, text: () => t("No textual changes (file mode or whitespace only).") },
 };
 
 function FileHeader({ file, index, count, collapsed, width, onToggle }: { file: DiffFile; index: number; count: number; collapsed: boolean; width: number; onToggle: () => void }) {
@@ -152,7 +156,7 @@ function FileHeader({ file, index, count, collapsed, width, onToggle }: { file: 
 			className="sticky left-0 flex h-full items-center gap-2 px-3 text-left outline-none transition-colors hover:bg-surface-3 focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]"
 		>
 			<ChevronRight aria-hidden className={cn("size-3.5 shrink-0 text-subtle transition-transform duration-150", !collapsed && "rotate-90")} />
-			<span className={cn("grid size-5 shrink-0 place-items-center rounded font-mono text-2xs font-semibold bg-surface-3", KIND_TONE[kind])} title={file.status}>
+			<span className={cn("grid size-5 shrink-0 place-items-center rounded font-mono text-2xs font-semibold bg-surface-3", KIND_TONE[kind])} title={tr(KIND_LABEL[kind])}>
 				{KIND_LETTER[kind]}
 			</span>
 			<span className="min-w-0 truncate font-mono text-xs" title={file.path}>
@@ -161,7 +165,7 @@ function FileHeader({ file, index, count, collapsed, width, onToggle }: { file: 
 				<span className="font-medium text-foreground">{name}</span>
 			</span>
 			<span className="ml-auto flex shrink-0 items-center gap-2 font-mono text-2xs tabular">
-				{file.binary ? <span className="text-subtle">binary</span> : null}
+				{file.binary ? <span className="text-subtle">{t("binary")}</span> : null}
 				{file.additions > 0 ? <span className="text-success">+{formatNumber(file.additions)}</span> : null}
 				{file.deletions > 0 ? <span className="text-danger">−{formatNumber(file.deletions)}</span> : null}
 				<span className="hidden text-subtle sm:inline">
@@ -331,7 +335,7 @@ export function DiffViewer({ files, truncated, mode, focus, onActiveFile, classN
 			{truncated ? (
 				<div role="status" className="flex shrink-0 items-center gap-2 border-b bg-warning/10 px-3 py-1.5 text-xs text-warning">
 					<TriangleAlert className="size-3.5 shrink-0" />
-					The diff is larger than the display limit — some files are omitted. Narrow it by staging or committing part of the changes.
+					{t("The diff is larger than the display limit — some files are omitted. Narrow it by staging or committing part of the changes.")}
 				</div>
 			) : null}
 			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard scrolling + n/p file navigation */}
@@ -339,7 +343,7 @@ export function DiffViewer({ files, truncated, mode, focus, onActiveFile, classN
 				ref={scrollRef}
 				tabIndex={0}
 				role="region"
-				aria-label="Diff"
+				aria-label={t("Diff")}
 				onKeyDown={(e) => {
 					if (e.metaKey || e.ctrlKey || e.altKey) return;
 					if (e.key === "n") {

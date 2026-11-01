@@ -5,7 +5,7 @@ import path from "node:path";
 import { PassThrough, Transform, type Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { wire } from "@clam/agent-network";
-import { ATTACHMENT_MAX_BYTES, type FileEntry, type SaveAttachmentBody, type SharedAttachment } from "@clam/contracts";
+import { ATTACHMENT_MAX_BYTES, type FileEntry, i18nMsg, type SaveAttachmentBody, type SharedAttachment } from "@clam/contracts";
 import type { z } from "zod";
 import { agentSessions, projects } from "@clam/database";
 import { eq } from "drizzle-orm";
@@ -155,9 +155,9 @@ export class AttachmentService implements AttachmentApi {
 
 	async upload(sharedId: string, input: { name: string; mimeType: string | undefined; body: unknown; contentLength: string | undefined }): Promise<SharedAttachment> {
 		const shared = this.store.get(sharedId);
-		if (shared.state !== "active") throw new ApiError(409, "not_a_participant", "This node left the shared session");
+		if (shared.state !== "active") throw new ApiError(409, "not_a_participant", i18nMsg("This node left the shared session"));
 		if (input.contentLength !== undefined && /^\d{1,16}$/.test(input.contentLength) && Number(input.contentLength) > ATTACHMENT_MAX_BYTES) {
-			throw new ApiError(413, "payload_too_large", `The file is larger than the ${Math.round(ATTACHMENT_MAX_BYTES / 1024 / 1024)} MB limit`);
+			throw new ApiError(413, "payload_too_large", i18nMsg("The file is larger than the {mb} MB limit", { mb: Math.round(ATTACHMENT_MAX_BYTES / 1024 / 1024) }));
 		}
 		const { sha256, size } = await this.ingestStream(bodyStream(input.body), ATTACHMENT_MAX_BYTES);
 		const name = safeFileName(input.name);
@@ -176,7 +176,7 @@ export class AttachmentService implements AttachmentApi {
 		return [...new Set(ids)].map((id) => {
 			const row = this.store.attachment(id);
 			if (!row || row.sharedSessionId !== sharedId || row.originNodeId !== this.ctx.identity.nodeId || row.messageId !== null || !row.stored) {
-				throw ApiError.badRequest(`Attachment ${id} is unknown, already posted, or was not uploaded to this shared session on this node`);
+				throw ApiError.badRequest(i18nMsg("Attachment {id} is unknown, already posted, or was not uploaded to this shared session on this node", { id }));
 			}
 			return row;
 		});
@@ -214,7 +214,7 @@ export class AttachmentService implements AttachmentApi {
 
 	private async download(row: AttachmentRow, sink: Writable | undefined): Promise<void> {
 		const holders = this.holders(row);
-		let last: unknown = ApiError.upstream("No other member node of this shared session is known to hold the file");
+		let last: unknown = ApiError.upstream(i18nMsg("No other member node of this shared session is known to hold the file"));
 		for (const peer of holders) {
 			const tmp = await this.temporary();
 			let sent = 0;
@@ -245,7 +245,7 @@ export class AttachmentService implements AttachmentApi {
 				if (sink && sent > 0) break;
 			}
 		}
-		const failure = last instanceof ApiError ? last : ApiError.upstream(`The file could not be fetched from the other member nodes: ${errorText(last)}`);
+		const failure = last instanceof ApiError ? last : ApiError.upstream(i18nMsg("The file could not be fetched from the other member nodes: {error}", { error: errorText(last) }));
 		sink?.destroy(failure);
 		throw failure;
 	}
@@ -402,11 +402,11 @@ export class AttachmentService implements AttachmentApi {
 		// Agents think in absolute paths too: accept one when it lies inside the working folder.
 		const wanted = path.isAbsolute(wantedPath) ? path.relative(root.abs, wantedPath) : wantedPath;
 		const { rel, abs } = await resolveInsideRoot(project.path, wanted);
-		if (rel === "") throw ApiError.badRequest("path must name a file");
+		if (rel === "") throw ApiError.badRequest(i18nMsg("path must name a file"));
 		refuseGitDir(rel);
 		const info = await stat(abs);
-		if (!info.isFile()) throw ApiError.badRequest(`"${rel}" is not a regular file`);
-		if (info.size > maxBytes) throw ApiError.badRequest(`"${rel}" is ${info.size} bytes; the limit for a file in the group chat is ${maxBytes}`);
+		if (!info.isFile()) throw ApiError.badRequest(i18nMsg("\"{path}\" is not a regular file", { path: rel }));
+		if (info.size > maxBytes) throw ApiError.badRequest(i18nMsg("\"{path}\" is {size} bytes; the limit for a file in the group chat is {max}", { path: rel, size: info.size, max: maxBytes }));
 		// The agent may keep editing its file: the group gets a snapshot of it as it is now.
 		const { sha256, size } = await this.ingestStream(createReadStream(abs), maxBytes);
 		if (options.skipIfPosted && (this.store.postedFromFolder(sharedId, sha256, rel) || this.store.postedDigest(sharedId, sha256))) return null;

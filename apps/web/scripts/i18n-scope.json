@@ -1,0 +1,28 @@
+{
+	"lint": [
+		"src/main.tsx",
+		"src/app",
+		"src/components",
+		"src/lib",
+		"src/features/overview",
+		"src/features/auth",
+		"src/features/agents",
+		"src/features/chats",
+		"src/features/usage",
+		"src/features/node",
+		"src/hooks",
+		"src/ui",
+		"src/features/session",
+		"src/features/workspaces",
+		"src/features/shared",
+		"src/features/browser",
+		"src/features/network",
+		"src/features/context",
+		"src/features/handoff",
+		"src/features/settings",
+		"src/features/terminal",
+		"src/features/tasks",
+		"src/features/git",
+		"src/features/projects"
+	]
+}

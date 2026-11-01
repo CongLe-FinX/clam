@@ -1,5 +1,5 @@
 import { ulid } from "@clam/agent-network";
-import type { MessagesPage, SessionLiveState, UiMessage } from "@clam/contracts";
+import { i18nMsg, type MessagesPage, type SessionLiveState, type UiMessage } from "@clam/contracts";
 import {
 	outbox,
 	sharedCheckpoints,
@@ -50,7 +50,7 @@ export function decodeMessageCursor(cursor: string): MessagePosition {
 	} catch {
 		// falls through to the error below
 	}
-	throw ApiError.badRequest("The cursor is not valid");
+	throw ApiError.badRequest(i18nMsg("The cursor is not valid"));
 }
 export type MirrorStateRow = typeof sharedMirrorState.$inferSelect;
 
@@ -249,7 +249,7 @@ export class SharedStore {
 		const created = this.db.insert(sharedMessages).values(values).onConflictDoNothing().returning().get();
 		if (created) return { row: created, inserted: true };
 		const existing = this.message(values.id);
-		if (!existing) throw new ApiError(409, "idempotency_conflict", `Sequence ${values.originSeq} of that origin is already used by another message`);
+		if (!existing) throw new ApiError(409, "idempotency_conflict", i18nMsg("Sequence {seq} of that origin is already used by another message", { seq: String(values.originSeq) }));
 		return { row: existing, inserted: false };
 	}
 

@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { API_PREFIX, normalizePeerUrl, signRequest, signerFromIdentity } from "@clam/agent-network";
-import { BundleManifest } from "@clam/contracts";
+import { BundleManifest, i18nMsg, plainMsg, type I18nMessage } from "@clam/contracts";
 import type { HandoffManifest, ManifestArtifactRef } from "@clam/handoff-engine";
 import { applyBundle, readBundleManifest, scanFolder } from "@clam/workspace-files";
 import { taskBranchName } from "@clam/task-engine";
@@ -64,11 +64,11 @@ export async function downloadHandoffArtifact(hub: HandoffHub, row: HandoffRow, 
 	const dest = path.join(hub.dir(row.id), ref.artifactId);
 	const known = hub.store.artifact(row.id, ref.artifactId);
 	if (known && (await matches(known.path, ref))) return known;
-	if (ref.size > MAX_ARTIFACT_BYTES) throw new HandoffStepError("manifest_invalid", `${o.name} is ${ref.size} bytes; this node accepts at most ${MAX_ARTIFACT_BYTES}`, 2);
+	if (ref.size > MAX_ARTIFACT_BYTES) throw new HandoffStepError("manifest_invalid", i18nMsg("{name} is {size} bytes; this node accepts at most {max}", { name: o.name, size: ref.size, max: MAX_ARTIFACT_BYTES }), 2);
 
 	const peer = hub.ctx.network.peers.row(row.peerId);
 	const origin = peer ? normalizePeerUrl(peer.url, { allowLoopbackHttp: hub.ctx.config.allowLoopbackPeers }) : null;
-	if (!peer || peer.status === "revoked" || origin === null) throw new HandoffStepError("timeout", "The source node is not reachable, so its files cannot be downloaded", 2);
+	if (!peer || peer.status === "revoked" || origin === null) throw new HandoffStepError("timeout", i18nMsg("The source node is not reachable, so its files cannot be downloaded"), 2);
 	const url = `${origin}${API_PREFIX}/handoffs/${encodeURIComponent(row.id)}/artifacts/${encodeURIComponent(ref.artifactId)}`;
 
 	let last = "";
@@ -78,37 +78,37 @@ export async function downloadHandoffArtifact(hub: HandoffHub, row: HandoffRow, 
 		try {
 			const headers = signRequest(signerFromIdentity(hub.ctx.identity), { method: "GET", url, bodyBytes: new Uint8Array(0) });
 			const response = await fetch(url, { method: "GET", headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-			if ([403, 404, 410].includes(response.status)) throw new HandoffStepError("manifest_invalid", `The source no longer serves ${o.name} (${response.status})`, 2);
+			if ([403, 404, 410].includes(response.status)) throw new HandoffStepError("manifest_invalid", i18nMsg("The source no longer serves {name} ({status})", { name: o.name, status: response.status }), 2);
 			if (!response.ok || !response.body) {
 				last = `the source answered ${response.status}`;
 				continue;
 			}
 			const declared = Number(response.headers.get("content-length") ?? ref.size);
-			if (declared !== ref.size) throw new HandoffStepError("manifest_invalid", `${o.name} is announced as ${ref.size} bytes but the source sends ${declared}`, 2);
+			if (declared !== ref.size) throw new HandoffStepError("manifest_invalid", i18nMsg("{name} is announced as {size} bytes but the source sends {declared}", { name: o.name, size: ref.size, declared }), 2);
 			const hash = createHash("sha256");
 			let received = 0;
 			const handle = await open(partial, "w", 0o600);
 			try {
 				for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
 					received += chunk.length;
-					if (received > ref.size) throw new HandoffStepError("manifest_invalid", `${o.name} is larger than announced`, 2);
+					if (received > ref.size) throw new HandoffStepError("manifest_invalid", i18nMsg("{name} is larger than announced", { name: o.name }), 2);
 					hash.update(chunk);
 					await handle.write(chunk);
 				}
 			} finally {
 				await handle.close();
 			}
-			if (received !== ref.size || hash.digest("hex") !== ref.sha256) throw new HandoffStepError("manifest_invalid", `${o.name} does not match the digest in the manifest`, 2);
+			if (received !== ref.size || hash.digest("hex") !== ref.sha256) throw new HandoffStepError("manifest_invalid", i18nMsg("{name} does not match the digest in the manifest", { name: o.name }), 2);
 			await rename(partial, dest);
 			return hub.store.insertArtifact({ handoffId: row.id, artifactId: ref.artifactId, name: o.name, kind: o.kind, sha256: ref.sha256, size: ref.size, path: dest });
 		} catch (error) {
 			await rm(partial, { force: true });
 			if (error instanceof HandoffStepError) throw error;
-			if (isNoSpace(error)) throw new HandoffStepError("disk_full", `No space left to store ${o.name}`, 2);
+			if (isNoSpace(error)) throw new HandoffStepError("disk_full", i18nMsg("No space left to store {name}", { name: o.name }), 2);
 			last = errorText(error);
 		}
 	}
-	throw new HandoffStepError("timeout", `${o.name} could not be downloaded from the source: ${last}`, 2);
+	throw new HandoffStepError("timeout", i18nMsg("{name} could not be downloaded from the source: {error}", { name: o.name, error: last }), 2);
 }
 
 /** Every artifact of the manifest this node needs, downloaded and verified. Optional ones (transcript, logs) never fail the step. */
@@ -129,7 +129,7 @@ export async function downloadManifestArtifacts(hub: HandoffHub, row: HandoffRow
 		} catch (error) {
 			if (error instanceof HandoffStepError && error.code === "disk_full") throw error;
 			hub.log.warn({ handoffId: row.id, artifactId: ref.artifactId, err: errorText(error) }, "an optional handoff artifact could not be downloaded");
-			hub.note(row.id, `${name} could not be downloaded (${errorText(error)}); continuing without it`);
+			hub.note(row.id, i18nMsg("{name} could not be downloaded ({error}); continuing without it", { name, error: errorText(error) }));
 		}
 	}
 }
@@ -164,24 +164,24 @@ const stripRef = (name: string, prefix: string): string => (name.startsWith(pref
  * Step 3, vcs `git`: fetch, create a dedicated branch at `git.commit` in the project (never the user's own branch, never force) and apply
  * the working-tree patch of the source on top. Re-entrant: HEAD already on the branch at the commit with the patch applied is "done".
  */
-export async function restoreGit(hub: HandoffHub, row: HandoffRow, manifest: HandoffManifest, project: ProjectRow): Promise<{ detail: string; prepared: { workBranch: string; baseBranch: string; baseRef: string; originalBranch: string | null; originalSha: string | null } }> {
+export async function restoreGit(hub: HandoffHub, row: HandoffRow, manifest: HandoffManifest, project: ProjectRow): Promise<{ detail: I18nMessage; prepared: { workBranch: string; baseBranch: string; baseRef: string; originalBranch: string | null; originalSha: string | null } }> {
 	const git = manifest.git;
-	if (!git) throw new HandoffStepError("manifest_invalid", "The manifest has no git section", 3);
+	if (!git) throw new HandoffStepError("manifest_invalid", i18nMsg("The manifest has no git section"), 3);
 	const { gitService } = hub.ctx;
 	const guarded = async <T>(work: () => Promise<T>, code: "git_unavailable" | "checkout_conflict"): Promise<T> => {
 		try {
 			return await work();
 		} catch (error) {
-			throw new HandoffStepError(code, errorText(error), 3);
+			throw new HandoffStepError(code, plainMsg(errorText(error)), 3);
 		}
 	};
 
 	const { dir } = await guarded(() => gitService.resolve(project.id), "git_unavailable");
 	const status = await guarded(() => gitService.status(project.id), "git_unavailable");
-	if (!status.isRepo) throw new HandoffStepError("git_unavailable", "The project folder is not a git repository", 3);
+	if (!status.isRepo) throw new HandoffStepError("git_unavailable", i18nMsg("The project folder is not a git repository"), 3);
 	const workBranch = restoreMetaOf(row)?.workBranch ?? handoffBranchName(hub, row, manifest);
 	const patchRow = git.patchArtifact ? hub.store.artifact(row.id, git.patchArtifact.artifactId) : undefined;
-	if (git.patchArtifact && !patchRow) throw new HandoffStepError("manifest_invalid", "The working-tree patch of the handoff was not downloaded", 3);
+	if (git.patchArtifact && !patchRow) throw new HandoffStepError("manifest_invalid", i18nMsg("The working-tree patch of the handoff was not downloaded"), 3);
 	const commit = git.commit.toLowerCase();
 
 	const prepared = (meta: RestoreMeta) => ({ workBranch: meta.workBranch, baseBranch: git.baseBranch, baseRef: `origin/${git.baseBranch}`, originalBranch: meta.originalBranch, originalSha: meta.originalSha });
@@ -189,19 +189,32 @@ export async function restoreGit(hub: HandoffHub, row: HandoffRow, manifest: Han
 
 	if (!(status.branch === workBranch && status.headSha?.toLowerCase() === commit)) {
 		if (status.branch !== workBranch) {
-			if (status.operation) throw new HandoffStepError("checkout_conflict", `A ${status.operation} is in progress in the project; finish or abort it, then retry`, 3);
+			if (status.operation) throw new HandoffStepError("checkout_conflict", i18nMsg("A {operation} is in progress in the project; finish or abort it, then retry", { operation: status.operation }), 3);
 			const tracked = status.files.filter((f) => f.kind !== "untracked");
 			if (tracked.length > 0) {
 				const listed = tracked.slice(0, LISTED_PATHS).map((f) => f.path);
-				throw new HandoffStepError("checkout_conflict", `The project has uncommitted changes to tracked files (${listed.join(", ")}${tracked.length > listed.length ? ` and ${tracked.length - listed.length} more` : ""}); nothing was touched. Commit, stash or discard them, then retry`, 3);
+				const files = listed.join(", ");
+				throw new HandoffStepError(
+					"checkout_conflict",
+					tracked.length > listed.length
+						? i18nMsg("The project has uncommitted changes to tracked files ({files} and {more} more); nothing was touched. Commit, stash or discard them, then retry", { files, more: tracked.length - listed.length })
+						: i18nMsg("The project has uncommitted changes to tracked files ({files}); nothing was touched. Commit, stash or discard them, then retry", { files }),
+					3,
+				);
 			}
 			const busy = treeHolder(hub, row, project.id);
-			if (busy) throw new HandoffStepError("checkout_conflict", `The project's working tree is in use by ${busy}; retry when it is free`, 3);
+			if (busy) throw new HandoffStepError("checkout_conflict", i18nMsg("The project's working tree is in use by {holder}; retry when it is free", { holder: busy }), 3);
 		}
 		if ((await runGit(dir, ["cat-file", "-e", `${commit}^{commit}`])).code !== 0) {
 			await guarded(() => gitService.fetch(project.id), "git_unavailable");
 			if ((await runGit(dir, ["cat-file", "-e", `${commit}^{commit}`])).code !== 0) {
-				throw new HandoffStepError("git_unavailable", `Commit ${commit.slice(0, 12)} is not available from origin after fetching: ${git.pushed ? "is this project linked to the right repository?" : "the source could not push it"}`, 3);
+				throw new HandoffStepError(
+					"git_unavailable",
+					git.pushed
+						? i18nMsg("Commit {commit} is not available from origin after fetching: is this project linked to the right repository?", { commit: commit.slice(0, 12) })
+						: i18nMsg("Commit {commit} is not available from origin after fetching: the source could not push it", { commit: commit.slice(0, 12) }),
+					3,
+				);
 			}
 		}
 		if (meta === null) {
@@ -220,17 +233,17 @@ export async function restoreGit(hub: HandoffHub, row: HandoffRow, manifest: Han
 	}
 	meta ??= { workBranch, originalBranch: status.branch, originalSha: status.headSha, branchCreated: false };
 
-	let detail = `Branch ${workBranch} at ${commit.slice(0, 12)}`;
+	let detail = i18nMsg("Branch {branch} at {commit}", { branch: workBranch, commit: commit.slice(0, 12) });
 	if (patchRow) {
 		const applied = await runGit(dir, ["apply", "--check", "--reverse", patchRow.path]);
 		if (applied.code !== 0) {
 			const check = await runGit(dir, ["apply", "--check", patchRow.path]);
-			if (check.code !== 0) throw new HandoffStepError("patch_failed", `The source's uncommitted changes do not apply on top of ${commit.slice(0, 12)}: ${check.stderr.trim().slice(0, 600)}`, 3);
+			if (check.code !== 0) throw new HandoffStepError("patch_failed", i18nMsg("The source's uncommitted changes do not apply on top of {commit}: {error}", { commit: commit.slice(0, 12), error: check.stderr.trim().slice(0, 600) }), 3);
 			const result = await runGit(dir, ["apply", patchRow.path]);
-			if (result.code !== 0) throw new HandoffStepError("patch_failed", `git apply failed: ${result.stderr.trim().slice(0, 600)}`, 3);
+			if (result.code !== 0) throw new HandoffStepError("patch_failed", i18nMsg("git apply failed: {error}", { error: result.stderr.trim().slice(0, 600) }), 3);
 			await gitService.status(project.id).catch(() => undefined);
 		}
-		detail += ` plus the patch of ${git.patchArtifact?.files.length ?? 0} file(s)`;
+		detail = i18nMsg("Branch {branch} at {commit} plus the patch of {files, plural, one {# file} other {# files}}", { branch: workBranch, commit: commit.slice(0, 12), files: git.patchArtifact?.files.length ?? 0 });
 	}
 	return { detail, prepared: prepared(meta) };
 }
@@ -288,39 +301,45 @@ export const baseManifestPath = (hub: HandoffHub, taskId: string): string => pat
  * Step 3, vcs `files`: unpack the folder bundle into the project without replacing anything that differs (`files_conflict`), then install the
  * base manifest the result is measured against (the executor's, or — when the source had none — the folder as it is now).
  */
-export async function restoreFilesBundle(hub: HandoffHub, row: HandoffRow, manifest: HandoffManifest, project: ProjectRow): Promise<string> {
+export async function restoreFilesBundle(hub: HandoffHub, row: HandoffRow, manifest: HandoffManifest, project: ProjectRow): Promise<I18nMessage> {
 	const files = manifest.files;
-	if (!files) throw new HandoffStepError("manifest_invalid", "The manifest has no files bundle", 3);
+	if (!files) throw new HandoffStepError("manifest_invalid", i18nMsg("The manifest has no files bundle"), 3);
 	const bundle = hub.store.artifact(row.id, files.artifactId);
-	if (!bundle) throw new HandoffStepError("manifest_invalid", "The folder bundle of the handoff was not downloaded", 3);
+	if (!bundle) throw new HandoffStepError("manifest_invalid", i18nMsg("The folder bundle of the handoff was not downloaded"), 3);
 	let listed: Awaited<ReturnType<typeof readBundleManifest>>;
 	try {
 		listed = await guardBundle(() => readBundleManifest(bundle.path));
 		const result = await guardBundle(() => applyBundle(bundle.path, project.path));
 		const conflicts = result.skipped.filter((s) => s.reason === "conflict").map((s) => s.path);
 		if (conflicts.length > 0) {
-			throw new HandoffStepError("files_conflict", `${conflicts.length} file(s) in the project folder differ from the handed-over ones and were not replaced: ${conflicts.slice(0, LISTED_PATHS).join(", ")}${conflicts.length > LISTED_PATHS ? " …" : ""}`, 3);
+			throw new HandoffStepError(
+				"files_conflict",
+				conflicts.length > LISTED_PATHS
+					? i18nMsg("{count} file(s) in the project folder differ from the handed-over ones and were not replaced: {files} …", { count: conflicts.length, files: conflicts.slice(0, LISTED_PATHS).join(", ") })
+					: i18nMsg("{count} file(s) in the project folder differ from the handed-over ones and were not replaced: {files}", { count: conflicts.length, files: conflicts.slice(0, LISTED_PATHS).join(", ") }),
+				3,
+			);
 		}
 	} catch (error) {
 		if (error instanceof HandoffStepError) throw error;
-		if (error instanceof ApiError && error.status === 422) throw new HandoffStepError("manifest_invalid", error.message, 3);
-		if (isNoSpace(error)) throw new HandoffStepError("disk_full", "No space left to restore the files", 3);
+		if (error instanceof ApiError && error.status === 422) throw new HandoffStepError("manifest_invalid", { text: error.message, i18n: error.i18n }, 3);
+		if (isNoSpace(error)) throw new HandoffStepError("disk_full", i18nMsg("No space left to restore the files"), 3);
 		throw error;
 	}
 
 	await mkdir(path.dirname(baseManifestPath(hub, manifest.task.id)), { recursive: true, mode: 0o700 });
 	const baseRow = files.base ? hub.store.artifact(row.id, files.base.artifactId) : undefined;
-	if (files.base && !baseRow) throw new HandoffStepError("manifest_invalid", "The base manifest of the handoff was not downloaded", 3);
+	if (files.base && !baseRow) throw new HandoffStepError("manifest_invalid", i18nMsg("The base manifest of the handoff was not downloaded"), 3);
 	if (baseRow) {
 		let base: BundleManifest;
 		try {
 			base = BundleManifest.parse(JSON.parse(await readFile(baseRow.path, "utf8")));
 		} catch {
-			throw new HandoffStepError("manifest_invalid", "The base manifest of the handoff is not valid", 3);
+			throw new HandoffStepError("manifest_invalid", i18nMsg("The base manifest of the handoff is not valid"), 3);
 		}
 		await writeFile(baseManifestPath(hub, manifest.task.id), JSON.stringify(base), { mode: 0o600 });
 	} else {
 		await writeFile(baseManifestPath(hub, manifest.task.id), JSON.stringify(await guardBundle(() => scanFolder(project.path))), { mode: 0o600 });
 	}
-	return `${listed.files.length} file(s) restored into ${project.path}`;
+	return i18nMsg("{count, plural, one {# file} other {# files}} restored into {path}", { count: listed.files.length, path: project.path });
 }

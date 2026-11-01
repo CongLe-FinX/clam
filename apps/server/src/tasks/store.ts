@@ -1,8 +1,8 @@
 import { ulid, type wire } from "@clam/agent-network";
-import type { Task, TaskEvent, TaskMessage, TaskResult, TaskStatus } from "@clam/contracts";
+import { i18nMsg, type I18nMessage, type Task, type TaskEvent, type TaskMessage, type TaskResult, type TaskStatus } from "@clam/contracts";
 import { TERMINAL_TASK_STATUSES } from "@clam/contracts";
 import { artifacts, outbox, taskEvents, taskMessages, tasks, type ClamDb } from "@clam/database";
-import { AGENT_MESSAGE_LIMIT, agentMessageBudget, applyMirroredEvents, assertTransition, describeStatusChange, orderMessages, TaskTransitionError } from "@clam/task-engine";
+import { AGENT_MESSAGE_LIMIT, agentMessageBudget, applyMirroredEvents, assertTransition, statusChangeMessage, orderMessages, TaskTransitionError } from "@clam/task-engine";
 import { and, asc, desc, eq, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { ApiError } from "../http/errors.ts";
 
@@ -73,7 +73,7 @@ export interface NewOutboxItem {
 
 export interface StatusTransitionOptions {
 	/** Why (rejected / failed / blocked ...). Cleared (null) when omitted. */
-	reason?: string | null;
+	reason?: string | I18nMessage | null;
 	/** Extra columns written together with the status. */
 	patch?: Partial<TaskInsert>;
 	/** Only transition when the current status is one of these; otherwise `ApiError` 409 `conflict`. */
@@ -174,19 +174,20 @@ export class TaskStore {
 			const row = tx.select().from(tasks).where(eq(tasks.id, id)).get();
 			if (!row) throw ApiError.notFound("Task");
 			const from = row.status as TaskStatus;
-			if (options.from && !options.from.includes(from)) throw ApiError.conflict(`Task is ${from}, expected ${options.from.join(" or ")}`, { status: from });
+			if (options.from && !options.from.includes(from)) throw ApiError.conflict(i18nMsg("Task is {status}, expected {expected}", { status: from, expected: options.from.join(" or ") }), { status: from });
 			try {
 				assertTransition(from, to);
 			} catch (error) {
-				if (error instanceof TaskTransitionError) throw new ApiError(409, "illegal_transition", error.message, { from, to });
+				if (error instanceof TaskTransitionError) throw new ApiError(409, "illegal_transition", i18nMsg("illegal task transition {fromStatus} → {toStatus}", { fromStatus: from, toStatus: to }), { from, to });
 				throw error;
 			}
 			const at = nowIso();
-			const reason = options.reason ?? null;
+			const say = typeof options.reason === "string" ? { text: options.reason, i18n: undefined } : (options.reason ?? null);
+			const reason = say?.text ?? null;
 			const seq = row.lastEventSeq + 1;
 			const event = tx
 				.insert(taskEvents)
-				.values({ taskId: id, seq, type: "status", summary: describeStatusChange(from, to, reason), payload: { from, to, reason, ...options.payload }, createdAt: at })
+				.values({ taskId: id, seq, type: "status", ...statusSummary(from, to, reason), payload: { from, to, reason, ...options.payload }, createdAt: at })
 				.returning()
 				.get();
 			const updated = tx
@@ -195,6 +196,7 @@ export class TaskStore {
 					...options.patch,
 					status: to,
 					reason,
+					reasonI18n: say?.i18n ?? null,
 					lastEventSeq: seq,
 					updatedAt: at,
 					...(to === "running" && row.startedAt === null && { startedAt: at }),
@@ -210,13 +212,13 @@ export class TaskStore {
 	// ------------------------------------------------------------------ events
 
 	/** Append an event, allocating the next gap-free `seq` (executor side; the sender stores mirrored events with `mirrorEvents`). */
-	appendEvent(taskId: string, e: { type: EventKind; summary: string; payload?: unknown }): TaskEventRow {
+	appendEvent(taskId: string, e: { type: EventKind; summary: I18nMessage; payload?: unknown }): TaskEventRow {
 		return this.db.transaction((tx) => {
 			const row = tx.select({ seq: tasks.lastEventSeq }).from(tasks).where(eq(tasks.id, taskId)).get();
 			if (!row) throw ApiError.notFound("Task");
 			const seq = row.seq + 1;
 			const at = nowIso();
-			const event = tx.insert(taskEvents).values({ taskId, seq, type: e.type, summary: e.summary.slice(0, 2000), payload: e.payload ?? null, createdAt: at }).returning().get();
+			const event = tx.insert(taskEvents).values({ taskId, seq, type: e.type, ...eventSummary(e.summary), payload: e.payload ?? null, createdAt: at }).returning().get();
 			tx.update(tasks).set({ lastEventSeq: seq, updatedAt: at }).where(eq(tasks.id, taskId)).run();
 			return event;
 		});
@@ -245,7 +247,7 @@ export class TaskStore {
 			for (const e of accepted) {
 				const created = tx
 					.insert(taskEvents)
-					.values({ taskId, seq: e.seq, type: e.type, summary: e.summary, payload: e.payload ?? null, createdAt: e.at })
+					.values({ taskId, seq: e.seq, type: e.type, summary: e.summary, i18n: e.i18n ?? null, payload: e.payload ?? null, createdAt: e.at })
 					.onConflictDoNothing()
 					.returning()
 					.get();
@@ -387,7 +389,9 @@ export class TaskStore {
 	}
 
 	updateOutbox(id: string, patch: Partial<typeof outbox.$inferInsert>): OutboxRow | undefined {
-		return this.db.update(outbox).set(patch).where(eq(outbox.id, id)).returning().get();
+		// `last_error` and its twin always change together: a patch that sets one without the other clears the stale twin.
+		const withTwin = "lastError" in patch && !("lastErrorI18n" in patch) ? { ...patch, lastErrorI18n: null } : patch;
+		return this.db.update(outbox).set(withTwin).where(eq(outbox.id, id)).returning().get();
 	}
 
 	// ------------------------------------------------------------------ artifacts
@@ -440,7 +444,7 @@ export class TaskStore {
 			.get();
 		if (!row) return { state: "delivered", attempts: 0, lastError: null };
 		const state = row.state === "pending" ? "pending" : row.state === "sent" ? "delivered" : "failed";
-		return { state, attempts: row.attempts, lastError: row.lastError };
+		return { state, attempts: row.attempts, lastError: row.lastError, ...(row.lastErrorI18n && { lastErrorI18n: row.lastErrorI18n }) };
 	}
 
 	toTask(row: TaskRow): Task {
@@ -461,6 +465,7 @@ export class TaskStore {
 			deliverAs: row.deliverAs === "summary" ? "summary" : row.deliverAs === "files" ? "files" : "branch",
 			constraints: row.constraints,
 			reason: row.reason,
+			...(row.reasonI18n && { reasonI18n: row.reasonI18n }),
 			result: withFiles(row.result),
 			cost: row.cost,
 			delivery: outgoing ? this.createDelivery(row.id) : { state: "delivered", attempts: 0, lastError: null },
@@ -476,7 +481,7 @@ export class TaskStore {
 	}
 
 	toEvent(row: TaskEventRow): TaskEvent {
-		return { seq: row.seq, type: row.type as TaskEvent["type"], at: row.createdAt, summary: row.summary, payload: row.payload ?? null };
+		return { seq: row.seq, type: row.type as TaskEvent["type"], at: row.createdAt, summary: row.summary, ...(row.i18n && { i18n: row.i18n }), payload: row.payload ?? null };
 	}
 
 	toMessage(row: TaskMessageRow): TaskMessage {
@@ -501,6 +506,7 @@ export class TaskStore {
 			agentId: row.executorAgentId,
 			agentName: row.executorAgentName,
 			reason: row.reason,
+			...(row.reasonI18n && { reasonI18n: row.reasonI18n }),
 			createdAt: row.createdAt,
 			updatedAt: row.updatedAt,
 			startedAt: row.startedAt,
@@ -510,4 +516,13 @@ export class TaskStore {
 			lastEventSeq: row.lastEventSeq,
 		};
 	}
+}
+
+/** Row columns of an event summary. A truncated text no longer equals its template rendering, so it is stored without the structured twin. */
+function eventSummary(say: I18nMessage): { summary: string; i18n: I18nMessage["i18n"] | null } {
+	return { summary: say.text.slice(0, 2000), i18n: say.text.length <= 2000 ? (say.i18n ?? null) : null };
+}
+
+function statusSummary(from: TaskStatus | null, to: TaskStatus, reason: string | null) {
+	return eventSummary(statusChangeMessage(from, to, reason));
 }

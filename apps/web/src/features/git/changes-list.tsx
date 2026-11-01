@@ -2,7 +2,8 @@ import type { GitFileStatus, GitStatus } from "@clam/contracts";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Check, Minus, Plus, Undo2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
-import { cn } from "@/lib/utils";
+import { t, tr } from "@/i18n";
+import { cn, formatNumber } from "@/lib/utils";
 import { EmptyState } from "@/ui/empty-state";
 import { Tip } from "@/ui/tooltip";
 import { type ChangeGroup, GROUP_LABEL, GROUP_ORDER, groupFiles, KIND_LABEL, KIND_LETTER, KIND_TONE, splitPath } from "./status-utils.ts";
@@ -74,8 +75,8 @@ export function ChangesList({ status, selected, disabled, onSelect, onStage, onD
 		return (
 			<EmptyState
 				icon={Check}
-				title="Working tree clean"
-				description={status.ahead > 0 ? `Nothing to commit. ${status.ahead} ${status.ahead === 1 ? "commit is" : "commits are"} waiting to be pushed.` : "Nothing to commit. Changes made by you or an agent show up here as they happen."}
+				title={t("Working tree clean")}
+				description={status.ahead > 0 ? t("Nothing to commit. {count, plural, one {# commit is} other {# commits are}} waiting to be pushed.", { count: status.ahead }) : t("Nothing to commit. Changes made by you or an agent show up here as they happen.")}
 				className={cn("min-h-0 flex-1 py-10", className)}
 			/>
 		);
@@ -133,25 +134,25 @@ function GroupHeader({
 	const paths = files.map((f) => f.path);
 	return (
 		<div className="flex h-full items-center gap-1 border-b bg-surface-1 px-2.5">
-			<h3 className={cn("text-2xs font-semibold uppercase tracking-wider", group === "conflicted" ? "text-danger" : "text-subtle")}>{GROUP_LABEL[group]}</h3>
-			<span className="tabular rounded bg-surface-3 px-1 font-mono text-2xs text-muted-foreground">{files.length}</span>
+			<h3 className={cn("text-2xs font-semibold uppercase tracking-wider", group === "conflicted" ? "text-danger" : "text-subtle")}>{tr(GROUP_LABEL[group])}</h3>
+			<span className="tabular rounded bg-surface-3 px-1 font-mono text-2xs text-muted-foreground">{formatNumber(files.length)}</span>
 			<div className="ml-auto flex items-center gap-0.5">
 				{group === "changes" || group === "untracked" ? (
-					<Tip label={group === "untracked" ? "Delete all untracked files…" : "Discard all changes…"}>
-						<button type="button" aria-label={`Discard all ${GROUP_LABEL[group].toLowerCase()}`} disabled={disabled} onClick={() => onDiscard(files)} className={iconBtn}>
+					<Tip label={group === "untracked" ? t("Delete all untracked files…") : t("Discard all changes…")}>
+						<button type="button" aria-label={group === "untracked" ? t("Discard all untracked files") : t("Discard all changes")} disabled={disabled} onClick={() => onDiscard(files)} className={iconBtn}>
 							<Undo2 className="size-3.5" />
 						</button>
 					</Tip>
 				) : null}
 				{group === "staged" ? (
-					<Tip label="Unstage all">
-						<button type="button" aria-label="Unstage all" disabled={disabled} onClick={() => onStage(paths, false)} className={iconBtn}>
+					<Tip label={t("Unstage all")}>
+						<button type="button" aria-label={t("Unstage all")} disabled={disabled} onClick={() => onStage(paths, false)} className={iconBtn}>
 							<Minus className="size-3.5" />
 						</button>
 					</Tip>
 				) : (
-					<Tip label={group === "conflicted" ? "Mark all as resolved" : "Stage all"}>
-						<button type="button" aria-label={group === "conflicted" ? "Mark all as resolved" : `Stage all ${GROUP_LABEL[group].toLowerCase()}`} disabled={disabled} onClick={() => onStage(paths, true)} className={iconBtn}>
+					<Tip label={group === "conflicted" ? t("Mark all as resolved") : t("Stage all")}>
+						<button type="button" aria-label={group === "conflicted" ? t("Mark all as resolved") : group === "untracked" ? t("Stage all untracked files") : t("Stage all changes")} disabled={disabled} onClick={() => onStage(paths, true)} className={iconBtn}>
 							<Plus className="size-3.5" />
 						</button>
 					</Tip>
@@ -182,10 +183,10 @@ function FileRow({
 	const staged = group === "staged";
 	return (
 		<div className={cn("group/file flex h-full items-center gap-1 px-1.5 transition-colors", active ? "bg-accent-soft" : "hover:bg-surface-2")}>
-			<Tip label={staged ? "Unstage" : group === "conflicted" ? "Mark as resolved" : "Stage"}>
+			<Tip label={staged ? t("Unstage") : group === "conflicted" ? t("Mark as resolved") : t("Stage")}>
 				<button
 					type="button"
-					aria-label={`${staged ? "Unstage" : group === "conflicted" ? "Mark resolved" : "Stage"} ${file.path}`}
+					aria-label={staged ? t("Unstage {path}", { path: file.path }) : group === "conflicted" ? t("Mark {path} resolved", { path: file.path }) : t("Stage {path}", { path: file.path })}
 					disabled={disabled}
 					onClick={() => onStage([file.path], !staged)}
 					className={iconBtn}
@@ -197,10 +198,10 @@ function FileRow({
 				type="button"
 				onClick={() => onSelect(file, group)}
 				aria-current={active || undefined}
-				title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}
+				title={file.origPath ? t("{from} → {to}", { from: file.origPath, to: file.path }) : file.path}
 				className="flex h-full min-w-0 flex-1 items-center gap-2 rounded-md text-left outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]"
 			>
-				<span className={cn("w-4 shrink-0 text-center font-mono text-2xs font-semibold", KIND_TONE[file.kind])} title={KIND_LABEL[file.kind]}>
+				<span className={cn("w-4 shrink-0 text-center font-mono text-2xs font-semibold", KIND_TONE[file.kind])} title={tr(KIND_LABEL[file.kind])}>
 					{KIND_LETTER[file.kind]}
 				</span>
 				<span className="min-w-0 truncate text-[13px]">
@@ -209,10 +210,10 @@ function FileRow({
 				</span>
 			</button>
 			{group === "changes" || group === "untracked" ? (
-				<Tip label={group === "untracked" ? "Delete file…" : "Discard changes…"}>
+				<Tip label={group === "untracked" ? t("Delete file…") : t("Discard changes…")}>
 					<button
 						type="button"
-						aria-label={`Discard ${file.path}`}
+						aria-label={t("Discard {path}", { path: file.path })}
 						disabled={disabled}
 						onClick={() => onDiscard([file])}
 						className={cn(iconBtn, "opacity-0 focus-visible:opacity-100 group-hover/file:opacity-100 coarse:opacity-100")}

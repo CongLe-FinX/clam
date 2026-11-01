@@ -1,5 +1,6 @@
 import { Bell, ChevronUp, MessageCircleQuestion, ShieldQuestion } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { AskCard } from "./ask-card.tsx";
 import { CountdownPill, useRemaining } from "./countdown.tsx";
@@ -37,7 +38,12 @@ export function AskDock({ store, group, className }: { store: OmpStore; /** Shar
 	if (!first) return null;
 	const approval = first.method !== "ask";
 	const Icon = approval ? ShieldQuestion : MessageCircleQuestion;
-	const label = first.method === "ask" ? (first.questions && first.questions.length > 1 ? `${first.questions.length} questions for you` : "A question for you") : "Approval needed";
+	const label =
+		first.method === "ask"
+			? first.questions && first.questions.length > 1
+				? t("{count} questions for you", { count: first.questions.length })
+				: t("A question for you")
+			: t("Approval needed");
 
 	return (
 		<div ref={ref} className={cn("animate-slide-up mx-auto flex w-full max-w-[60rem] shrink-0 flex-col px-3 pt-2 pb-1.5 sm:px-4", className)}>
@@ -54,13 +60,13 @@ export function AskDock({ store, group, className }: { store: OmpStore; /** Shar
 					{requests.length > 1 ? <span className="tabular rounded bg-surface-3 px-1.5 py-0.5 font-mono text-2xs text-muted-foreground">+{requests.length - 1}</span> : null}
 					{remaining !== null ? <CountdownPill remaining={remaining} /> : null}
 					<span className="flex items-center gap-1 text-xs font-medium text-accent">
-						Answer <ChevronUp className="size-3.5" aria-hidden />
+						{t("Answer")} <ChevronUp className="size-3.5" aria-hidden />
 					</span>
 				</button>
 			) : null}
 			{!collapsed && group ? (
 				<p className="mb-1.5 px-1 text-2xs text-subtle">
-					<span className="font-medium text-muted-foreground">{group}</span> is waiting · anybody in the group can answer
+					<span className="font-medium text-muted-foreground">{group}</span> {t("is waiting · anybody in the group can answer")}
 				</p>
 			) : null}
 			{collapsed ? null : first.method === "ask" ? (
@@ -68,14 +74,14 @@ export function AskDock({ store, group, className }: { store: OmpStore; /** Shar
 			) : (
 				<RequestCard key={first.requestId} store={store} request={first} onCollapse={() => setCollapsed(true)} className="max-h-[min(72dvh,560px)]" />
 			)}
-			{!collapsed && requests.length > 1 ? <p className="mt-1.5 px-1 text-center text-2xs text-subtle">{requests.length - 1} more waiting after this one</p> : null}
+			{!collapsed && requests.length > 1 ? <p className="mt-1.5 px-1 text-center text-2xs text-subtle">{t("{count} more waiting after this one", { count: requests.length - 1 })}</p> : null}
 			{!collapsed && notify === "default" ? (
 				<button
 					type="button"
 					onClick={() => void enablePendingNotifications().then((p) => setNotify(p))}
 					className="mx-auto mt-1.5 inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-2xs text-subtle outline-none transition-colors hover:text-foreground focus-visible:text-foreground coarse:min-h-11"
 				>
-					<Bell className="size-3" aria-hidden /> Notify me when the agent asks something while I am away
+					<Bell className="size-3" aria-hidden /> {t("Notify me when the agent asks something while I am away")}
 				</button>
 			) : null}
 		</div>

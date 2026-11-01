@@ -11,6 +11,7 @@ import {
 	browserSocketPath,
 } from "@clam/contracts";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { t } from "@/i18n";
 import { browserStats } from "./stats.ts";
 
 export type ConnState = "connecting" | "open" | "reconnecting" | "tab-closed" | "signed-out" | "unavailable";
@@ -206,7 +207,7 @@ export class TabConnection {
 			} else if (ev.code === CLOSE_NO_TAB) {
 				this.ended = true;
 				this.patch({ state: "tab-closed" });
-				this.events.onClosed(this.tabId, "This tab no longer exists.");
+				this.events.onClosed(this.tabId, t("This tab no longer exists."));
 			} else if (ev.code === CLOSE_UNAVAILABLE) {
 				this.ended = true;
 				this.patch({ state: "unavailable" });

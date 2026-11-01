@@ -1,6 +1,7 @@
 import type { CreateTerminalBody, Project, TerminalInfo } from "@clam/contracts";
 import { Folder, Home, MessageSquare, Search, TerminalSquare } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { t } from "@/i18n";
 import { useProjects } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -88,17 +89,17 @@ export function NewTerminalDialog({
 			>
 				<GrabHandle onClose={() => onOpenChange(false)} className="sm:hidden" />
 				<DialogHeader>
-					<DialogTitle>New terminal</DialogTitle>
-					<DialogDescription>A shell on this machine. Pick the folder it starts in.</DialogDescription>
+					<DialogTitle>{t("New terminal")}</DialogTitle>
+					<DialogDescription>{t("A shell on this machine. Pick the folder it starts in.")}</DialogDescription>
 				</DialogHeader>
 				{(projects.data?.length ?? 0) > 5 ? (
 					<div className="relative">
 						<Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle" aria-hidden />
-						<Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter projects and chats" aria-label="Filter folders" className="pl-8 text-base sm:text-[13px]" />
+						<Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("Filter projects and chats")} aria-label={t("Filter folders")} className="pl-8 text-base sm:text-[13px]" />
 					</div>
 				) : null}
-				<div role="radiogroup" aria-label="Starting folder" className="scrollbar-thin -mx-1 flex max-h-[min(46dvh,360px)] min-h-0 flex-col gap-0.5 overflow-y-auto px-1">
-					{!q && <Row selected={choice === HOME} icon={<Home className="size-4" />} title="Home" subtitle={info?.home ?? "~"} onSelect={() => setChoice(HOME)} />}
+				<div role="radiogroup" aria-label={t("Starting folder")} className="scrollbar-thin -mx-1 flex max-h-[min(46dvh,360px)] min-h-0 flex-col gap-0.5 overflow-y-auto px-1">
+					{!q && <Row selected={choice === HOME} icon={<Home className="size-4" />} title={t("Home")} subtitle={info?.home ?? "~"} onSelect={() => setChoice(HOME)} />}
 					{projects.isPending ? (
 						<div className="flex flex-col gap-1.5 py-1">
 							<Skeleton className="h-12" />
@@ -106,23 +107,23 @@ export function NewTerminalDialog({
 						</div>
 					) : (
 						<>
-							{userProjects.length > 0 && <div className="px-2.5 pb-0.5 pt-2.5 text-2xs font-semibold uppercase tracking-wider text-subtle">Projects</div>}
+							{userProjects.length > 0 && <div className="px-2.5 pb-0.5 pt-2.5 text-2xs font-semibold uppercase tracking-wider text-subtle">{t("Projects")}</div>}
 							{userProjects.map((p) => (
 								<Row key={p.id} selected={choice === p.id} icon={<Folder className="size-4" />} title={p.name} subtitle={tildePath(p.path, info?.home)} onSelect={() => setChoice(p.id)} />
 							))}
-							{chats.length > 0 && <div className="px-2.5 pb-0.5 pt-2.5 text-2xs font-semibold uppercase tracking-wider text-subtle">Chats</div>}
+							{chats.length > 0 && <div className="px-2.5 pb-0.5 pt-2.5 text-2xs font-semibold uppercase tracking-wider text-subtle">{t("Chats")}</div>}
 							{chats.map((p) => (
 								<Row key={p.id} selected={choice === p.id} icon={<MessageSquare className="size-4" />} title={p.name} subtitle={tildePath(p.path, info?.home)} onSelect={() => setChoice(p.id)} />
 							))}
-							{q && userProjects.length === 0 && chats.length === 0 && <p className="px-2.5 py-6 text-center text-[13px] text-muted-foreground">No folder matches “{filter}”.</p>}
+							{q && userProjects.length === 0 && chats.length === 0 && <p className="px-2.5 py-6 text-center text-[13px] text-muted-foreground">{t("No folder matches “{filter}”.", { filter })}</p>}
 						</>
 					)}
 				</div>
 				{shells.length > 1 && (
 					<div className="flex items-center justify-between gap-3">
-						<span className="text-[13px] text-muted-foreground">Shell</span>
+						<span className="text-[13px] text-muted-foreground">{t("Shell")}</span>
 						<Select value={shell ?? info?.defaultShell} onValueChange={setShell}>
-							<SelectTrigger className="w-44" aria-label="Shell">
+							<SelectTrigger className="w-44" aria-label={t("Shell")}>
 								<SelectValue />
 							</SelectTrigger>
 							<SelectContent>
@@ -137,14 +138,14 @@ export function NewTerminalDialog({
 				)}
 				<DialogFooter>
 					<Button variant="ghost" onClick={() => onOpenChange(false)}>
-						Cancel
+						{t("Cancel")}
 					</Button>
 					<Button
 						variant="primary"
 						loading={pending}
 						onClick={() => onCreate({ ...(choice !== HOME ? { projectId: choice } : {}), ...(shell && shell !== info?.defaultShell ? { shell } : {}) })}
 					>
-						<TerminalSquare /> Open terminal
+						<TerminalSquare /> {t("Open terminal")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

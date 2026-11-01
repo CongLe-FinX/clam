@@ -67,6 +67,8 @@ export const QuotaLimit = z.object({
 	id: z.string(),
 	label: z.string(),
 	windowLabel: z.string().nullable(),
+	/** Length of the quota window in ms (e.g. 5 h, 7 d) when the provider reports it; lets the UI localize `windowLabel`. */
+	windowMs: z.number().nullable(),
 	resetsAt: z.number().nullable(),
 	used: z.number().nullable(),
 	limit: z.number().nullable(),

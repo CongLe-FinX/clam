@@ -12,7 +12,8 @@ import { driverOf, participantLabel } from "@/features/shared/format";
 import { SharedBanner } from "@/features/shared/shared-banner";
 import { TaskBanner } from "@/features/tasks/task-banner";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
-import { ApiError, errorMessage } from "@/lib/api";
+import { ApiError, errorText } from "@/lib/api";
+import { t } from "@/i18n";
 import { projectAssets } from "@/components/rich/assets";
 import { useAgents, useProject, useSession, useWorkspaces } from "@/lib/queries";
 import { type SessionKind, useUi } from "@/lib/store";
@@ -53,7 +54,7 @@ export default function SessionPage() {
 
 function PageSkeleton() {
 	return (
-		<div className="flex h-full flex-col" aria-busy="true" aria-label="Loading session">
+		<div className="flex h-full flex-col" aria-busy="true" aria-label={t("Loading session")}>
 			<div className="flex h-12 shrink-0 items-center gap-3 border-b px-3">
 				<Skeleton className="size-8" />
 				<Skeleton className="h-4 w-48" />
@@ -84,11 +85,11 @@ function SessionGate({ sessionId }: { sessionId: string }) {
 			<EmptyState
 				className="h-full"
 				icon={SearchX}
-				title="Session not found"
-				description="It may have been deleted, or the link is wrong."
+				title={t("Session not found")}
+				description={t("It may have been deleted, or the link is wrong.")}
 				action={
 					<Button asChild variant="outline">
-						<Link to="/node/sessions">View all sessions</Link>
+						<Link to="/node/sessions">{t("View all sessions")}</Link>
 					</Button>
 				}
 			/>
@@ -98,11 +99,11 @@ function SessionGate({ sessionId }: { sessionId: string }) {
 		<EmptyState
 			className="h-full"
 			icon={TriangleAlert}
-			title="Could not load this session"
-			description={errorMessage(q.error)}
+			title={t("Could not load this session")}
+			description={errorText(q.error)}
 			action={
 				<Button variant="outline" onClick={() => void q.refetch()}>
-					<RotateCw /> Retry
+					<RotateCw /> {t("Retry")}
 				</Button>
 			}
 		/>
@@ -231,18 +232,18 @@ function StateBanner({ stream }: { stream: SessionStream }) {
 	if (!live && liveStatus === "error") {
 		body = (
 			<>
-				<span className="font-medium">Could not reach the runtime.</span> {errorMessage(liveError)}
+				<span className="font-medium">{t("Could not reach the runtime.")}</span> {errorText(liveError)}
 			</>
 		);
 		action = (
 			<Button size="sm" variant="outline" onClick={() => void stream.retry()}>
-				<RotateCw /> Retry
+				<RotateCw /> {t("Retry")}
 			</Button>
 		);
 	} else if (live?.runtime.state === "crashed") {
 		body = (
 			<>
-				<span className="font-medium">The runtime crashed.</span> {live.runtime.lastError ?? "No error details were reported."}
+				<span className="font-medium">{t("The runtime crashed.")}</span> {live.runtime.lastError ?? t("No error details were reported.")}
 			</>
 		);
 		action = (
@@ -254,11 +255,11 @@ function StateBanner({ stream }: { stream: SessionStream }) {
 					setRestarting(true);
 					stream
 						.restartRuntime()
-						.catch((e) => toast.error(`Could not restart the runtime: ${errorMessage(e)}`))
+						.catch((e) => toast.error(t("Could not restart the runtime: {error}", { error: errorText(e) })))
 						.finally(() => setRestarting(false));
 				}}
 			>
-				<RotateCw /> Restart
+				<RotateCw /> {t("Restart")}
 			</Button>
 		);
 	}
@@ -302,7 +303,7 @@ function Workspace({ session }: { session: AgentSession }) {
 
 	useEffect(() => {
 		const prev = document.title;
-		document.title = `${session.title || "Session"} · CL Agent Mesh`;
+		document.title = `${session.title || t("Session")} · CL Agent Mesh`;
 		return () => {
 			document.title = prev;
 		};
@@ -366,7 +367,7 @@ function Workspace({ session }: { session: AgentSession }) {
 	);
 
 	const agents = useAgents().data;
-	const agentName = agents?.find((a) => a.id === session.agentId)?.name ?? "The agent";
+	const agentName = agents?.find((a) => a.id === session.agentId)?.name ?? t("The agent");
 	const projectId = session.projectId;
 	// Stable per session/project/agent, so memoized conversation rows (markdown assets, file strips) never re-render for it.
 	const env = useMemo<SessionEnv>(() => ({ projectId, assets: projectAssets(projectId), openFile, agentName }), [projectId, openFile, agentName]);
@@ -425,9 +426,9 @@ function Workspace({ session }: { session: AgentSession }) {
 	const center = (
 		<div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
 			{openFiles.length > 0 ? (
-				<div role="tablist" aria-label="Open views" className="scrollbar-none flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto border-b bg-surface-1 px-1.5 coarse:h-11">
+				<div role="tablist" aria-label={t("Open views")} className="scrollbar-none flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto border-b bg-surface-1 px-1.5 coarse:h-11">
 					<TabButton active={tab === "chat"} onClick={() => setTab("chat")}>
-						<MessagesSquare className="size-3.5" /> Chat
+						<MessagesSquare className="size-3.5" /> {t("Chat")}
 					</TabButton>
 					{openFiles.map((p) => (
 						<TabButton key={p} active={tab === p} onClick={() => setTab(p)} onClose={() => closeFile(p)} title={p}>
@@ -436,7 +437,7 @@ function Workspace({ session }: { session: AgentSession }) {
 					))}
 				</div>
 			) : null}
-			{sharedMode ? <ViewSwitch view={view} onView={setView} unread={detail?.shared.unreadMessages ?? 0} workspaceLabel={session.kind === "mirror" ? "Live view" : session.movedTo ? "Moved copy" : "Workspace"} /> : null}
+			{sharedMode ? <ViewSwitch view={view} onView={setView} unread={detail?.shared.unreadMessages ?? 0} workspaceLabel={session.kind === "mirror" ? t("Live view") : session.movedTo ? t("Moved copy") : t("Workspace")} /> : null}
 			<TaskBanner sessionId={session.id} />
 			<SharedBanner session={session} detail={detail} onOpenTeam={openTeam} onOpenHandover={handover} />
 			{readOnly || showChat ? null : <StateBanner stream={stream} />}
@@ -449,10 +450,10 @@ function Workspace({ session }: { session: AgentSession }) {
 						keyboardOpen={kbInset > 0}
 						onOpenWorkspace={() => setView("workspace")}
 						onOpenTeam={openTeam}
-						dock={<AskDock store={omp} group={participantLabel(driverOf(detail.shared) ?? { agentName: null, nodeName: "the driving machine" })} />}
+						dock={<AskDock store={omp} group={participantLabel(driverOf(detail.shared) ?? { agentName: null, nodeName: t("the driving machine") })} />}
 					/>
 				) : (
-					<div className="flex flex-col gap-3 p-4" aria-busy="true" aria-label="Loading the group chat">
+					<div className="flex flex-col gap-3 p-4" aria-busy="true" aria-label={t("Loading the group chat")}>
 						<Skeleton className="h-9 w-2/5 self-end rounded-2xl" />
 						<Skeleton className="h-16 w-3/5 rounded-2xl" />
 						<Skeleton className="h-9 w-1/3 rounded-2xl" />
@@ -462,7 +463,7 @@ function Workspace({ session }: { session: AgentSession }) {
 			{detail && detail.shared.localRole !== "driver" ? (
 				<AwaitingStrip
 					mirrorSessionId={detail.shared.mirrorSessionId ?? (session.kind === "mirror" ? session.id : null)}
-					driverName={detail.shared.participants.find((p) => p.nodeId === detail.shared.driverNodeId)?.nodeName ?? "the driving machine"}
+					driverName={detail.shared.participants.find((p) => p.nodeId === detail.shared.driverNodeId)?.nodeName ?? t("the driving machine")}
 					driverUrl={detail.shared.participants.find((p) => p.nodeId === detail.shared.driverNodeId)?.uiUrl ?? null}
 				/>
 			) : null}
@@ -526,7 +527,7 @@ function Workspace({ session }: { session: AgentSession }) {
 						<Panel id="left" order={1} defaultSize={18} minSize={16} maxSize={32} collapsible collapsedSize={0} ref={left.ref} onCollapse={left.onCollapse} onExpand={left.onExpand}>
 							{threadsEl()}
 						</Panel>
-						<PanelResizeHandle aria-label="Resize threads panel" />
+						<PanelResizeHandle aria-label={t("Resize threads panel")} />
 						<Panel id="center" order={2} minSize={30}>
 							<PanelGroup direction="vertical" autoSaveId="clam.session.v">
 								<Panel id="chat" order={1} minSize={30}>
@@ -538,7 +539,7 @@ function Workspace({ session }: { session: AgentSession }) {
 								</Panel>
 							</PanelGroup>
 						</Panel>
-						<PanelResizeHandle aria-label="Resize context panel" />
+						<PanelResizeHandle aria-label={t("Resize context panel")} />
 						<Panel id="right" order={3} defaultSize={24} minSize={18} maxSize={40} collapsible collapsedSize={0} ref={right.ref} onCollapse={right.onCollapse} onExpand={right.onExpand}>
 							{contextEl}
 						</Panel>
@@ -553,8 +554,8 @@ function Workspace({ session }: { session: AgentSession }) {
 						) : null}
 						<Sheet open={sheets.left} onOpenChange={(v) => setSheet("left", v)}>
 							<SheetContent side="left" className="p-0" aria-describedby={undefined}>
-								<SheetTitle className="sr-only">Threads and files</SheetTitle>
-								<SheetDescription className="sr-only">Switch threads or browse project files.</SheetDescription>
+								<SheetTitle className="sr-only">{t("Threads and files")}</SheetTitle>
+								<SheetDescription className="sr-only">{t("Switch threads or browse project files.")}</SheetDescription>
 								{sheets.left ? threadsEl(() => setSheet("left", false)) : null}
 							</SheetContent>
 						</Sheet>
@@ -565,16 +566,16 @@ function Workspace({ session }: { session: AgentSession }) {
 								style={mobile && kbInset > 0 ? { bottom: kbInset, height: `min(82dvh, calc(100dvh - ${kbInset}px - 1rem))` } : undefined}
 								aria-describedby={undefined}
 							>
-								<SheetTitle className="sr-only">{rightTab === "team" ? "Team" : rightTab === "memory" ? "Memory" : rightTab === "agents" ? "Subagents" : "Context"}</SheetTitle>
-								<SheetDescription className="sr-only">{rightTab === "team" ? "Participants, discussion and checkpoints of the shared session." : rightTab === "agents" ? "Subagents the agent started, with live progress." : "Context usage, plan, stats and session info."}</SheetDescription>
+								<SheetTitle className="sr-only">{rightTab === "team" ? t("Team") : rightTab === "memory" ? t("Memory") : rightTab === "agents" ? t("Subagents") : t("Context")}</SheetTitle>
+								<SheetDescription className="sr-only">{rightTab === "team" ? t("Participants, discussion and checkpoints of the shared session.") : rightTab === "agents" ? t("Subagents the agent started, with live progress.") : t("Context usage, plan, stats and session info.")}</SheetDescription>
 								{sheets.right ? <div className="min-h-0 flex-1 overflow-hidden">{contextEl}</div> : null}
 							</SheetContent>
 						</Sheet>
 						{mobile ? (
 							<Sheet open={sheets.log} onOpenChange={(v) => setSheet("log", v)}>
 								<SheetContent side="bottom" className="h-[70dvh] p-0" aria-describedby={undefined}>
-									<SheetTitle className="sr-only">Runtime log</SheetTitle>
-									<SheetDescription className="sr-only">Tool executions and runtime events.</SheetDescription>
+									<SheetTitle className="sr-only">{t("Runtime log")}</SheetTitle>
+									<SheetDescription className="sr-only">{t("Tool executions and runtime events.")}</SheetDescription>
 									{sheets.log ? bottomEl(() => setSheet("log", false)) : null}
 								</SheetContent>
 							</Sheet>
@@ -654,28 +655,28 @@ function RightPanel({
 	const shown: RightTabId = tab === "changes" && !hasGit ? "context" : tab;
 	return (
 		<div className="@container flex h-full min-h-0 flex-col bg-surface-1">
-			<div role="tablist" aria-label="Side panel" className="scrollbar-none flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b px-1.5 coarse:h-12">
+			<div role="tablist" aria-label={t("Side panel")} className="scrollbar-none flex h-10 shrink-0 items-center gap-0.5 overflow-x-auto border-b px-1.5 coarse:h-12">
 				<PanelTab active={shown === "context"} onClick={() => onTab("context")}>
-					Context
+					{t("Context")}
 				</PanelTab>
 				<PanelTab active={shown === "memory"} onClick={() => onTab("memory")}>
-					<BookMarked /> <span className="@max-[22rem]:sr-only">Memory</span>
+					<BookMarked /> <span className="@max-[22rem]:sr-only">{t("Memory")}</span>
 				</PanelTab>
 				{hasGit ? (
 					<PanelTab active={shown === "changes"} onClick={() => onTab("changes")}>
-						Changes
+						{t("Changes")}
 						{dirty > 0 ? <span className="tabular rounded bg-accent-soft px-1 font-mono text-2xs text-accent">{dirty}</span> : null}
 					</PanelTab>
 				) : null}
 				{subagentCount > 0 || tab === "agents" ? (
 					<PanelTab active={shown === "agents"} onClick={() => onTab("agents")}>
-						<Bot /> <span className="@max-[22rem]:sr-only">Subagents</span>
+						<Bot /> <span className="@max-[22rem]:sr-only">{t("Subagents")}</span>
 						{subagentRunning > 0 ? <span className="tabular rounded bg-accent px-1 font-mono text-2xs text-accent-foreground">{subagentRunning}</span> : <span className="tabular rounded bg-surface-3 px-1 font-mono text-2xs text-muted-foreground">{subagentCount}</span>}
 					</PanelTab>
 				) : null}
 				{team ? (
 					<PanelTab active={tab === "team"} onClick={() => onTab("team")}>
-						<Users /> <span className="@max-[22rem]:sr-only">Team</span>
+						<Users /> <span className="@max-[22rem]:sr-only">{t("Team")}</span>
 						{teamUnread > 0 ? <span className="tabular rounded bg-accent px-1 font-mono text-2xs text-accent-foreground">{teamUnread}</span> : null}
 					</PanelTab>
 				) : null}
@@ -702,12 +703,12 @@ function RightPanel({
 /** Bottom panel: runtime log, plus the project's Git panel (branches, changes, history, pull requests). */
 function BottomPanel({ stream, session, tab, onTab, onCollapse }: { stream: SessionStream; session: AgentSession; tab: "log" | "git"; onTab: (t: "log" | "git") => void; onCollapse: () => void }) {
 	const tabs = (
-		<div role="tablist" aria-label="Bottom panel" className="flex items-center gap-0.5">
+		<div role="tablist" aria-label={t("Bottom panel")} className="flex items-center gap-0.5">
 			<PanelTab active={tab === "log"} onClick={() => onTab("log")}>
-				<ScrollText /> Runtime log
+				<ScrollText /> {t("Runtime log")}
 			</PanelTab>
 			<PanelTab active={tab === "git"} onClick={() => onTab("git")}>
-				<GitBranch /> Git
+				<GitBranch /> {t("Git")}
 			</PanelTab>
 		</div>
 	);
@@ -716,7 +717,7 @@ function BottomPanel({ stream, session, tab, onTab, onCollapse }: { stream: Sess
 		<div className="flex h-full min-h-0 flex-col bg-surface-1">
 			<div className="flex h-9 shrink-0 items-center gap-2 border-b px-3 coarse:h-11">
 				{tabs}
-				<button type="button" aria-label="Collapse panel" onClick={onCollapse} className="ml-auto grid size-6 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground coarse:size-9">
+				<button type="button" aria-label={t("Collapse panel")} onClick={onCollapse} className="ml-auto grid size-6 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground coarse:size-9">
 					<ChevronDown className="size-3.5" />
 				</button>
 			</div>
@@ -736,7 +737,7 @@ function TabButton({ active, onClick, onClose, children, title }: { active: bool
 				{children}
 			</button>
 			{onClose ? (
-				<button type="button" aria-label={`Close ${title ?? "tab"}`} onClick={onClose} className="mr-1 grid size-5 place-items-center rounded text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-8">
+				<button type="button" aria-label={t("Close {title}", { title: title ?? t("tab") })} onClick={onClose} className="mr-1 grid size-5 place-items-center rounded text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-8">
 					<X className="size-3" />
 				</button>
 			) : null}
@@ -747,9 +748,9 @@ function TabButton({ active, onClick, onClose, children, title }: { active: bool
 /** Shared sessions: the group chat is the main view, the agent's own session (tool calls, files) its workspace. */
 function ViewSwitch({ view, onView, unread, workspaceLabel }: { view: "group" | "workspace"; onView: (v: "group" | "workspace") => void; unread: number; workspaceLabel: string }) {
 	return (
-		<div role="tablist" aria-label="Session view" className="flex h-10 shrink-0 items-center gap-0.5 border-b bg-surface-1 px-1.5 coarse:h-12">
+		<div role="tablist" aria-label={t("Session view")} className="flex h-10 shrink-0 items-center gap-0.5 border-b bg-surface-1 px-1.5 coarse:h-12">
 			<PanelTab active={view === "group"} onClick={() => onView("group")}>
-				<Users /> Group chat
+				<Users /> {t("Group chat")}
 				{unread > 0 ? <span className="tabular rounded bg-accent px-1 font-mono text-2xs text-accent-foreground">{unread}</span> : null}
 			</PanelTab>
 			<PanelTab active={view === "workspace"} onClick={() => onView("workspace")}>

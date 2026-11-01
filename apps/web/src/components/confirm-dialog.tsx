@@ -1,13 +1,14 @@
 import type { ReactNode } from "react";
 import { Button } from "@/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
+import { t } from "@/i18n";
 
 export function ConfirmDialog({
 	open,
 	onOpenChange,
 	title,
 	description,
-	confirmLabel = "Confirm",
+	confirmLabel,
 	danger,
 	loading,
 	onConfirm,
@@ -34,10 +35,10 @@ export function ConfirmDialog({
 				{children}
 				<DialogFooter>
 					<Button variant="ghost" onClick={() => onOpenChange(false)}>
-						Cancel
+						{t("Cancel")}
 					</Button>
 					<Button variant={danger ? "danger" : "primary"} loading={loading} onClick={onConfirm}>
-						{confirmLabel}
+						{confirmLabel ?? t("Confirm")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

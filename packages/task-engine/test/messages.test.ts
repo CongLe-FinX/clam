@@ -47,7 +47,7 @@ describe("canSendKind", () => {
 		for (const a of ["agent", "human"] as const) {
 			const r = canSendKind("executor", a, "instruction");
 			expect(r.ok).toBe(false);
-			if (!r.ok) expect(r.message).toMatch(/sender/);
+			if (!r.ok) expect(r.message.text).toMatch(/sender/);
 		}
 	});
 	it("other kinds ok for everyone", () => {

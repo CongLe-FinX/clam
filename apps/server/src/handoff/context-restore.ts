@@ -1,3 +1,4 @@
+import { i18nMsg, type I18nMessage } from "@clam/contracts";
 import type { HandoffManifest } from "@clam/handoff-engine";
 import { type HandoffHub, HandoffStepError } from "./hub.ts";
 import type { HandoffRow } from "./store.ts";
@@ -17,8 +18,8 @@ function sleep(ms: number): Promise<void> {
  * has not arrived is noted on the timeline and left to the ordinary sync. A version number we hold with a DIFFERENT hash is a failed
  * integrity check (`manifest_invalid`). Returns the step detail.
  */
-export async function restoreContexts(hub: HandoffHub, row: HandoffRow, manifest: HandoffManifest): Promise<string> {
-	if (manifest.contexts.length === 0) return "No shared contexts were referenced";
+export async function restoreContexts(hub: HandoffHub, row: HandoffRow, manifest: HandoffManifest): Promise<I18nMessage> {
+	if (manifest.contexts.length === 0) return i18nMsg("No shared contexts were referenced");
 	const { store } = hub.ctx.contexts;
 
 	const missing = (): string[] => {
@@ -26,7 +27,7 @@ export async function restoreContexts(hub: HandoffHub, row: HandoffRow, manifest
 		for (const ref of manifest.contexts) {
 			if (store.snapshot(ref.id, ref.version, ref.sha256)) continue;
 			if (store.snapshots(ref.id).some((s) => s.version === ref.version)) {
-				throw new HandoffStepError("manifest_invalid", `Context ${ref.id} version ${ref.version} differs from the one the source handed over (hash mismatch)`, 4);
+				throw new HandoffStepError("manifest_invalid", i18nMsg("Context {id} version {version} differs from the one the source handed over (hash mismatch)", { id: ref.id, version: ref.version }), 4);
 			}
 			out.push(`${ref.id}@v${ref.version}`);
 		}
@@ -43,10 +44,10 @@ export async function restoreContexts(hub: HandoffHub, row: HandoffRow, manifest
 		}
 	}
 	if (lacking.length > 0) {
-		hub.note(row.id, `Context not synced yet (${lacking.join(", ")}); continuing, the ordinary sync will bring it`);
+		hub.note(row.id, i18nMsg("Context not synced yet ({contexts}); continuing, the ordinary sync will bring it", { contexts: lacking.join(", ") }));
 		hub.store.patchMeta(row.id, { contextsMissing: lacking });
-		return `${manifest.contexts.length - lacking.length} of ${manifest.contexts.length} context version(s) verified; ${lacking.length} still to sync`;
+		return i18nMsg("{verified} of {total} context version(s) verified; {lacking} still to sync", { verified: manifest.contexts.length - lacking.length, total: manifest.contexts.length, lacking: lacking.length });
 	}
 	hub.store.patchMeta(row.id, { contextsMissing: undefined });
-	return `${manifest.contexts.length} context version(s) verified`;
+	return i18nMsg("{count, plural, one {# context version} other {# context versions}} verified", { count: manifest.contexts.length });
 }

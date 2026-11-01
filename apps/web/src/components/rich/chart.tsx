@@ -25,6 +25,8 @@
  * At most 2000 points are drawn. Colours come from the `--chart-1…8` CSS variables, so charts follow light/dark.
  */
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { msg, t, tr, type Msg } from "@/i18n";
+import { intlTag } from "@/i18n/core";
 import { cn } from "@/lib/utils";
 
 type ChartType = "bar" | "line" | "area" | "pie" | "donut" | "scatter";
@@ -63,11 +65,11 @@ export function parseChart(source: string): ChartSpec | { error: string } {
 	try {
 		raw = JSON.parse(source);
 	} catch (e) {
-		return { error: `Invalid JSON: ${(e as Error).message}` };
+		return { error: t("Invalid JSON: {message}", { message: (e as Error).message }) };
 	}
-	if (!rec(raw)) return { error: "A chart must be a JSON object." };
+	if (!rec(raw)) return { error: t("A chart must be a JSON object.") };
 	const type = (str(raw.type)?.toLowerCase() ?? "bar") as ChartType;
-	if (!TYPES.includes(type)) return { error: `Unknown chart type “${String(raw.type)}”. Use ${TYPES.join(", ")}.` };
+	if (!TYPES.includes(type)) return { error: t("Unknown chart type “{type}”. Use {types}.", { type: String(raw.type), types: TYPES.join(", ") }) };
 	const base = {
 		type,
 		title: str(raw.title),
@@ -82,11 +84,11 @@ export function parseChart(source: string): ChartSpec | { error: string } {
 	let budget = MAX_POINTS;
 
 	if (Array.isArray(raw.datasets) || (Array.isArray(raw.labels) && Array.isArray(raw.data))) {
-		const sets = Array.isArray(raw.datasets) ? raw.datasets : [{ label: base.title ?? "Value", data: raw.data }];
+		const sets = Array.isArray(raw.datasets) ? raw.datasets : [{ label: base.title ?? t("Value"), data: raw.data }];
 		categories = Array.isArray(raw.labels) ? raw.labels.map((l) => String(l ?? "")) : [];
 		for (const [i, ds] of sets.entries()) {
-			if (!rec(ds) || !Array.isArray(ds.data)) return { error: `datasets[${i}] needs a “data” array.` };
-			const name = str(ds.label) ?? `Series ${i + 1}`;
+			if (!rec(ds) || !Array.isArray(ds.data)) return { error: t("datasets[{index}] needs a “data” array.", { index: i }) };
+			const name = str(ds.label) ?? t("Series {n}", { n: i + 1 });
 			const pts: Pt[] = [];
 			for (const [j, d] of ds.data.entries()) {
 				if (budget-- <= 0) {
@@ -101,29 +103,39 @@ export function parseChart(source: string): ChartSpec | { error: string } {
 		}
 	} else if (Array.isArray(raw.data)) {
 		const rows = raw.data.filter(rec);
-		if (rows.length === 0) return { error: "No data rows to plot." };
+		if (rows.length === 0) return { error: t("No data rows to plot.") };
 		const keys = [...new Set(rows.flatMap((r) => Object.keys(r)))];
 		const xKey = str(raw.x) ?? keys[0] ?? "x";
 		let yKeys = Array.isArray(raw.y) ? raw.y.map(str).filter((k): k is string => !!k) : str(raw.y) ? [str(raw.y) as string] : [];
 		if (yKeys.length === 0) yKeys = keys.filter((k) => k !== xKey && rows.some((r) => num(r[k]) !== null));
-		if (yKeys.length === 0) return { error: "No numeric columns found. Set “y” to the key holding the values." };
+		if (yKeys.length === 0) return { error: t("No numeric columns found. Set “y” to the key holding the values.") };
 		const slice = rows.slice(0, Math.max(1, Math.floor(MAX_POINTS / yKeys.length)));
 		base.truncated = slice.length < rows.length;
 		if (scatter) categories = [];
 		else categories = slice.map((r, i) => str(r[xKey]) ?? String(i + 1));
 		series = yKeys.map((k) => ({ name: k, pts: slice.map((r, i) => ({ x: scatter ? (num(r[xKey]) ?? i) : i, y: num(r[k]) })) }));
 	} else {
-		return { error: "Provide “data” (array of rows) or “labels” + “datasets”." };
+		return { error: t("Provide “data” (array of rows) or “labels” + “datasets”.") };
 	}
-	if (series.length === 0 || series.every((s) => s.pts.length === 0)) return { error: "No data to plot." };
-	if (series.every((s) => s.pts.every((p) => p.y === null))) return { error: "None of the values are numbers." };
+	if (series.length === 0 || series.every((s) => s.pts.length === 0)) return { error: t("No data to plot.") };
+	if (series.every((s) => s.pts.every((p) => p.y === null))) return { error: t("None of the values are numbers.") };
 	return { ...base, categories, series };
 }
 
 /* ───────────── layout helpers ───────────── */
 
-const fmt = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 2 });
-const fmtFull = new Intl.NumberFormat(undefined, { maximumFractionDigits: 4 });
+const formats = new Map<string, Intl.NumberFormat>();
+/** Locale-aware number formats (cached per locale); axes/tooltips need more digits than the shared helpers in `@/lib/utils`. */
+function nf(key: string, opts: Intl.NumberFormatOptions): Intl.NumberFormat {
+	const id = `${intlTag()}|${key}`;
+	let f = formats.get(id);
+	if (!f) formats.set(id, (f = new Intl.NumberFormat(intlTag(), opts)));
+	return f;
+}
+const fmt = (n: number) => nf("compact", { notation: "compact", maximumFractionDigits: 2 }).format(n);
+const fmtFull = (n: number) => nf("full", { maximumFractionDigits: 4 }).format(n);
+const fmtPct = (ratio: number) => nf("pct1", { style: "percent", minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(ratio);
+const CHART_NAME: Record<ChartType, Msg> = { bar: msg("bar chart"), line: msg("line chart"), area: msg("area chart"), pie: msg("pie chart"), donut: msg("donut chart"), scatter: msg("scatter chart") };
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function niceTicks(min: number, max: number, count = 5): number[] {
@@ -207,7 +219,7 @@ function ChartView({ spec }: { spec: ChartSpec }) {
 		if (items.length <= 12) return items;
 		const head = items.slice().sort((a, b) => b.value - a.value);
 		const rest = head.slice(11).reduce((n, p) => n + p.value, 0);
-		return [...head.slice(0, 11), { name: "Other", value: rest }];
+		return [...head.slice(0, 11), { name: t("Other"), value: rest }];
 	}, [pie, spec]);
 
 	const toggle = (i: number) =>
@@ -221,11 +233,16 @@ function ChartView({ spec }: { spec: ChartSpec }) {
 	const legendItems = pie ? slices.map((s, i) => ({ name: s.name, i })) : spec.series.map((s, i) => ({ name: s.name, i }));
 	const showLegend = pie || spec.series.length > 1;
 
-	const summary = `${spec.title ? `${spec.title}: ` : ""}${spec.type} chart, ${pie ? `${slices.length} slices` : `${spec.series.length} series`}${pie ? "" : `, ${spec.categories.length || spec.series[0]?.pts.length || 0} points`}.`;
+	const chartName = tr(CHART_NAME[spec.type]);
+	const points = spec.categories.length || spec.series[0]?.pts.length || 0;
+	const description = pie
+		? t("{chart}, {count, plural, one {# slice} other {# slices}}.", { chart: chartName, count: slices.length })
+		: t("{chart}, {series, plural, one {# series} other {# series}}, {points, plural, one {# point} other {# points}}.", { chart: chartName, series: spec.series.length, points });
+	const summary = spec.title ? t("{title}: {summary}", { title: spec.title, summary: description }) : description;
 
 	/* ── geometry ── */
 	const H = pie ? Math.max(220, Math.min(300, Math.round(width * 0.55))) : Math.max(210, Math.min(320, Math.round(width * 0.56)));
-	const labelFor = (n: number) => fmt.format(n);
+	const labelFor = (n: number) => fmt(n);
 	let plot: React.ReactNode = null;
 	let onKey: ((e: React.KeyboardEvent) => void) | undefined;
 
@@ -256,7 +273,7 @@ function ChartView({ spec }: { spec: ChartSpec }) {
 					const mid = (a0 + (a0 - frac * Math.PI * 2)) / 2;
 					const [tx, ty] = polar(cx, cy, r * 0.7, mid);
 					const show = (a: boolean) => () =>
-						setTip(a ? { x: tx, y: ty, title: s.name, rows: [{ name: `${(frac * 100).toFixed(1)}%`, value: fmtFull.format(s.value), color: color(s.i) }] } : null);
+						setTip(a ? { x: tx, y: ty, title: s.name, rows: [{ name: fmtPct(frac), value: fmtFull(s.value), color: color(s.i) }] } : null);
 					return (
 						<path
 							key={s.i}
@@ -274,7 +291,7 @@ function ChartView({ spec }: { spec: ChartSpec }) {
 				{inner ? (
 					<g textAnchor="middle" pointerEvents="none">
 						<text x={cx} y={cy - 2} fontSize={20} fontWeight={600} fill="var(--foreground)">{labelFor(total)}</text>
-						<text x={cx} y={cy + 16} fontSize={11} fill="var(--subtle)">total</text>
+						<text x={cx} y={cy + 16} fontSize={11} fill="var(--subtle)">{t("total")}</text>
 					</g>
 				) : null}
 			</g>
@@ -309,7 +326,7 @@ function ChartView({ spec }: { spec: ChartSpec }) {
 		const ticks = niceTicks(lo, hi);
 		const y0 = ticks[0] ?? 0;
 		const y1 = ticks[ticks.length - 1] ?? 1;
-		const tickW = Math.max(...ticks.map((t) => labelFor(t).length)) * 6.4 + 10;
+		const tickW = Math.max(...ticks.map((tk) => labelFor(tk).length)) * 6.4 + 10;
 		const left = Math.round(tickW + (spec.yLabel ? 16 : 0));
 		const right = 12;
 		const top = 10;
@@ -338,7 +355,7 @@ function ChartView({ spec }: { spec: ChartSpec }) {
 			const a = tx[0] ?? 0;
 			const b = tx[tx.length - 1] ?? 1;
 			sx = (v) => left + ((v - a) / (b - a || 1)) * iw;
-			xTicks = tx.map((t) => ({ x: sx(t), label: labelFor(t) }));
+			xTicks = tx.map((tk) => ({ x: sx(tk), label: labelFor(tk) }));
 		} else {
 			band = iw / Math.max(1, n);
 			const bars = spec.type === "bar";
@@ -432,7 +449,7 @@ function ChartView({ spec }: { spec: ChartSpec }) {
 				if (best && best.d < 32) {
 					const s = spec.series[best.si];
 					const p = s?.pts[best.k];
-					setTip({ x: best.x, y: best.y, title: s?.name ?? "", rows: [{ name: `x ${fmtFull.format(p?.x ?? 0)}`, value: fmtFull.format(p?.y ?? 0), color: color(best.si) }] });
+					setTip({ x: best.x, y: best.y, title: s?.name ?? "", rows: [{ name: t("x {value}", { value: fmtFull(p?.x ?? 0) }), value: fmtFull(p?.y ?? 0), color: color(best.si) }] });
 				} else setTip(null);
 				return;
 			}
@@ -444,7 +461,7 @@ function ChartView({ spec }: { spec: ChartSpec }) {
 			x: sx(k),
 			y: top,
 			title: spec.categories[k] ?? String(k + 1),
-			rows: vis.map(({ s, i }) => ({ name: s.name, value: s.pts[k]?.y == null ? "–" : fmtFull.format(s.pts[k]?.y as number), color: color(i) })),
+			rows: vis.map(({ s, i }) => ({ name: s.name, value: s.pts[k]?.y == null ? "–" : fmtFull(s.pts[k]?.y as number), color: color(i) })),
 		});
 		onKey = (e: React.KeyboardEvent) => {
 			if (scatter || (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Escape")) return;
@@ -460,15 +477,15 @@ function ChartView({ spec }: { spec: ChartSpec }) {
 		};
 		plot = (
 			<g>
-				{ticks.map((t) => (
-					<g key={t}>
-						<line x1={left} x2={left + iw} y1={sy(t)} y2={sy(t)} stroke="var(--border)" strokeDasharray={t === 0 ? undefined : "3 4"} />
-						<text x={left - 6} y={sy(t) + 3.5} textAnchor="end" fontSize={11} fill="var(--subtle)">{labelFor(t)}</text>
+				{ticks.map((tk) => (
+					<g key={tk}>
+						<line x1={left} x2={left + iw} y1={sy(tk)} y2={sy(tk)} stroke="var(--border)" strokeDasharray={tk === 0 ? undefined : "3 4"} />
+						<text x={left - 6} y={sy(tk) + 3.5} textAnchor="end" fontSize={11} fill="var(--subtle)">{labelFor(tk)}</text>
 					</g>
 				))}
 				{y0 < 0 && y1 > 0 ? <line x1={left} x2={left + iw} y1={sy(0)} y2={sy(0)} stroke="var(--border-strong)" /> : null}
-				{xTicks.map((t, k) => (
-					<text key={k} x={t.x} y={top + ih + 15} textAnchor="middle" fontSize={11} fill="var(--subtle)">{t.label}</text>
+				{xTicks.map((xt, k) => (
+					<text key={k} x={xt.x} y={top + ih + 15} textAnchor="middle" fontSize={11} fill="var(--subtle)">{xt.label}</text>
 				))}
 				{active !== null && !scatter && spec.type !== "bar" && xs[active] !== undefined ? <line x1={xs[active]} x2={xs[active]} y1={top} y2={top + ih} stroke="var(--border-strong)" /> : null}
 				{bars}
@@ -534,7 +551,7 @@ function ChartView({ spec }: { spec: ChartSpec }) {
 				) : null}
 			</div>
 			{showLegend ? (
-				<ul className="mt-1.5 flex flex-wrap gap-x-1 gap-y-0.5 px-1" aria-label="Legend">
+				<ul className="mt-1.5 flex flex-wrap gap-x-1 gap-y-0.5 px-1" aria-label={t("Legend")}>
 					{legendItems.map(({ name, i }) => (
 						<li key={i}>
 							<button
@@ -550,13 +567,13 @@ function ChartView({ spec }: { spec: ChartSpec }) {
 					))}
 				</ul>
 			) : null}
-			{spec.truncated ? <p className="px-1 pt-1 text-2xs text-subtle">Showing the first {MAX_POINTS} points.</p> : null}
+			{spec.truncated ? <p className="px-1 pt-1 text-2xs text-subtle">{t("Showing the first {count} points.", { count: String(MAX_POINTS) })}</p> : null}
 			<table className="sr-only">
 				<caption>{summary}</caption>
 				<thead>
 					<tr>
-						<th scope="col">{spec.xLabel ?? "Label"}</th>
-						{(pie ? [{ name: "Value" }] : spec.series).map((s, i) => (
+						<th scope="col">{spec.xLabel ?? t("Label")}</th>
+						{(pie ? [{ name: t("Value") }] : spec.series).map((s, i) => (
 							<th key={i} scope="col">{s.name}</th>
 						))}
 					</tr>

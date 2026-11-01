@@ -24,7 +24,8 @@ import {
 	X,
 } from "lucide-react";
 import { type KeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { api, errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { api, errorText } from "@/lib/api";
 import { hasFiles } from "@/lib/upload";
 import { UploadDock, useProjectUploads } from "./uploads.tsx";
 import { qk } from "@/lib/queries";
@@ -181,7 +182,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 		dirPaths.forEach((p, i) => {
 			const r = results[i];
 			if (!r) return;
-			m.set(p, { entries: r.data ? [...r.data].sort(byKindThenName) : undefined, loading: r.isPending, error: r.error ? errorMessage(r.error) : undefined });
+			m.set(p, { entries: r.data ? [...r.data].sort(byKindThenName) : undefined, loading: r.isPending, error: r.error ? errorText(r.error) : undefined });
 		});
 		return m;
 		// biome-ignore lint/correctness/useExhaustiveDependencies: results is a fresh array each render; depend on its contents
@@ -405,14 +406,14 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 									if (rows.length) moveTo(0);
 								}
 							}}
-							placeholder="Filter files"
-							aria-label="Filter loaded files by name"
+							placeholder={t("Filter files")}
+							aria-label={t("Filter loaded files by name")}
 							className="h-7 w-full rounded-md bg-surface-2 pl-7 pr-7 text-base outline-none placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1px_var(--accent)] md:text-xs coarse:h-10"
 						/>
 						{filter ? (
 							<button
 								type="button"
-								aria-label="Clear filter"
+								aria-label={t("Clear filter")}
 								onClick={() => {
 									setFilter("");
 									setFilterOpen(false);
@@ -424,26 +425,26 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 						) : null}
 					</div>
 				) : (
-					<Tip label="Filter files">
-						<Button variant="ghost" size="icon-sm" aria-label="Filter files" onClick={() => setFilterOpen(true)}>
+					<Tip label={t("Filter files")}>
+						<Button variant="ghost" size="icon-sm" aria-label={t("Filter files")} onClick={() => setFilterOpen(true)}>
 							<Search />
 						</Button>
 					</Tip>
 				)}
 				{narrow && filterShown ? null : (
 					<>
-						<Tip label="Refresh">
-							<Button variant="ghost" size="icon-sm" aria-label="Refresh file tree" onClick={refresh}>
+						<Tip label={t("Refresh")}>
+							<Button variant="ghost" size="icon-sm" aria-label={t("Refresh file tree")} onClick={refresh}>
 								<RefreshCw className={cn(refreshing && "animate-spin")} />
 							</Button>
 						</Tip>
-						<Tip label={targetDir ? `Upload to /${targetDir}` : "Upload files"}>
-							<Button variant="ghost" size="icon-sm" aria-label="Upload files" onClick={() => fileInput.current?.click()}>
+						<Tip label={targetDir ? t("Upload to /{dir}", { dir: targetDir }) : t("Upload files")}>
+							<Button variant="ghost" size="icon-sm" aria-label={t("Upload files")} onClick={() => fileInput.current?.click()}>
 								<Upload />
 							</Button>
 						</Tip>
-						<Tip label="Open terminal here">
-							<Button asChild variant="ghost" size="icon-sm" aria-label="Open terminal here">
+						<Tip label={t("Open terminal here")}>
+							<Button asChild variant="ghost" size="icon-sm" aria-label={t("Open terminal here")}>
 								<Link to="/terminal" search={{ project: projectId }}>
 									<Terminal />
 								</Link>
@@ -466,7 +467,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 			<div
 				ref={scrollRef}
 				role="tree"
-				aria-label="Project files"
+				aria-label={t("Project files")}
 				aria-activedescendant={activeId}
 				tabIndex={0}
 				onKeyDown={onKeyDown}
@@ -476,7 +477,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 				className="scrollbar-thin min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--accent)]"
 			>
 				{q && rows.length === 0 ? (
-					<p className="px-4 py-6 text-center text-xs text-subtle">No loaded files match “{filter.trim()}”. Expand folders to load more.</p>
+					<p className="px-4 py-6 text-center text-xs text-subtle">{t("No loaded files match “{query}”. Expand folders to load more.", { query: filter.trim() })}</p>
 				) : null}
 				<div className="relative w-full min-w-max" style={{ height: v.getTotalSize() }}>
 					{v.getVirtualItems().map((item) => {
@@ -500,7 +501,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, className }:
 			<UploadDock uploads={uploads} />
 			{dragging ? (
 				<div aria-hidden className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl bg-accent-soft text-xs font-medium text-accent shadow-[inset_0_0_0_2px_var(--accent)]">
-					Drop to upload into {targetDir ? `/${targetDir}` : "the project folder"}
+					{targetDir ? t("Drop to upload into /{dir}", { dir: targetDir }) : t("Drop to upload into the project folder")}
 				</div>
 			) : null}
 		</div>
@@ -541,7 +542,7 @@ const TreeRow = memo(function TreeRow({
 		return (
 			<div role="none" className="relative flex h-full items-center text-2xs italic text-subtle" style={{ paddingLeft: pad + 20 }}>
 				{guides}
-				{row.depth === 0 ? "Empty — drop files here" : "Empty"}
+				{row.depth === 0 ? t("Empty — drop files here") : t("Empty")}
 			</div>
 		);
 	}
@@ -554,7 +555,7 @@ const TreeRow = memo(function TreeRow({
 					{row.message}
 				</span>
 				<button type="button" onClick={onRetry} className="shrink-0 rounded px-1.5 py-0.5 font-medium text-accent hover:bg-surface-3 coarse:py-2">
-					Retry
+					{t("Retry")}
 				</button>
 			</div>
 		);
@@ -596,7 +597,7 @@ const TreeRow = memo(function TreeRow({
 				<Icon aria-hidden className={cn("size-4 shrink-0", tone)} />
 			)}
 			<span className={cn("whitespace-nowrap", selected ? "font-medium" : isDir ? "text-foreground" : "text-muted-foreground")}>{entry.name}</span>
-			{entry.kind === "symlink" ? <Link2 aria-label="Symbolic link" className="size-3 shrink-0 text-subtle" /> : null}
+			{entry.kind === "symlink" ? <Link2 aria-label={t("Symbolic link")} className="size-3 shrink-0 text-subtle" /> : null}
 			{row.hint ? <span className="whitespace-nowrap font-mono text-2xs text-subtle">{row.hint}</span> : null}
 		</div>
 	);

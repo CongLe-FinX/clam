@@ -1,6 +1,6 @@
 import { createReadStream } from "node:fs";
 import { wire, FORMAT } from "@clam/agent-network";
-import type { Capability } from "@clam/contracts";
+import { i18nMsg, type Capability } from "@clam/contracts";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ApiError } from "../http/errors.ts";
 import { contentDisposition } from "../http/file-response.ts";
@@ -30,7 +30,7 @@ function sharedId(params: IdParams): string {
 }
 
 function seqOf(value: string): number {
-	if (!SEQ.test(value)) throw ApiError.badRequest("seq must be a positive integer");
+	if (!SEQ.test(value)) throw ApiError.badRequest(i18nMsg("seq must be a positive integer"));
 	return Number(value);
 }
 

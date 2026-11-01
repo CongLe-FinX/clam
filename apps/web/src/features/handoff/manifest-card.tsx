@@ -2,6 +2,7 @@ import type { Handoff } from "@clam/contracts";
 import { FileArchive, GitBranch } from "lucide-react";
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { KeyValue } from "@/features/settings/components/section";
+import { t } from "@/i18n";
 import { formatBytes } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
@@ -19,59 +20,59 @@ export function ManifestCard({ h }: { h: Handoff }) {
 		<>
 			<Card>
 				<CardHeader>
-					<CardTitle>What is being handed over</CardTitle>
+					<CardTitle>{t("What is being handed over")}</CardTitle>
 					{h.manifestSha256 ? (
-						<span className="font-mono text-2xs text-subtle" title={`Manifest sha-256 ${h.manifestSha256}`}>
-							manifest {short(h.manifestSha256, 8)}
+						<span className="font-mono text-2xs text-subtle" title={t("Manifest sha-256 {hash}", { hash: h.manifestSha256 })}>
+							{t("manifest {hash}", { hash: short(h.manifestSha256, 8) })}
 						</span>
 					) : null}
 				</CardHeader>
 				<CardContent className="pt-1">
 					<dl className="divide-y">
-						<KeyValue label="Files travel as">
+						<KeyValue label={t("Files travel as")}>
 							{h.vcs === "git" ? (
 								<span className="inline-flex items-center gap-1.5">
-									<GitBranch className="size-3.5 text-subtle" aria-hidden /> Git branch
+									<GitBranch className="size-3.5 text-subtle" aria-hidden /> {t("Git branch")}
 								</span>
 							) : h.vcs === "files" ? (
 								<span className="inline-flex items-center gap-1.5">
-									<FileArchive className="size-3.5 text-subtle" aria-hidden /> Folder bundle (no Git needed)
+									<FileArchive className="size-3.5 text-subtle" aria-hidden /> {t("Folder bundle (no Git needed)")}
 								</span>
 							) : (
-								"Nothing (context only)"
+								t("Nothing (context only)")
 							)}
 						</KeyValue>
 						{h.git ? (
 							<>
-								<KeyValue label="Repository">{h.git.repoUrl}</KeyValue>
-								<KeyValue label="Branch">
+								<KeyValue label={t("Repository")}>{h.git.repoUrl}</KeyValue>
+								<KeyValue label={t("Branch")}>
 									<Mono>{h.git.branch}</Mono>
 								</KeyValue>
-								<KeyValue label="Commit">
+								<KeyValue label={t("Commit")}>
 									<Mono>{short(h.git.commit, 12)}</Mono>
 								</KeyValue>
-								<KeyValue label="Delivery">
+								<KeyValue label={t("Delivery")}>
 									<span className="flex flex-wrap gap-1.5">
-										<Badge variant={h.git.pushed ? "success" : "warning"}>{h.git.pushed ? "Pushed" : "Not pushed"}</Badge>
-										{h.git.patch ? <Badge variant="accent">Includes uncommitted changes as a patch</Badge> : null}
+										<Badge variant={h.git.pushed ? "success" : "warning"}>{h.git.pushed ? t("Pushed") : t("Not pushed")}</Badge>
+										{h.git.patch ? <Badge variant="accent">{t("Includes uncommitted changes as a patch")}</Badge> : null}
 									</span>
 								</KeyValue>
 							</>
 						) : null}
 						{h.files ? (
 							<>
-								<KeyValue label="Bundle">
-									{h.files.fileCount} {h.files.fileCount === 1 ? "file" : "files"} · {formatBytes(h.files.size)}
+								<KeyValue label={t("Bundle")}>
+									{t("{count, plural, one {# file} other {# files}} · {size}", { count: h.files.fileCount, size: formatBytes(h.files.size) })}
 								</KeyValue>
-								<KeyValue label="Checksum" mono>
+								<KeyValue label={t("Checksum")} mono>
 									{short(h.files.sha256, 16)}…
 								</KeyValue>
 							</>
 						) : null}
-						<KeyValue label="Ownership">
-							epoch {h.fromEpoch} → {h.toEpoch}
+						<KeyValue label={t("Ownership")}>
+							{t("epoch {from} → {to}", { from: h.fromEpoch, to: h.toEpoch })}
 						</KeyValue>
-						<KeyValue label="Transcript">{h.includeTranscript ? "The old agent transcript is included for reading" : "Not included (only a summary travels)"}</KeyValue>
+						<KeyValue label={t("Transcript")}>{h.includeTranscript ? t("The old agent transcript is included for reading") : t("Not included (only a summary travels)")}</KeyValue>
 					</dl>
 				</CardContent>
 			</Card>
@@ -79,14 +80,14 @@ export function ManifestCard({ h }: { h: Handoff }) {
 			{env ? (
 				<Card>
 					<CardHeader>
-						<CardTitle>Environment the work expects</CardTitle>
+						<CardTitle>{t("Environment the work expects")}</CardTitle>
 					</CardHeader>
 					<CardContent className="pt-1">
 						<dl className="divide-y">
-							{env.os || env.arch ? <KeyValue label="Source machine">{[env.os, env.arch].filter(Boolean).join(" · ")}</KeyValue> : null}
-							<KeyValue label="Runtimes">
+							{env.os || env.arch ? <KeyValue label={t("Source machine")}>{[env.os, env.arch].filter(Boolean).join(" · ")}</KeyValue> : null}
+							<KeyValue label={t("Runtimes")}>
 								{env.runtimes.length === 0 ? (
-									<span className="text-subtle">None detected</span>
+									<span className="text-subtle">{t("None detected")}</span>
 								) : (
 									<span className="flex flex-wrap gap-1.5">
 										{env.runtimes.map((r) => (
@@ -97,7 +98,7 @@ export function ManifestCard({ h }: { h: Handoff }) {
 									</span>
 								)}
 							</KeyValue>
-							<KeyValue label="Package manager">
+							<KeyValue label={t("Package manager")}>
 								{env.packageManager ? (
 									<span className="flex flex-col gap-1">
 										<span>
@@ -107,11 +108,11 @@ export function ManifestCard({ h }: { h: Handoff }) {
 										<Mono>{env.packageManager.installCommand}</Mono>
 									</span>
 								) : (
-									<span className="text-subtle">{env.projects?.length ? "None in the top folder" : "None detected"}</span>
+									<span className="text-subtle">{env.projects?.length ? t("None in the top folder") : t("None detected")}</span>
 								)}
 							</KeyValue>
 							{env.projects?.length ? (
-								<KeyValue label="Projects in folders">
+								<KeyValue label={t("Projects in folders")}>
 									<span className="flex flex-col gap-1.5">
 										{env.projects.map((p) => (
 											<span key={`${p.path}:${p.packageManager.installCommand}`} className="flex flex-col gap-0.5">
@@ -125,9 +126,9 @@ export function ManifestCard({ h }: { h: Handoff }) {
 									</span>
 								</KeyValue>
 							) : null}
-							<KeyValue label="Setup commands">
+							<KeyValue label={t("Setup commands")}>
 								{env.setupCommands.length === 0 ? (
-									<span className="text-subtle">None declared</span>
+									<span className="text-subtle">{t("None declared")}</span>
 								) : (
 									<span className="flex flex-col gap-1">
 										{env.setupCommands.map((c) => (
@@ -136,9 +137,9 @@ export function ManifestCard({ h }: { h: Handoff }) {
 									</span>
 								)}
 							</KeyValue>
-							<KeyValue label="Required env vars">
+							<KeyValue label={t("Required env vars")}>
 								{env.requiredEnvVars.length === 0 ? (
-									<span className="text-subtle">None</span>
+									<span className="text-subtle">{t("None")}</span>
 								) : (
 									<span className="flex flex-col gap-1.5">
 										<span className="flex flex-wrap gap-1.5">
@@ -148,11 +149,11 @@ export function ManifestCard({ h }: { h: Handoff }) {
 												</Badge>
 											))}
 										</span>
-										<span className="text-xs text-subtle">Names only. Values never travel; set them on the target.</span>
+										<span className="text-xs text-subtle">{t("Names only. Values never travel; set them on the target.")}</span>
 									</span>
 								)}
 							</KeyValue>
-							<KeyValue label="Check command">{env.checkCommand ? <Mono>{env.checkCommand}</Mono> : <span className="text-subtle">None</span>}</KeyValue>
+							<KeyValue label={t("Check command")}>{env.checkCommand ? <Mono>{env.checkCommand}</Mono> : <span className="text-subtle">{t("None")}</span>}</KeyValue>
 						</dl>
 					</CardContent>
 				</Card>
@@ -161,8 +162,8 @@ export function ManifestCard({ h }: { h: Handoff }) {
 			{h.conversationSummary ? (
 				<Card>
 					<CardHeader>
-						<CardTitle>Conversation summary</CardTitle>
-						<span className="text-2xs text-subtle">scanned for secrets</span>
+						<CardTitle>{t("Conversation summary")}</CardTitle>
+						<span className="text-2xs text-subtle">{t("scanned for secrets")}</span>
 					</CardHeader>
 					<CardContent className="pt-3">
 						<LazyMarkdown text={h.conversationSummary} />

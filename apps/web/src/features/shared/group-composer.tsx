@@ -1,6 +1,7 @@
 import { type MentionCandidate, mentionTokens, parseMentions, type Participant, type SharedSession, type SharedSessionDetail } from "@clam/contracts";
 import { AtSign, Bot, CornerDownRight, Send, Users } from "lucide-react";
 import { type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { t } from "@/i18n";
 import { filesFromClipboard } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -32,13 +33,13 @@ function addressable(shared: SharedSession): Addressable[] {
 }
 
 function mentionOptions(shared: SharedSession, members: Addressable[], candidates: MentionCandidate[]): MentionOption[] {
-	const out: MentionOption[] = [{ key: "all", insert: "@all", label: "@all", hint: "every agent in the group", search: "all everyone", kind: "all" }];
+	const out: MentionOption[] = [{ key: "all", insert: "@all", label: "@all", hint: t("every agent in the group"), search: "all everyone", kind: "all" }];
 	for (const p of members) {
 		// Every token is checked against the parser: two agents named "OMP Agent" are told apart by their machine.
 		const tokens = mentionTokens(p, candidates);
 		const search = `${p.agentName} ${p.nodeName}`;
-		out.push({ key: `a:${p.nodeId}`, insert: tokens.agent, label: tokens.agent, hint: `${p.agentName} on ${p.nodeName}${p.nodeId === shared.driverNodeId ? " · lead" : ""}`, search, kind: "agent" });
-		if (tokens.machine !== tokens.agent) out.push({ key: `n:${p.nodeId}`, insert: tokens.machine, label: tokens.machine, hint: `the agent on this machine (${p.agentName})`, search, kind: "node" });
+		out.push({ key: `a:${p.nodeId}`, insert: tokens.agent, label: tokens.agent, hint: p.nodeId === shared.driverNodeId ? t("{agent} on {machine} · lead", { agent: p.agentName, machine: p.nodeName }) : t("{agent} on {machine}", { agent: p.agentName, machine: p.nodeName }), search, kind: "agent" });
+		if (tokens.machine !== tokens.agent) out.push({ key: `n:${p.nodeId}`, insert: tokens.machine, label: tokens.machine, hint: t("the agent on this machine ({agent})", { agent: p.agentName }), search, kind: "node" });
 	}
 	return out;
 }
@@ -53,20 +54,20 @@ const subscribeWide = (cb: () => void) => {
 function RecipientChip({ lead, everyone, mentioned }: { lead: Participant | undefined; everyone: boolean; mentioned: Participant[] }) {
 	const explicit = everyone || mentioned.length > 0;
 	const names = mentioned.map(participantLabel).join(", ");
-	const label = everyone ? "Everyone in the group" : mentioned.length > 0 ? names : lead ? `${participantLabel(lead)}, the lead agent` : "";
+	const label = everyone ? t("Everyone in the group") : mentioned.length > 0 ? names : lead ? t("{name}, the lead agent", { name: participantLabel(lead) }) : "";
 	return (
 		<Popover>
 			<PopoverTrigger asChild>
 				<button
 					type="button"
-					title={explicit ? "Who this message is addressed to" : "Messages without an @mention go to the lead agent"}
-					aria-label={explicit ? `This message is addressed to ${label}` : `Messages without an @mention go to ${label}`}
+					title={explicit ? t("Who this message is addressed to") : t("Messages without an @mention go to the lead agent")}
+					aria-label={explicit ? t("This message is addressed to {name}", { name: label }) : t("Messages without an @mention go to {name}", { name: label })}
 					data-testid="recipient-chip"
 					className="inline-flex min-h-7 max-w-full flex-wrap items-center gap-x-1.5 gap-y-1 rounded-full bg-surface-2 px-2.5 py-0.5 text-2xs text-muted-foreground outline-none hover:bg-surface-3 focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:min-h-11"
 				>
 					{everyone ? <Users className="size-3 shrink-0" aria-hidden /> : <CornerDownRight className="size-3 shrink-0" aria-hidden />}
 					{everyone ? (
-						<span className="font-medium text-foreground">Everyone</span>
+						<span className="font-medium text-foreground">{t("Everyone")}</span>
 					) : (
 						(explicit ? mentioned : lead ? [lead] : []).map((p) => (
 							<span key={p.nodeId} className="inline-flex min-w-0 items-center gap-1">
@@ -80,13 +81,13 @@ function RecipientChip({ lead, everyone, mentioned }: { lead: Participant | unde
 			<PopoverContent align="start" className="w-72">
 				<p className="text-xs text-muted-foreground">
 					{everyone ? (
-						<span className="font-medium text-foreground">Goes to every agent in the group.</span>
+						<span className="font-medium text-foreground">{t("Goes to every agent in the group.")}</span>
 					) : explicit ? (
-						<span className="font-medium text-foreground">Goes to {names}.</span>
+						<span className="font-medium text-foreground">{t("Goes to {names}.", { names })}</span>
 					) : (
-						<span className="font-medium text-foreground">Goes to {lead ? lead.agentName : "the lead agent"}, the lead agent.</span>
+						<span className="font-medium text-foreground">{lead?.agentName ? t("Goes to {name}, the lead agent.", { name: lead.agentName }) : t("Goes to the lead agent.")}</span>
 					)}{" "}
-					Write @name to address another agent, or @all to wake every agent in the group. Everyone in the group sees every message either way.
+					{t("Write @name to address another agent, or @all to wake every agent in the group. Everyone in the group sees every message either way.")}
 				</p>
 			</PopoverContent>
 		</Popover>
@@ -114,7 +115,7 @@ export function GroupComposer({
 	const candidates = useMemo<MentionCandidate[]>(() => members.map((p) => ({ nodeId: p.nodeId, nodeName: p.nodeName, agentId: p.agentId, agentName: p.agentName })), [members]);
 	// Exactly who the server will address for this text (it parses the same way): the chip shows it, send passes it as `to`.
 	const mentions = useMemo(() => parseMentions(text, candidates), [text, candidates]);
-	const mentioned = useMemo(() => mentions.agents.flatMap((t) => members.find((p) => p.nodeId === t.nodeId) ?? []), [mentions, members]);
+	const mentioned = useMemo(() => mentions.agents.flatMap((a) => members.find((p) => p.nodeId === a.nodeId) ?? []), [mentions, members]);
 	const [menu, setMenu] = useState<{ start: number; query: string } | null>(null);
 	const [active, setActive] = useState(0);
 	const ref = useRef<HTMLTextAreaElement>(null);
@@ -218,12 +219,12 @@ export function GroupComposer({
 		}
 	};
 
-	if (out) return <div className={cn("shrink-0 border-t px-4 py-3 pb-safe text-center text-xs text-subtle", className)}>You are no longer part of this group; the chat is read-only.</div>;
+	if (out) return <div className={cn("shrink-0 border-t px-4 py-3 pb-safe text-center text-xs text-subtle", className)}>{t("You are no longer part of this group; the chat is read-only.")}</div>;
 	return (
 		<div className={cn("relative shrink-0 border-t bg-surface-1 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-2.5", keyboardOpen ? "pb-2" : "pb-[max(0.75rem,env(safe-area-inset-bottom))]", className)}>
 			<div className="mx-auto w-full max-w-3xl">
 				{menu && matches.length > 0 ? (
-					<ul role="listbox" aria-label="Mention" className="clam-pop absolute inset-x-3 bottom-full z-10 mb-1 mx-auto flex max-h-56 max-w-3xl flex-col overflow-y-auto rounded-xl bg-overlay p-1 shadow-pop shadow-[inset_0_0_0_1px_var(--border-strong)]">
+					<ul role="listbox" aria-label={t("Mention")} className="clam-pop absolute inset-x-3 bottom-full z-10 mb-1 mx-auto flex max-h-56 max-w-3xl flex-col overflow-y-auto rounded-xl bg-overlay p-1 shadow-pop shadow-[inset_0_0_0_1px_var(--border-strong)]">
 						{matches.map((o, i) => (
 							<li key={o.key} role="option" aria-selected={i === active}>
 								<button
@@ -265,17 +266,17 @@ export function GroupComposer({
 						onClick={(e) => refreshMenu(e.currentTarget.value, e.currentTarget.selectionStart)}
 						rows={1}
 						maxLength={20_000}
-						aria-label="Message to the group"
-						placeholder={wide ? "Message the group · @mention to pick an agent" : "Message the group…"}
+						aria-label={t("Message to the group")}
+						placeholder={wide ? t("Message the group · @mention to pick an agent") : t("Message the group…")}
 						enterKeyHint={touch ? "enter" : "send"}
 						// 16px on touch screens: smaller text makes iOS zoom the page when the box is focused.
 						className="scrollbar-thin min-h-11 flex-1 resize-none overflow-hidden py-2.5 coarse:text-base"
 					/>
-					<Button variant="primary" size="lg" onClick={send} loading={post.isPending} disabled={(!text.trim() && uploads.ready.length === 0) || uploads.busy} aria-label="Send message" className="shrink-0 px-3.5 coarse:min-h-12 coarse:min-w-12">
+					<Button variant="primary" size="lg" onClick={send} loading={post.isPending} disabled={(!text.trim() && uploads.ready.length === 0) || uploads.busy} aria-label={t("Send message")} className="shrink-0 px-3.5 coarse:min-h-12 coarse:min-w-12">
 						<Send />
 					</Button>
 				</div>
-				{touch ? null : <p className="mt-1.5 hidden text-2xs text-subtle fine:block [@media(max-height:520px)]:hidden">Type @ to address an agent, a machine or everyone · drop, paste or attach files · Enter sends · Shift+Enter for a new line</p>}
+				{touch ? null : <p className="mt-1.5 hidden text-2xs text-subtle fine:block [@media(max-height:520px)]:hidden">{t("Type @ to address an agent, a machine or everyone · drop, paste or attach files · Enter sends · Shift+Enter for a new line")}</p>}
 			</div>
 		</div>
 	);

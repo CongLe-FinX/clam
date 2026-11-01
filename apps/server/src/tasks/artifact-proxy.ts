@@ -3,6 +3,7 @@ import { Buffer } from "node:buffer";
 import { API_PREFIX, contentDigest, normalizePeerUrl, signRequest, signerFromIdentity } from "@clam/agent-network";
 import type { FastifyReply } from "fastify";
 import type { ServerContext } from "../context.ts";
+import { i18nMsg } from "@clam/contracts";
 import { ApiError } from "../http/errors.ts";
 import { errorText } from "../network/util.ts";
 import { MAX_ARTIFACT_BYTES } from "./artifacts.ts";
@@ -41,30 +42,30 @@ async function fetchTaskBlob(ctx: ServerContext, task: TaskRow, segment: "artifa
 	const other = segment === "artifacts" ? "executing" : "delegating";
 	const peer = ctx.network.peers.row(task.peerId);
 	const origin = peer ? normalizePeerUrl(peer.url, { allowLoopbackHttp: ctx.config.allowLoopbackPeers }) : null;
-	if (!peer || peer.status === "revoked" || origin === null) throw ApiError.upstream(`The ${other} node is not reachable`);
-	if (listed.size > MAX_ARTIFACT_BYTES) throw ApiError.upstream("The artifact is larger than this node accepts");
+	if (!peer || peer.status === "revoked" || origin === null) throw ApiError.upstream(i18nMsg("The {other} node is not reachable", { other }));
+	if (listed.size > MAX_ARTIFACT_BYTES) throw ApiError.upstream(i18nMsg("The artifact is larger than this node accepts"));
 	const url = `${origin}${API_PREFIX}/tasks/${encodeURIComponent(task.id)}/${segment}/${encodeURIComponent(listed.artifactId)}`;
 	const headers = signRequest(signerFromIdentity(ctx.identity), { method: "GET", url, bodyBytes: new Uint8Array(0) });
 	let response: Response;
 	try {
 		response = await fetch(url, { method: "GET", headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 	} catch (error) {
-		throw ApiError.upstream(`The ${other} node could not be reached: ${errorText(error)}`);
+		throw ApiError.upstream(i18nMsg("The {other} node could not be reached: {error}", { other, error: errorText(error) }));
 	}
 	if (response.status === 404) throw ApiError.notFound("Artifact");
-	if (response.status === 403 && segment === "inputs") throw new ApiError(403, "forbidden", "The delegating node did not grant this node tasks.receive, so the input files cannot be fetched");
-	if (!response.ok) throw ApiError.upstream(`The ${other} node answered ${response.status}`);
+	if (response.status === 403 && segment === "inputs") throw new ApiError(403, "forbidden", i18nMsg("The delegating node did not grant this node tasks.receive, so the input files cannot be fetched"));
+	if (!response.ok) throw ApiError.upstream(i18nMsg("The {other} node answered {status}", { other, status: response.status }));
 	const declared = Number(response.headers.get("content-length") ?? 0);
-	if (declared > MAX_ARTIFACT_BYTES) throw ApiError.upstream("The artifact is larger than this node accepts");
+	if (declared > MAX_ARTIFACT_BYTES) throw ApiError.upstream(i18nMsg("The artifact is larger than this node accepts"));
 	let bytes: Buffer;
 	try {
 		bytes = Buffer.from(await response.arrayBuffer());
 	} catch (error) {
-		throw ApiError.upstream(`The artifact download was interrupted: ${errorText(error)}`);
+		throw ApiError.upstream(i18nMsg("The artifact download was interrupted: {error}", { error: errorText(error) }));
 	}
-	if (bytes.length > MAX_ARTIFACT_BYTES) throw ApiError.upstream("The artifact is larger than this node accepts");
+	if (bytes.length > MAX_ARTIFACT_BYTES) throw ApiError.upstream(i18nMsg("The artifact is larger than this node accepts"));
 	if (createHash("sha256").update(bytes).digest("hex") !== listed.sha256) {
-		throw ApiError.upstream("The downloaded artifact does not match the digest the other node reported");
+		throw ApiError.upstream(i18nMsg("The downloaded artifact does not match the digest the other node reported"));
 	}
 	return bytes;
 }

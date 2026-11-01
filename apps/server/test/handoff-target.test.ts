@@ -1,10 +1,11 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import type { Task, TaskDetail } from "@clam/contracts";
+import type { HandoffDetail, Task, TaskDetail } from "@clam/contracts";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { expectEventsLocalised, expectStepsLocalised } from "./i18n-helpers.ts";
 import { writeNodeSettings } from "../src/services/settings.ts";
 import { api } from "./full-harness.ts";
-import { BLOCK, cloneFor, gitOut, handoffFor, linkedProject, makeRepo, readProjectFile, startTrio, type Trio, waitForHandoffOf, waitForTaskOn } from "./handoff-fixtures.ts";
+import { BLOCK, cloneFor, gitOut, handoffFor, linkedProject, makeRepo, readProjectFile, startTrio, type Trio, waitForHandoffOf, waitForTaskOn, whenResumeSettled } from "./handoff-fixtures.ts";
 import { eventually } from "./net-helpers.ts";
 import { type GitConfigIsolation, isolateGitConfig } from "./task-fixtures.ts";
 
@@ -44,10 +45,14 @@ describe("handoff target, files mode", () => {
 		expect(onC.steps.every((s) => s.state === "done" || s.state === "skipped")).toBe(true);
 		expect(onC.failure).toBeNull();
 		expect(onC.target.sessionId).not.toBeNull();
+		expectEventsLocalised((await api(trio.c).get<HandoffDetail>(`/handoffs/${onC.id}`)).body.events);
+		// step details that are our own sentences carry a twin that renders to them (steps 1, 2, 5, 8, 9, 10 at least)
+		expect(expectStepsLocalised(onC.steps)).toBeGreaterThanOrEqual(6);
 
 		const taskC = (await api(trio.c).get<TaskDetail>(`/tasks/${task.id}`)).body.task;
 		expect(taskC).toMatchObject({ direction: "incoming", epoch: 1, executor: { nodeId: trio.ids.c } });
 		expect(["running", "blocked", "succeeded"]).toContain(taskC.status);
+		await whenResumeSettled(trio.c, task.id);
 		const project = taskC.projectId ? trio.c.ctx.db.$client.prepare("select path from projects where id = ?").get(taskC.projectId) : undefined;
 		expect(readProjectFile((project as { path: string }).path, "work.txt")).toBe("hello\n");
 
@@ -134,6 +139,7 @@ describe("handoff target, git mode", () => {
 		expect(done.failure, JSON.stringify(done.failure)).toBeNull();
 		expect(done.state).toBe("completed");
 
+		await whenResumeSettled(trio.c, res.body.id);
 		const branch = gitOut(workC, "rev-parse", "--abbrev-ref", "HEAD").trim();
 		expect(branch).toMatch(/^clam\/node-c\/git-handoff-[a-z0-9]+-h[a-z0-9]+$/);
 		expect(readProjectFile(workC, "feature.txt")).toBe("wip\n");
@@ -163,6 +169,7 @@ describe("handoff target, git mode", () => {
 		const done = await waitForHandoffOf(trio.c, res.body.id, "target", (h) => h.state === "completed" || h.state === "failed", "the handoff ends on C");
 		expect(done.failure, JSON.stringify(done.failure)).toBeNull();
 		expect(done.git).toMatchObject({ pushed: false, patch: true });
+		await whenResumeSettled(trio.c, res.body.id);
 		expect(readProjectFile(workC, "feature.txt")).toBe("patched\n");
 		expect(gitOut(workC, "rev-parse", "HEAD").trim()).toBe(done.git?.commit);
 	});
@@ -225,6 +232,7 @@ describe("handoff target, returning home and retries", () => {
 		const taskA = (await api(trio.a).get<TaskDetail>(`/tasks/${task.id}`)).body.task;
 		expect(taskA).toMatchObject({ direction: "incoming", epoch: 1, executor: { nodeId: trio.ids.a } });
 		const project = trio.a.ctx.db.$client.prepare("select path from projects where id = ?").get(taskA.projectId) as { path: string };
+		await whenResumeSettled(trio.a, task.id);
 		expect(readProjectFile(project.path, "work.txt")).toBe("home\n");
 		// no executor notice goes anywhere: the sender is the executor
 		expect(trio.a.ctx.tasks.store.pendingOutbox().filter((i) => i.kind === "task.executor")).toEqual([]);

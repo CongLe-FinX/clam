@@ -23,7 +23,7 @@ const AUTOSTART_STATUS = { not_built: 409, unsupported: 409, failed: 502 } as co
 /** Autostart failures reach the user as typed API errors with the OS-level reason in the message. */
 function toApiError(error: unknown): unknown {
 	if (!(error instanceof AutostartError)) return error;
-	return new ApiError(AUTOSTART_STATUS[error.code], `autostart_${error.code}`, error.message);
+	return new ApiError(AUTOSTART_STATUS[error.code], `autostart_${error.code}`, { text: error.message, i18n: error.i18n });
 }
 
 /** Node identity/health/settings/security and the Cloudflare Tunnel. */
@@ -53,7 +53,7 @@ export default async function nodeRoutes(app: FastifyInstance, { ctx }: RoutePlu
 	/** Stored settings, with `autoStart` replaced by what the OS login entry really is. */
 	async function effectiveSettings(): Promise<NodeSettings> {
 		const login = await ctx.autostart.status();
-		return { ...readNodeSettings(ctx.db), autoStart: login.enabled, autoStartDetail: login.detail };
+		return { ...readNodeSettings(ctx.db), autoStart: login.enabled, autoStartDetail: login.detail, ...(login.i18n && { autoStartI18n: login.i18n }) };
 	}
 
 	app.get(routes.settings, effectiveSettings);

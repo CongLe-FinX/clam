@@ -1,4 +1,4 @@
-import type { SharedInvite, SharedMessagesPage, SharedSession, SharedSessionDetail, SharedTopicEvent } from "@clam/contracts";
+import { i18nMsg, type SharedInvite, type SharedMessagesPage, type SharedSession, type SharedSessionDetail, type SharedTopicEvent } from "@clam/contracts";
 import type { FastifyBaseLogger } from "fastify";
 import { ApiError } from "../http/errors.ts";
 import type { ServerContext } from "../context.ts";
@@ -139,10 +139,10 @@ export class SharedService implements SharedHub {
 		const peer = this.ctx.network.peers.row(peerId);
 		if (!peer || peer.status === "revoked") throw ApiError.notFound("Peer");
 		if (!(peer.receivedCapabilities as string[]).includes("sessions.share")) {
-			throw new ApiError(409, "capability_missing", `${peer.name} has not granted this node the capability sessions.share. Ask its user to enable shared sessions for this node (Network → peers).`, { missing: ["sessions.share"], grantedBy: peer.id });
+			throw new ApiError(409, "capability_missing", i18nMsg("{name} has not granted this node the capability sessions.share. Ask its user to enable shared sessions for this node (Network → peers).", { name: peer.name }), { missing: ["sessions.share"], grantedBy: peer.id });
 		}
 		if (!(peer.grantedCapabilities as string[]).includes("sessions.share")) {
-			throw new ApiError(409, "capability_missing", `This node has not granted ${peer.name} the capability sessions.share, which it needs to reach shared sessions on this node (mirror, snapshots, messages). Grant it in Network → ${peer.name}.`, { missing: ["sessions.share"], grantedBy: this.ctx.identity.nodeId });
+			throw new ApiError(409, "capability_missing", i18nMsg("This node has not granted {name} the capability sessions.share, which it needs to reach shared sessions on this node (mirror, snapshots, messages). Grant it in Network → {name}.", { name: peer.name }), { missing: ["sessions.share"], grantedBy: this.ctx.identity.nodeId });
 		}
 	}
 

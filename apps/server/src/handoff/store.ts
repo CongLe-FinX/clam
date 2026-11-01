@@ -1,5 +1,5 @@
 import { ulid } from "@clam/agent-network";
-import type { Handoff, HandoffEvent, HandoffKind, HandoffRole, HandoffState, HandoffStep, SetupCommand } from "@clam/contracts";
+import type { Handoff, HandoffEvent, I18nMessage, HandoffKind, HandoffRole, HandoffState, HandoffStep, SetupCommand } from "@clam/contracts";
 import { handoffArtifacts, handoffEvents, handoffSetup, handoffSteps, handoffs, type ClamDb } from "@clam/database";
 import { assertTransition, HandoffManifest, InvalidTransitionError, isTerminal, TARGET_STEPS } from "@clam/handoff-engine";
 import { and, asc, desc, eq, inArray, notInArray, sql } from "drizzle-orm";
@@ -30,7 +30,7 @@ export interface HandoffFilter {
 
 export interface TransitionOptions {
 	/** Timeline text (the same text appears in the Handoff Center of this node). */
-	summary: string;
+	summary: I18nMessage;
 	/** Compare-and-set guard: only transition when the current state is one of these (409 `conflict` otherwise). */
 	from?: readonly HandoffState[];
 	/** Extra columns written together with the state. */
@@ -203,7 +203,7 @@ export class HandoffStore {
 	// ------------------------------------------------------------------ events
 
 	/** Append a timeline event without changing the state (progress notes, the other node's states). Gap-free `seq`. */
-	appendEvent(id: string, e: { state: HandoffState; summary: string; nodeId?: string }): HandoffEventRow {
+	appendEvent(id: string, e: { state: HandoffState; summary: I18nMessage; nodeId?: string }): HandoffEventRow {
 		return this.db.transaction((tx) => appendEventTx(tx, id, { nodeId: e.nodeId ?? this.self.nodeId, state: e.state, summary: e.summary, at: nowIso() }));
 	}
 
@@ -225,11 +225,12 @@ export class HandoffStore {
 		return this.steps(id);
 	}
 
-	setStep(id: string, n: number, state: StepState, detail?: string | null): HandoffStepRow {
+	setStep(id: string, n: number, state: StepState, detail?: string | I18nMessage | null): HandoffStepRow {
 		const at = nowIso();
+		const say = typeof detail === "string" ? { text: detail, i18n: undefined } : detail;
 		const row = this.db
 			.update(handoffSteps)
-			.set({ state, at, ...(detail !== undefined && { detail }) })
+			.set({ state, at, ...(say !== undefined && { detail: say?.text ?? null, detailI18n: say?.i18n ?? null }) })
 			.where(and(eq(handoffSteps.handoffId, id), eq(handoffSteps.n, n)))
 			.returning()
 			.get();
@@ -283,11 +284,11 @@ export class HandoffStore {
 	// ------------------------------------------------------------------ mapping to the contract
 
 	toEvent(row: HandoffEventRow): HandoffEvent {
-		return { seq: row.seq, at: row.at, nodeId: row.nodeId, state: row.state as HandoffState, summary: row.summary };
+		return { seq: row.seq, at: row.at, nodeId: row.nodeId, state: row.state as HandoffState, summary: row.summary, ...(row.i18n && { i18n: row.i18n }) };
 	}
 
 	toStep(row: HandoffStepRow): HandoffStep {
-		return { n: row.n, name: row.name, state: row.state as StepState, detail: row.detail, at: row.at };
+		return { n: row.n, name: row.name, state: row.state as StepState, detail: row.detail, ...(row.detailI18n && { i18n: row.detailI18n }), at: row.at };
 	}
 
 	toSetup(row: HandoffSetupRow): SetupCommand {
@@ -365,7 +366,7 @@ export class HandoffStore {
 			manifestSha256: row.manifestSha256,
 			conversationSummary: row.conversationSummary,
 			includeTranscript: row.includeTranscript,
-			failure: row.failureCode ? { code: row.failureCode as NonNullable<Handoff["failure"]>["code"], detail: row.failureDetail ?? "", step: row.failureStep } : null,
+			failure: row.failureCode ? { code: row.failureCode as NonNullable<Handoff["failure"]>["code"], detail: row.failureDetail ?? "", ...(row.failureI18n && { i18n: row.failureI18n }), step: row.failureStep } : null,
 			actions: this.actions(row),
 			expiresAt: row.expiresAt,
 			deadlineAt: row.deadlineAt,
@@ -392,8 +393,8 @@ export class HandoffStore {
 
 type Tx = Parameters<Parameters<ClamDb["transaction"]>[0]>[0];
 
-function appendEventTx(tx: Tx, handoffId: string, e: { nodeId: string; state: string; summary: string; at: string }): HandoffEventRow {
+function appendEventTx(tx: Tx, handoffId: string, e: { nodeId: string; state: string; summary: I18nMessage; at: string }): HandoffEventRow {
 	const last = tx.select({ seq: sql<number>`coalesce(max(${handoffEvents.seq}), 0)` }).from(handoffEvents).where(eq(handoffEvents.handoffId, handoffId)).get();
 	const seq = (last?.seq ?? 0) + 1;
-	return tx.insert(handoffEvents).values({ handoffId, seq, at: e.at, nodeId: e.nodeId, state: e.state, summary: e.summary.slice(0, 2000) }).returning().get();
+	return tx.insert(handoffEvents).values({ handoffId, seq, at: e.at, nodeId: e.nodeId, state: e.state, summary: e.summary.text.slice(0, 2000), i18n: e.summary.text.length <= 2000 ? (e.summary.i18n ?? null) : null }).returning().get();
 }

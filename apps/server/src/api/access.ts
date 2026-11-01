@@ -1,11 +1,11 @@
-import { LoginBody, SetPasswordBody, StepUpBody, UpdateAccessBody, routes, type AccessStatus } from "@clam/contracts";
+import { LoginBody, SetPasswordBody, StepUpBody, UpdateAccessBody, routes, type AccessStatus, i18nMsg } from "@clam/contracts";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { IssuedSession } from "../auth/service.ts";
 import { clearedSessionCookie, sessionCookie } from "../auth/token.ts";
 import type { RoutePluginOptions } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
 
-const LOOPBACK_ONLY = "This can only be changed from the machine this node runs on (the local UI)";
+const LOOPBACK_ONLY = i18nMsg("This can only be changed from the machine this node runs on (the local UI)");
 
 /** The client a login attempt is charged to: the real address behind the tunnel (see docs/security.md on why that header is trustworthy here). */
 function clientOf(request: FastifyRequest): string {
@@ -46,10 +46,10 @@ export default async function accessRoutes(app: FastifyInstance, { ctx }: RouteP
 			// Switching a machine tool ON from a signed-in remote session needs the owner password in the same request; OFF never does.
 			if (patch.remoteTerminalEnabled === true || patch.remoteBrowserEnabled === true) {
 				const session = request.access.session;
-				if (!session) throw new ApiError(401, "auth_required", "Sign in to continue");
-				if (!password) throw ApiError.badRequest("password is required to switch this on from a remote session");
+				if (!session) throw new ApiError(401, "auth_required", i18nMsg("Sign in to continue"));
+				if (!password) throw ApiError.badRequest(i18nMsg("password is required to switch this on from a remote session"));
 				const matched = await throttled(reply, () => access.verifyOwnerPassword(clientOf(request), password));
-				if (!matched) throw new ApiError(401, "invalid_credentials", "Invalid password");
+				if (!matched) throw new ApiError(401, "invalid_credentials", i18nMsg("Invalid password"));
 				access.updateConfig(patch, via);
 				access.elevate(session);
 				return access.status(request.access);
@@ -61,10 +61,10 @@ export default async function accessRoutes(app: FastifyInstance, { ctx }: RouteP
 
 	app.post(routes.accessStepUp, async (request, reply): Promise<AccessStatus> => {
 		const session = request.access.session;
-		if (request.access.via !== "remote" || !session) throw new ApiError(409, "step_up_not_required", "No re-entry of the password is needed on the local UI");
+		if (request.access.via !== "remote" || !session) throw new ApiError(409, "step_up_not_required", i18nMsg("No re-entry of the password is needed on the local UI"));
 		const body = StepUpBody.parse(request.body);
 		const matched = await throttled(reply, () => access.verifyOwnerPassword(clientOf(request), body.password));
-		if (!matched) throw new ApiError(403, "invalid_credentials", "Invalid password");
+		if (!matched) throw new ApiError(403, "invalid_credentials", i18nMsg("Invalid password"));
 		access.elevate(session);
 		return access.status(request.access);
 	});
@@ -75,11 +75,11 @@ export default async function accessRoutes(app: FastifyInstance, { ctx }: RouteP
 		if (remote) {
 			// The very first password is set at the machine; afterwards a signed-in owner must prove the current one.
 			if (!access.passwordSet()) throw new ApiError(403, "loopback_only", LOOPBACK_ONLY);
-			if (!request.access.session) throw new ApiError(401, "auth_required", "Sign in to continue");
-			if (!body.currentPassword) throw ApiError.badRequest("currentPassword is required to change the password remotely");
+			if (!request.access.session) throw new ApiError(401, "auth_required", i18nMsg("Sign in to continue"));
+			if (!body.currentPassword) throw ApiError.badRequest(i18nMsg("currentPassword is required to change the password remotely"));
 			const currentPassword = body.currentPassword;
 			const matched = await throttled(reply, () => access.verifyOwnerPassword(clientOf(request), currentPassword));
-			if (!matched) throw new ApiError(403, "invalid_current_password", "The current password is not correct");
+			if (!matched) throw new ApiError(403, "invalid_current_password", i18nMsg("The current password is not correct"));
 		}
 		await access.setPassword(body.password);
 		if (!remote) return access.status(request.access);
@@ -90,10 +90,10 @@ export default async function accessRoutes(app: FastifyInstance, { ctx }: RouteP
 	});
 
 	app.post(routes.accessLogin, async (request, reply): Promise<AccessStatus> => {
-		if (request.access.via === "loopback") throw new ApiError(409, "login_not_required", "No sign-in is needed on the local UI");
+		if (request.access.via === "loopback") throw new ApiError(409, "login_not_required", i18nMsg("No sign-in is needed on the local UI"));
 		const body = LoginBody.parse(request.body);
 		const matched = await throttled(reply, () => access.verifyOwnerPassword(clientOf(request), body.password));
-		if (!matched) throw new ApiError(401, "invalid_credentials", "Invalid password");
+		if (!matched) throw new ApiError(401, "invalid_credentials", i18nMsg("Invalid password"));
 		const issued = await access.startSession();
 		sendCookie(reply, issued);
 		return access.status({ via: "remote", session: issued.claims });

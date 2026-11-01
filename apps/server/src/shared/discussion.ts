@@ -1,6 +1,6 @@
 import { NetworkError, wire as wireSchemas } from "@clam/agent-network";
 import type { wire } from "@clam/agent-network";
-import { ATTACHMENT_EAGER_MAX_BYTES, type MentionCandidate, type SessionEvent, type SharedMessage, type TurnOutputFile } from "@clam/contracts";
+import { ATTACHMENT_EAGER_MAX_BYTES, type I18nMessage, type I18nText, i18nMsg, type MentionCandidate, type SessionEvent, type SharedMessage, type TurnOutputFile } from "@clam/contracts";
 import { agents, agentSessions } from "@clam/database";
 import {
 	buildSharedMessageInjection,
@@ -191,17 +191,17 @@ export class DiscussionService implements DiscussionApi {
 
 	async post(sharedId: string, input: PostInput): Promise<SharedMessage> {
 		const shared = this.store.get(sharedId);
-		if (shared.state !== "active") throw new ApiError(409, "not_a_participant", "This node left the shared session");
-		if (input.kind === "system" || (input.author.kind === "human" && input.kind === "reply")) throw ApiError.badRequest(`a ${input.author.kind} cannot post a message of kind ${input.kind}`);
+		if (shared.state !== "active") throw new ApiError(409, "not_a_participant", i18nMsg("This node left the shared session"));
+		if (input.kind === "system" || (input.author.kind === "human" && input.kind === "reply")) throw ApiError.badRequest(i18nMsg("a {author} cannot post a message of kind {kind}", { author: input.author.kind, kind: input.kind }));
 		if (input.kind === "instruction" && input.author.kind === "agent" && shared.localRole !== "driver") {
-			throw ApiError.badRequest("only the lead's agent may send an instruction; use question, answer or note");
+			throw ApiError.badRequest(i18nMsg("only the lead's agent may send an instruction; use question, answer or note"));
 		}
 		const attachments = this.hub.attachments.claim(sharedId, input.attachmentIds ?? []);
-		if (input.text.trim() === "" && attachments.length === 0) throw ApiError.badRequest("Write a message or attach a file");
+		if (input.text.trim() === "" && attachments.length === 0) throw ApiError.badRequest(i18nMsg("Write a message or attach a file"));
 		const candidates = this.candidates(sharedId);
 		if (input.to) {
 			const unknown = input.to.agents.find((a) => !candidates.some((c) => c.nodeId === a.nodeId && c.agentId === a.agentId));
-			if (unknown) throw ApiError.badRequest(`${unknown.agentId}@${unknown.nodeId} is not an active agent of this shared session`);
+			if (unknown) throw ApiError.badRequest(i18nMsg("{agent} is not an active agent of this shared session", { agent: `${unknown.agentId}@${unknown.nodeId}` }));
 		}
 		let to = resolveRecipients({ author: input.author.kind, authorNodeId: this.self, text: input.text, candidates, explicit: input.to });
 		// A human's message without a mention (and without an explicit `to`) goes to the lead; while the lead cannot take it, it goes to an agent that can (never made lead). An explicit choice is kept.
@@ -216,7 +216,7 @@ export class DiscussionService implements DiscussionApi {
 				throw new ApiError(
 					429,
 					"agent_message_limit",
-					`Agent message limit reached for this shared session (${budget.limit} messages from this node's agents that wake another agent, without a human message in between). A human must continue in the group chat.`,
+					i18nMsg("Agent message limit reached for this shared session ({limit} messages from this node's agents that wake another agent, without a human message in between). A human must continue in the group chat.", { limit: budget.limit }),
 					budget,
 				);
 			}
@@ -227,8 +227,13 @@ export class DiscussionService implements DiscussionApi {
 			if (target && normalizeText(input.text) !== "") this.run(target.sessionId).posted.add(normalizeText(input.text));
 		}
 		if (lost) {
-			const reason = lost.offline ? "is offline" : "cannot run its agent right now";
-			this.note(sharedId, fallback ? `${lost.nodeName} (lead) ${reason} — sent to ${formatParticipant(fallback)}` : `${lost.nodeName} (lead) ${reason} and no other agent is reachable — the message waits in the group`);
+			const name = lost.nodeName;
+			if (fallback) {
+				const agent = formatParticipant(fallback);
+				this.note(sharedId, lost.offline ? i18nMsg("{name} (lead) is offline — sent to {agent}", { name, agent }) : i18nMsg("{name} (lead) cannot run its agent right now — sent to {agent}", { name, agent }));
+			} else {
+				this.note(sharedId, lost.offline ? i18nMsg("{name} (lead) is offline and no other agent is reachable — the message waits in the group", { name }) : i18nMsg("{name} (lead) cannot run its agent right now and no other agent is reachable — the message waits in the group", { name }));
+			}
 		}
 		void this.route(sharedId);
 		return this.hub.views.message(row);
@@ -261,14 +266,16 @@ export class DiscussionService implements DiscussionApi {
 	 * `local`: use that for something EVERY node observes on its own (a leave notice, a driver change it learns of), where
 	 * each node posting a replicated line would only multiply it. Nothing is injected into an agent session for it.
 	 */
-	note(sharedId: string, text: string, options: { local?: boolean } = {}): void {
+	note(sharedId: string, say: I18nMessage, options: { local?: boolean } = {}): void {
 		const shared = this.store.find(sharedId);
 		if (!shared) return;
-		this.append(shared, { authorKind: "system", kind: "system", text: text.slice(0, 2000), to: { mode: "agents", agents: [] }, replicate: options.local !== true && shared.state === "active" });
+		// A truncated text no longer equals its template rendering, so it travels without the structured twin.
+		const fits = say.text.length <= 2000;
+		this.append(shared, { authorKind: "system", kind: "system", text: say.text.slice(0, 2000), ...(fits && say.i18n && { i18n: say.i18n }), to: { mode: "agents", agents: [] }, replicate: options.local !== true && shared.state === "active" });
 	}
 
 	/** Accept a message on this node: stamp, store, fan out to every other active member, publish. */
-	private append(shared: SharedRow, input: { authorKind: "human" | "agent" | "system"; agent?: { id: string | null; name: string | null } | undefined; kind: GroupMessageKind; text: string; to: MessageTo; replicate?: boolean; attachments?: readonly AttachmentRow[] }): SharedMessageRow {
+	private append(shared: SharedRow, input: { authorKind: "human" | "agent" | "system"; agent?: { id: string | null; name: string | null } | undefined; kind: GroupMessageKind; text: string; i18n?: I18nText; to: MessageTo; replicate?: boolean; attachments?: readonly AttachmentRow[] }): SharedMessageRow {
 		const replicate = input.replicate ?? true;
 		const recipients = replicate ? this.store.activePeers(shared.id) : [];
 		const system = input.authorKind === "system";
@@ -284,6 +291,7 @@ export class DiscussionService implements DiscussionApi {
 				kind: input.kind,
 				to: input.to,
 				text: input.text,
+				i18n: input.i18n ?? null,
 				epoch: shared.epoch,
 				createdAt: now,
 				hlc: this.stamp(),
@@ -306,6 +314,7 @@ export class DiscussionService implements DiscussionApi {
 			epoch: message.epoch,
 			kind: message.kind as wire.SharedMessageKind,
 			body: message.text,
+			...(message.i18n && { i18n: message.i18n }),
 			author: { kind: message.authorKind as "human" | "agent" | "system", agentId: message.authorAgentId, agentName: message.authorAgentName },
 			to: message.to,
 			origin: { nodeId: message.authorNodeId, nodeName: message.authorNodeName, seq: message.originSeq },
@@ -328,8 +337,8 @@ export class DiscussionService implements DiscussionApi {
 		const shared = this.store.find(sharedId);
 		if (!shared || shared.state !== "active") throw ApiError.notFound("Shared session");
 		const sender = this.store.participant(sharedId, peerId);
-		if (!sender || sender.state !== "active") throw new ApiError(403, "forbidden", "Only participants of the shared session may post to its group chat");
-		if (request.origin.nodeId !== peerId) throw new ApiError(403, "forbidden", "A node pushes its own messages only; messages of other nodes are fetched with messages/sync");
+		if (!sender || sender.state !== "active") throw new ApiError(403, "forbidden", i18nMsg("Only participants of the shared session may post to its group chat"));
+		if (request.origin.nodeId !== peerId) throw new ApiError(403, "forbidden", i18nMsg("A node pushes its own messages only; messages of other nodes are fetched with messages/sync"));
 		this.ingest(shared, request);
 		return { messageId: request.messageId, accepted: true };
 	}
@@ -339,15 +348,15 @@ export class DiscussionService implements DiscussionApi {
 	 * with a different origin or sequence is a protocol violation (`409 idempotency_conflict`). Returns whether it was new.
 	 */
 	private ingest(shared: SharedRow, request: wire.SharedMessageRequest): boolean {
-		if ((request.kind === "system") !== (request.author.kind === "system")) throw ApiError.badRequest("a system message is authored by the system, and nothing else is");
+		if ((request.kind === "system") !== (request.author.kind === "system")) throw ApiError.badRequest(i18nMsg("a system message is authored by the system, and nothing else is"));
 		if (request.origin.nodeId === this.self) {
 			if (this.store.message(request.messageId)) return false;
-			throw new ApiError(403, "forbidden", "A message that claims this node as its origin and that this node never accepted");
+			throw new ApiError(403, "forbidden", i18nMsg("A message that claims this node as its origin and that this node never accepted"));
 		}
 		const existing = this.store.message(request.messageId);
 		if (existing) {
 			if (existing.sharedSessionId !== shared.id || existing.authorNodeId !== request.origin.nodeId || existing.originSeq !== request.origin.seq) {
-				throw new ApiError(409, "idempotency_conflict", "That message id is already used by another message");
+				throw new ApiError(409, "idempotency_conflict", i18nMsg("That message id is already used by another message"));
 			}
 			return false;
 		}
@@ -362,6 +371,8 @@ export class DiscussionService implements DiscussionApi {
 			kind: request.kind,
 			to: request.to,
 			text: request.body,
+			// Only a system line is generated text; anything else carrying `i18n` would show a translation that is not its text.
+			i18n: request.kind === "system" ? (request.i18n ?? null) : null,
 			epoch: request.epoch,
 			createdAt: request.createdAt,
 			hlc: request.hlc,
@@ -383,7 +394,7 @@ export class DiscussionService implements DiscussionApi {
 		const shared = this.store.find(sharedId);
 		if (!shared || shared.state !== "active") throw ApiError.notFound("Shared session");
 		const sender = this.store.participant(sharedId, peerId);
-		if (!sender || sender.state !== "active") throw new ApiError(403, "forbidden", "Only participants of the shared session may read its group chat");
+		if (!sender || sender.state !== "active") throw new ApiError(403, "forbidden", i18nMsg("Only participants of the shared session may read its group chat"));
 		const rows = this.store.messagesAfter(sharedId, request.cursor, request.limit);
 		const page = rows.slice(0, request.limit);
 		const cursor: Record<string, number> = { ...request.cursor };
@@ -662,7 +673,7 @@ export class DiscussionService implements DiscussionApi {
 			const body = text.length > REPLY_MAX_CHARS ? `${text.slice(0, REPLY_MAX_CHARS - 80)}\n\n… (reply cut at ${REPLY_MAX_CHARS - 80} characters; the rest is in ${this.hub.nodeName()}'s session)` : text;
 			this.append(shared, { authorKind: "agent", agent: agent ?? { id: null, name: null }, kind: "reply", text: body, to, attachments });
 			if (limited) {
-				this.note(shared.id, `${agent?.name ?? "An agent"}@${this.hub.nodeName()} mentioned another agent, but this node's agents already posted ${budget.limit} messages that wake an agent without a human message in between: nobody was woken. A human must continue in the group chat.`);
+				this.note(shared.id, i18nMsg("{agent}@{node} mentioned another agent, but this node's agents already posted {limit} messages that wake an agent without a human message in between: nobody was woken. A human must continue in the group chat.", { agent: agent?.name ?? "An agent", node: this.hub.nodeName(), limit: budget.limit }));
 			}
 		} catch (error) {
 			this.hub.log.warn({ err: errorText(error), sessionId }, "could not post the reply of a turn to the group chat");

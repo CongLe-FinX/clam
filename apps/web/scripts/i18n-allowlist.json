@@ -1,0 +1,65 @@
+{
+	"*": [
+		"CL Agent Mesh",
+		"OMP",
+		"GitHub",
+		"Cloudflare",
+		"Markdown",
+		"JSON",
+		"SSH"
+	],
+	"src/features/shared/group-composer.tsx": [
+		"@all"
+	],
+	"src/app/palette/command-palette.tsx": [
+		"esc"
+	],
+	"src/features/node/runtime-page.tsx": [
+		"PID"
+	],
+	"src/features/overview/overview-page.tsx": [
+		"ms"
+	],
+	"src/features/handoff/hand-off-dialog.tsx": [
+		"pnpm install",
+		"pnpm test"
+	],
+	"src/features/browser/states.tsx": [
+		"set CLAM_BROWSER_PATH=/path/to/chrome"
+	],
+	"src/features/settings/components/omp-roles.tsx": [
+		"ms"
+	],
+	"src/features/settings/pages/github.tsx": [
+		"Iv1.xxxxxxxxxxxxxxxx"
+	],
+	"src/features/settings/pages/omp.tsx": [
+		"bun install -g @oh-my-pi/pi-coding-agent"
+	],
+	"src/features/settings/pages/tunnel.tsx": [
+		"cloudflared"
+	],
+	"src/features/terminal/terminal-page.tsx": [
+		"px"
+	],
+	"src/features/terminal/terminal-view.tsx": [
+		"Esc",
+		"Tab",
+		"Ctrl",
+		"Alt"
+	],
+	"src/features/git/commit-box.tsx": [
+		"&lt;",
+		"&gt;",
+		"email@example.com"
+	],
+	"src/features/git/git-page.tsx": [
+		"Git"
+	],
+	"src/features/git/repo-panel.tsx": [
+		".clmesh"
+	],
+	"src/features/tasks/discussion.tsx": [
+		"Enter"
+	]
+}

@@ -2,9 +2,10 @@ import { type FileEntry, routes } from "@clam/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, File, Folder, FolderOpen, Paperclip, RotateCw, X } from "lucide-react";
 import { useId, useMemo, useState } from "react";
-import { api, errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { api, errorText } from "@/lib/api";
 import { qk } from "@/lib/queries";
-import { cn, formatBytes } from "@/lib/utils";
+import { cn, formatBytes, formatNumber } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
 
@@ -52,9 +53,9 @@ function Level({ ctx, path, depth, covered }: { ctx: PickerCtx; path: string; de
 	if (dir.isError) {
 		return (
 			<div className="flex items-center gap-2 py-1.5 text-xs text-danger" style={pad} role="alert">
-				<span className="min-w-0 flex-1 truncate">{errorMessage(dir.error)}</span>
+				<span className="min-w-0 flex-1 truncate">{errorText(dir.error)}</span>
 				<Button type="button" size="sm" variant="ghost" onClick={() => void dir.refetch()}>
-					<RotateCw /> Retry
+					<RotateCw /> {t("Retry")}
 				</Button>
 			</div>
 		);
@@ -62,7 +63,7 @@ function Level({ ctx, path, depth, covered }: { ctx: PickerCtx; path: string; de
 	if (entries.length === 0) {
 		return (
 			<p className="py-1.5 text-xs text-subtle" style={pad}>
-				Empty folder
+				{t("Empty folder")}
 			</p>
 		);
 	}
@@ -83,7 +84,7 @@ function Node({ ctx, entry, depth, covered }: { ctx: PickerCtx; entry: FileEntry
 	const direct = ctx.selected.has(entry.path);
 	const checked = direct || covered;
 	const disabled = excluded || covered || (!direct && ctx.limitReached);
-	const label = excluded ? `${entry.name} (excluded from the bundle)` : covered ? `${entry.name} (included through its folder)` : entry.name;
+	const label = excluded ? t("{name} (excluded from the bundle)", { name: entry.name }) : covered ? t("{name} (included through its folder)", { name: entry.name }) : entry.name;
 	return (
 		<li role="treeitem" aria-expanded={isDir ? open : undefined} aria-selected={checked}>
 			<div
@@ -93,7 +94,7 @@ function Node({ ctx, entry, depth, covered }: { ctx: PickerCtx; entry: FileEntry
 				{isDir ? (
 					<button
 						type="button"
-						aria-label={open ? `Collapse ${entry.name}` : `Expand ${entry.name}`}
+						aria-label={open ? t("Collapse {name}", { name: entry.name }) : t("Expand {name}", { name: entry.name })}
 						onClick={() => setOpen((o) => !o)}
 						className="inline-flex size-6 shrink-0 items-center justify-center rounded text-subtle outline-none hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:size-9"
 					>
@@ -115,7 +116,7 @@ function Node({ ctx, entry, depth, covered }: { ctx: PickerCtx; entry: FileEntry
 					{isDir ? (open ? <FolderOpen className="size-3.5 shrink-0 text-accent" aria-hidden /> : <Folder className="size-3.5 shrink-0 text-accent" aria-hidden />) : <File className="size-3.5 shrink-0 text-subtle" aria-hidden />}
 					<span className="truncate">{entry.name}</span>
 				</label>
-				{excluded ? <span className="shrink-0 text-2xs text-subtle">excluded</span> : !isDir && entry.size !== null ? <span className="tabular shrink-0 font-mono text-2xs text-subtle">{formatBytes(entry.size)}</span> : null}
+				{excluded ? <span className="shrink-0 text-2xs text-subtle">{t("excluded")}</span> : !isDir && entry.size !== null ? <span className="tabular shrink-0 font-mono text-2xs text-subtle">{formatBytes(entry.size)}</span> : null}
 			</div>
 			{isDir && open ? <Level ctx={ctx} path={entry.path} depth={depth + 1} covered={checked} /> : null}
 		</li>
@@ -149,19 +150,19 @@ export function InputFilesPicker({ projectId, value, onChange }: { projectId: st
 		<div className="flex flex-col gap-2">
 			<div className="flex flex-wrap items-center gap-2">
 				<Button type="button" size="sm" variant="outline" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
-					<Paperclip /> {open ? "Hide file tree" : value.length > 0 ? "Change input files" : "Choose input files"}
+					<Paperclip /> {open ? t("Hide file tree") : value.length > 0 ? t("Change input files") : t("Choose input files")}
 				</Button>
 				<span className="tabular text-xs text-muted-foreground" aria-live="polite">
-					{value.length === 0 ? "None selected" : `${value.length} selected${limitReached ? ` (maximum ${MAX_INPUT_PATHS})` : ""}`}
+					{value.length === 0 ? t("None selected") : limitReached ? t("{count} selected (maximum {max})", { count: formatNumber(value.length), max: formatNumber(MAX_INPUT_PATHS) }) : t("{count} selected", { count: formatNumber(value.length) })}
 				</span>
 				{value.length > 0 ? (
 					<Button type="button" size="sm" variant="ghost" onClick={() => onChange([])}>
-						Clear
+						{t("Clear")}
 					</Button>
 				) : null}
 			</div>
 			{value.length > 0 ? (
-				<ul className="flex flex-wrap gap-1.5" aria-label="Selected input files">
+				<ul className="flex flex-wrap gap-1.5" aria-label={t("Selected input files")}>
 					{value.map((p) => (
 						<li key={p} className="inline-flex max-w-full items-center gap-1 rounded-md bg-surface-3 py-0.5 pl-2 pr-0.5 font-mono text-2xs coarse:py-1">
 							<span className="truncate" title={p}>
@@ -169,7 +170,7 @@ export function InputFilesPicker({ projectId, value, onChange }: { projectId: st
 							</span>
 							<button
 								type="button"
-								aria-label={`Remove ${p}`}
+								aria-label={t("Remove {path}", { path: p })}
 								onClick={() => onChange(value.filter((x) => x !== p))}
 								className="inline-flex size-5 shrink-0 items-center justify-center rounded text-subtle outline-none hover:bg-surface-2 hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:size-8"
 							>
@@ -180,11 +181,11 @@ export function InputFilesPicker({ projectId, value, onChange }: { projectId: st
 				</ul>
 			) : null}
 			{open ? (
-				<div role="tree" aria-multiselectable="true" aria-label="Project files" className="scrollbar-thin max-h-64 overflow-y-auto rounded-lg bg-surface-1 py-1 shadow-[inset_0_0_0_1px_var(--border)]">
+				<div role="tree" aria-multiselectable="true" aria-label={t("Project files")} className="scrollbar-thin max-h-64 overflow-y-auto rounded-lg bg-surface-1 py-1 shadow-[inset_0_0_0_1px_var(--border)]">
 					<Level ctx={ctx} path="" depth={0} covered={false} />
 				</div>
 			) : null}
-			<p className="text-xs text-subtle">Copied to the executor as a read-only bundle. Large files and ignored folders (node_modules, .git, build output, .env…) are left out, and a total size cap applies.</p>
+			<p className="text-xs text-subtle">{t("Copied to the executor as a read-only bundle. Large files and ignored folders (node_modules, .git, build output, .env…) are left out, and a total size cap applies.")}</p>
 		</div>
 	);
 }

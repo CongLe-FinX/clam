@@ -1,65 +1,39 @@
+import type { QuotaLimit } from "@clam/contracts";
 import { useEffect, useState } from "react";
+import { t } from "@/i18n";
+import { formatCompact, formatDate, formatDateTime as formatDateTimeIntl, formatDuration, formatNumber, formatSpan } from "@/lib/utils";
 
-const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
-const full = new Intl.NumberFormat("en");
-
+/** Token counts: exact below 1000, compact ("1.2K" / "1,2 N") above. */
 export function fmtTokens(n: number | null | undefined): string {
 	if (n == null || !Number.isFinite(n)) return "—";
-	return Math.abs(n) < 1000 ? full.format(n) : compact.format(n);
+	return Math.abs(n) < 1000 ? formatNumber(n) : formatCompact(n);
 }
 
-export function fmtInt(n: number | null | undefined): string {
-	return n == null || !Number.isFinite(n) ? "—" : full.format(n);
+/** The quota window in words in the active language ("5 hours" / "5 giờ"); the provider's own text when it did not report the window length. */
+export function windowText(l: Pick<QuotaLimit, "windowLabel" | "windowMs">): string | null {
+	return l.windowLabel !== null && l.windowMs ? formatSpan(l.windowMs) : l.windowLabel;
 }
 
-export function fmtCost(n: number | null | undefined): string {
-	if (n == null || !Number.isFinite(n)) return "—";
-	if (n === 0) return "$0.00";
-	if (Math.abs(n) < 0.01) return `$${n.toFixed(4)}`;
-	if (Math.abs(n) < 100) return `$${n.toFixed(2)}`;
-	return `$${full.format(Math.round(n))}`;
+/** Limit label with the provider's English window text ("Claude 7 Day (Fable)") replaced by `windowText`. */
+export function limitLabel(l: QuotaLimit): string {
+	const w = windowText(l);
+	return l.windowLabel && w && w !== l.windowLabel ? l.label.replace(l.windowLabel, w) : l.label;
 }
 
-export function fmtPercent(fraction: number | null | undefined, digits = 0): string {
-	if (fraction == null || !Number.isFinite(fraction)) return "—";
-	return `${(fraction * 100).toFixed(digits)}%`;
-}
-
-export function fmtDuration(ms: number): string {
-	if (!Number.isFinite(ms)) return "—";
-	const abs = Math.max(0, Math.round(ms / 1000));
-	const d = Math.floor(abs / 86400);
-	const h = Math.floor((abs % 86400) / 3600);
-	const m = Math.floor((abs % 3600) / 60);
-	const s = abs % 60;
-	if (d > 0) return `${d}d ${h}h`;
-	if (h > 0) return `${h}h ${m}m`;
-	if (m > 0) return `${m}m ${s.toString().padStart(2, "0")}s`;
-	return `${s}s`;
-}
-
+/** "5m 3s ago" / "just now" / "never"; falls back to an absolute date after a week. */
 export function fmtAgo(iso: string | number | null | undefined, now = Date.now()): string {
-	if (iso == null) return "never";
-	const t = typeof iso === "number" ? iso : Date.parse(iso);
-	if (!Number.isFinite(t)) return "—";
-	const diff = Math.max(0, now - t);
-	if (diff < 5_000) return "just now";
-	if (diff < 3_600_000 * 24 * 7) return `${fmtDuration(diff)} ago`;
-	return new Date(t).toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" });
+	if (iso == null) return t("never");
+	const at = typeof iso === "number" ? iso : Date.parse(iso);
+	if (!Number.isFinite(at)) return "—";
+	const diff = Math.max(0, now - at);
+	if (diff < 5_000) return t("just now");
+	if (diff < 3_600_000 * 24 * 7) return t("{duration} ago", { duration: formatDuration(diff) });
+	return formatDate(at);
 }
 
-export function fmtDate(t: number | string | null | undefined): string {
-	if (t == null) return "—";
-	const d = new Date(t);
-	return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en", { month: "short", day: "numeric", year: "numeric" });
-}
-
-export function fmtDateTime(t: number | string | null | undefined): string {
-	if (t == null) return "—";
-	const d = new Date(t);
-	return Number.isNaN(d.getTime())
-		? "—"
-		: d.toLocaleString("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+/** Date + time without the year ("Nov 1, 02:30 PM"). */
+export function fmtDateTime(at: number | string | null | undefined): string {
+	return formatDateTimeIntl(at, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 /** Re-renders every `intervalMs` so relative times and countdowns stay live. */

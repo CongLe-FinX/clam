@@ -11,7 +11,8 @@ import {
 } from "@clam/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api, errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { api, errorText } from "@/lib/api";
 import { qk } from "@/lib/queries";
 
 // Request bodies as the UI sends them (the contracts export the Zod schemas, not their inferred types).
@@ -59,9 +60,9 @@ export function useRevokeInvitation() {
 		},
 		onError: (e, _id, ctx) => {
 			if (ctx?.prev) qc.setQueryData(qk.invitations, ctx.prev);
-			toast.error("Could not revoke the invitation", { description: errorMessage(e) });
+			toast.error(t("Could not revoke the invitation"), { description: errorText(e) });
 		},
-		onSuccess: () => toast.success("Invitation revoked — its code no longer works"),
+		onSuccess: () => toast.success(t("Invitation revoked — its code no longer works")),
 		onSettled: () => void qc.invalidateQueries({ queryKey: qk.invitations }),
 	});
 }
@@ -75,7 +76,7 @@ export function useApprovePairing() {
 			void qc.invalidateQueries({ queryKey: qk.peers });
 			void qc.invalidateQueries({ queryKey: qk.invitations });
 		},
-		onError: (e) => toast.error("Could not approve the request", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not approve the request"), { description: errorText(e) }),
 	});
 }
 
@@ -86,9 +87,9 @@ export function useRejectPairing() {
 		onSuccess: (r) => {
 			qc.setQueryData<PairingRequest[]>(qk.pairingRequests, (d) => replaceById(d, r));
 			void qc.invalidateQueries({ queryKey: qk.invitations });
-			toast.success("Request rejected");
+			toast.success(t("Request rejected"));
 		},
-		onError: (e) => toast.error("Could not reject the request", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not reject the request"), { description: errorText(e) }),
 	});
 }
 
@@ -115,7 +116,7 @@ export function useUpdatePeer() {
 		},
 		onError: (e, _v, ctx) => {
 			if (ctx?.prev) qc.setQueryData(qk.peers, ctx.prev);
-			toast.error("Could not update the peer", { description: errorMessage(e) });
+			toast.error(t("Could not update the peer"), { description: errorText(e) });
 		},
 		onSuccess: (peer) => qc.setQueryData<Peer[]>(qk.peers, (d) => replaceById(d, peer)),
 	});
@@ -128,9 +129,9 @@ export function useRevokePeer() {
 		onSuccess: (peer) => {
 			qc.setQueryData<Peer[]>(qk.peers, (d) => replaceById(d, peer));
 			void qc.invalidateQueries({ queryKey: qk.directory });
-			toast.success(`${peer.name} was revoked`, { description: "It can no longer reach this machine." });
+			toast.success(t("{name} was revoked", { name: peer.name }), { description: t("It can no longer reach this machine.") });
 		},
-		onError: (e) => toast.error("Could not revoke the peer", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not revoke the peer"), { description: errorText(e) }),
 	});
 }
 
@@ -139,8 +140,8 @@ export function useTunnelActions() {
 	const set = (s: TunnelState) => qc.setQueryData(qk.tunnel, s);
 	return {
 		save: useMutation({ mutationFn: (body: TunnelConfigInput) => api.put<TunnelState>(routes.tunnelConfig, body), onSuccess: set }),
-		start: useMutation({ mutationFn: () => api.post<TunnelState>(routes.tunnelStart), onSuccess: set, onError: (e) => toast.error("Could not start the tunnel", { description: errorMessage(e) }) }),
-		stop: useMutation({ mutationFn: () => api.post<TunnelState>(routes.tunnelStop), onSuccess: set, onError: (e) => toast.error("Could not stop the tunnel", { description: errorMessage(e) }) }),
+		start: useMutation({ mutationFn: () => api.post<TunnelState>(routes.tunnelStart), onSuccess: set, onError: (e) => toast.error(t("Could not start the tunnel"), { description: errorText(e) }) }),
+		stop: useMutation({ mutationFn: () => api.post<TunnelState>(routes.tunnelStop), onSuccess: set, onError: (e) => toast.error(t("Could not stop the tunnel"), { description: errorText(e) }) }),
 	};
 }
 

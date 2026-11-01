@@ -19,6 +19,7 @@ import {
 	type SubagentsPage,
 	type UiResponseBody,
 	type PromptBody,
+	i18nMsg,
 } from "@clam/contracts";
 import type { z } from "zod";
 import { agentSessions, agents, nodeEvents, projects, providerUsage } from "@clam/database";
@@ -272,7 +273,7 @@ export class SessionService {
 		const agent = options.agentId
 			? this.ctx.db.select().from(agents).where(and(eq(agents.runtime, "omp"), eq(agents.id, options.agentId))).get()
 			: this.ctx.db.select().from(agents).where(eq(agents.runtime, "omp")).orderBy(agents.createdAt).get();
-		if (!agent) throw options.agentId ? ApiError.notFound("Agent") : ApiError.unavailable("This node has no OMP agent configured");
+		if (!agent) throw options.agentId ? ApiError.notFound("Agent") : ApiError.unavailable(i18nMsg("This node has no OMP agent configured"));
 		const id = newId("ses");
 		const now = new Date().toISOString();
 		this.ctx.db
@@ -295,11 +296,8 @@ export class SessionService {
 		if (input.prompt?.trim()) {
 			const message = input.prompt;
 			void this.prompt(id, { message, clientId: `init_${id}` }).catch((error: unknown) => {
-				this.ctx.bus.publish(`session:${id}`, {
-					type: "notice",
-					level: "error",
-					message: `Could not send the first prompt: ${error instanceof Error ? error.message : String(error)}`,
-				} satisfies SessionEvent);
+				const say = i18nMsg("Could not send the first prompt: {error}", { error: error instanceof Error ? error.message : String(error) });
+				this.ctx.bus.publish(`session:${id}`, { type: "notice", level: "error", message: say.text, i18n: say.i18n } satisfies SessionEvent);
 			});
 		}
 		return session;
@@ -312,17 +310,19 @@ export class SessionService {
 
 	private readOnlyError(row: SessionRow): ApiError {
 		if (row.kind === "mirror") {
-			return new ApiError(409, "session_read_only", "This is a live copy of a session that runs on another node; it cannot take prompts here. Open the session on its driver node, or take over from the shared session.");
+			return new ApiError(409, "session_read_only", i18nMsg("This is a live copy of a session that runs on another node; it cannot take prompts here. Open the session on its driver node, or take over from the shared session."));
 		}
-		const where = row.movedTo ? ` on ${row.movedTo.nodeName}` : "";
-		return new ApiError(409, "session_moved", `The work of this session continued${where}; this copy is read-only.`, row.movedTo ?? undefined);
+		const message = row.movedTo
+			? i18nMsg("The work of this session continued on {node}; this copy is read-only.", { node: row.movedTo.nodeName })
+			: i18nMsg("The work of this session continued; this copy is read-only.");
+		return new ApiError(409, "session_moved", message, row.movedTo ?? undefined);
 	}
 
 	private localAgent(agentId: string | null | undefined) {
 		const agent = agentId
 			? this.ctx.db.select().from(agents).where(and(eq(agents.runtime, "omp"), eq(agents.id, agentId))).get()
 			: this.ctx.db.select().from(agents).where(eq(agents.runtime, "omp")).orderBy(agents.createdAt).get();
-		if (!agent) throw agentId ? ApiError.notFound("Agent") : ApiError.unavailable("This node has no OMP agent configured");
+		if (!agent) throw agentId ? ApiError.notFound("Agent") : ApiError.unavailable(i18nMsg("This node has no OMP agent configured"));
 		return agent;
 	}
 
@@ -407,7 +407,7 @@ export class SessionService {
 			row = this.get(id);
 		}
 		const file = this.ctx.runtime.get(id)?.binding().runtimeSessionFile ?? row.runtimeSessionFile;
-		if (!file) throw ApiError.conflict("The session has no conversation file yet");
+		if (!file) throw ApiError.conflict(i18nMsg("The session has no conversation file yet"));
 		return this.ctx.runtime.withReleased(id, () => work(file), options);
 	}
 
@@ -489,14 +489,14 @@ export class SessionService {
 
 	state(id: string): Promise<SessionLiveState> {
 		const row = this.get(id);
-		if (this.isViewed(row)) return this.views ? Promise.resolve(this.views.state(id)) : Promise.reject(ApiError.unavailable("Shared sessions are not running"));
+		if (this.isViewed(row)) return this.views ? Promise.resolve(this.views.state(id)) : Promise.reject(ApiError.unavailable(i18nMsg("Shared sessions are not running")));
 		return this.runtime(id).then((rt) => rt.getState());
 	}
 
 	async messages(id: string, query: { cursor?: string; limit?: number }): Promise<MessagesPage> {
 		const row = this.get(id);
 		if (this.isViewed(row)) {
-			if (!this.views) throw ApiError.unavailable("Shared sessions are not running");
+			if (!this.views) throw ApiError.unavailable(i18nMsg("Shared sessions are not running"));
 			return this.views.messages(id, query);
 		}
 		const rt = await this.runtime(id);
@@ -571,12 +571,12 @@ export class SessionService {
 	async respondToUi(id: string, input: UiResponseInput): Promise<void> {
 		const row = this.get(id);
 		if (row.kind === "mirror" && row.movedTo === null) {
-			if (!this.views) throw ApiError.unavailable("Shared sessions are not running");
+			if (!this.views) throw ApiError.unavailable(i18nMsg("Shared sessions are not running"));
 			return this.views.respond(id, input);
 		}
 		if (this.isViewed(row)) throw this.readOnlyError(row);
 		const rt = this.ctx.runtime.get(id);
-		if (!rt) throw ApiError.conflict("The session's agent runtime is not running");
+		if (!rt) throw ApiError.conflict(i18nMsg("The session's agent runtime is not running"));
 		await rt.respondToUiRequest(input);
 	}
 
@@ -630,7 +630,7 @@ export class SessionService {
 		if (this.isViewed(row)) throw this.readOnlyError(row);
 		const rt = this.ctx.runtime.get(id);
 		const state = rt?.status().state;
-		if (!rt || (state !== "ready" && state !== "busy")) throw ApiError.conflict("The session's agent runtime is not running");
+		if (!rt || (state !== "ready" && state !== "busy")) throw ApiError.conflict(i18nMsg("The session's agent runtime is not running"));
 		if (!rt.subagents().some((s) => s.id === subagentId)) throw ApiError.notFound("Subagent");
 		await rt.steerSubagent(subagentId, message);
 	}

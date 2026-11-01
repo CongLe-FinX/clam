@@ -2,9 +2,10 @@ import type { FilesPreview, Task } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
 import { ChevronRight, CircleAlert, FolderOpen, RotateCw, TriangleAlert } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
-import { errorMessage } from "@/lib/api";
+import { msg, T, t, tr, type Msg } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { useProjects } from "@/lib/queries";
-import { cn, formatBytes } from "@/lib/utils";
+import { cn, formatBytes, formatNumber } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
@@ -16,28 +17,28 @@ import { useApplyTaskFiles, useTaskFilesPreview } from "./hooks.ts";
 type Status = FilesPreview["files"][number]["status"];
 type Row = FilesPreview["files"][number];
 
-const STATUS_META: Record<Status, { label: string; variant: "success" | "accent" | "warning" | "neutral" }> = {
-	new: { label: "new", variant: "success" },
-	update: { label: "update", variant: "accent" },
-	conflict: { label: "conflict", variant: "warning" },
-	unchanged: { label: "unchanged", variant: "neutral" },
+const STATUS_META: Record<Status, { label: Msg; variant: "success" | "accent" | "warning" | "neutral" }> = {
+	new: { label: msg("new"), variant: "success" },
+	update: { label: msg("update"), variant: "accent" },
+	conflict: { label: msg("conflict"), variant: "warning" },
+	unchanged: { label: msg("unchanged"), variant: "neutral" },
 };
 const STATUS_ORDER: Status[] = ["new", "update", "conflict", "unchanged"];
 
 const SKIP_REASON = {
-	unchanged: "already identical",
-	conflict: "changed locally and not marked Overwrite",
-	not_selected: "not selected",
+	unchanged: msg("already identical"),
+	conflict: msg("changed locally and not marked Overwrite"),
+	not_selected: msg("not selected"),
 } as const;
 
 /** Colours a unified diff: additions, removals, hunk headers. */
 function DiffView({ diff, isNew }: { diff: string | undefined; isNew?: boolean }) {
 	if (diff === undefined || diff === "") {
-		return <p className="px-3 py-2 text-xs text-subtle">{isNew ? "New file — it will be created as received (no earlier version to compare)." : "Binary or large file — no preview."}</p>;
+		return <p className="px-3 py-2 text-xs text-subtle">{isNew ? t("New file — it will be created as received (no earlier version to compare).") : t("Binary or large file — no preview.")}</p>;
 	}
 	const lines = diff.split("\n");
 	return (
-		<pre className="scrollbar-thin max-h-80 overflow-auto bg-surface-1 py-1.5 font-mono text-2xs leading-relaxed" aria-label="Unified diff">
+		<pre className="scrollbar-thin max-h-80 overflow-auto bg-surface-1 py-1.5 font-mono text-2xs leading-relaxed" aria-label={t("Unified diff")}>
 			{lines.map((line, i) => {
 				const head = line.startsWith("+++") || line.startsWith("---") || line.startsWith("diff ") || line.startsWith("index ");
 				return (
@@ -69,7 +70,7 @@ function FileRow({ row, checked, diff, onToggle }: { row: Row; checked: boolean;
 				<button
 					type="button"
 					aria-expanded={open}
-					aria-label={`${open ? "Hide" : "Show"} diff for ${row.path}`}
+					aria-label={open ? t("Hide diff for {path}", { path: row.path }) : t("Show diff for {path}", { path: row.path })}
 					onClick={() => setOpen((o) => !o)}
 					className="inline-flex size-7 shrink-0 items-center justify-center rounded text-subtle outline-none hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:size-10"
 				>
@@ -81,21 +82,21 @@ function FileRow({ row, checked, diff, onToggle }: { row: Row; checked: boolean;
 					checked={checked}
 					disabled={unchanged}
 					onChange={onToggle}
-					aria-label={conflict ? `Overwrite ${row.path}` : `Apply ${row.path}`}
+					aria-label={conflict ? t("Overwrite {path}", { path: row.path }) : t("Apply {path}", { path: row.path })}
 					className="size-4 shrink-0 accent-[var(--accent)] coarse:size-5"
 				/>
 				<label htmlFor={id} className="min-w-0 flex-1 basis-40 cursor-pointer break-all font-mono text-xs has-[:disabled]:cursor-default">
 					{row.path}
 				</label>
 				<span className="flex shrink-0 items-center gap-2">
-					<Badge variant={meta.variant}>{meta.label}</Badge>
+					<Badge variant={meta.variant}>{tr(meta.label)}</Badge>
 					<span className="tabular font-mono text-2xs text-subtle">{formatBytes(row.size)}</span>
 				</span>
 				{conflict ? (
 					<p className="flex basis-full items-start gap-1.5 pl-9 text-xs text-warning coarse:pl-12">
 						<TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
 						<span>
-							Changed locally too — will only be replaced if you tick <strong>Overwrite</strong>.
+							<T text="Changed locally too — will only be replaced if you tick <b>Overwrite</b>." tags={{ b: <strong /> }} />
 						</span>
 					</p>
 				) : null}
@@ -145,7 +146,7 @@ export default function FilesApplyDialog({ task, onClose }: { task: Task; onClos
 			return next;
 		});
 	const summary = STATUS_ORDER.filter((s) => counts[s] > 0)
-		.map((s) => `${counts[s]} ${STATUS_META[s].label}`)
+		.map((s) => `${formatNumber(counts[s])} ${tr(STATUS_META[s].label)}`)
 		.join(" · ");
 
 	const submit = () => {
@@ -164,24 +165,30 @@ export default function FilesApplyDialog({ task, onClose }: { task: Task; onClos
 		<Dialog open onOpenChange={(o) => !o && !apply.isPending && onClose()}>
 			<DialogContent sheetOnMobile className="max-w-3xl">
 				<DialogHeader>
-					<DialogTitle>{result ? "Files applied" : "Preview & apply files"}</DialogTitle>
+					<DialogTitle>{result ? t("Files applied") : t("Preview & apply files")}</DialogTitle>
 					<DialogDescription>
 						{result
-							? `Written to ${target?.name ?? "the project"}.`
-							: `The executor returned ${task.result?.files ? `${task.result.files.fileCount} ${task.result.files.fileCount === 1 ? "file" : "files"} (${formatBytes(task.result.files.size)})` : "a file bundle"}. Review the changes, then choose what to write into a local project.`}
+							? target
+								? t("Written to {name}.", { name: target.name })
+								: t("Written to the project.")
+							: task.result?.files
+								? t("{count, plural, one {The executor returned # file ({size}). Review the changes, then choose what to write into a local project.} other {The executor returned # files ({size}). Review the changes, then choose what to write into a local project.}}", { count: task.result.files.fileCount, size: formatBytes(task.result.files.size) })
+								: t("The executor returned a file bundle. Review the changes, then choose what to write into a local project.")}
 					</DialogDescription>
 				</DialogHeader>
 
 				{result ? (
 					<div className="scrollbar-thin -mx-1 flex min-h-0 flex-col gap-3 overflow-y-auto px-1" role="status">
 						<p className="text-[13px]">
-							<strong>{result.written.length}</strong> {result.written.length === 1 ? "file" : "files"} written
 							{result.skipped.length > 0 ? (
-								<>
-									, <strong>{result.skipped.length}</strong> skipped
-								</>
-							) : null}
-							.
+								<T
+									text="{written, plural, one {<b>#</b> file written} other {<b>#</b> files written}}, <b>{skipped}</b> skipped."
+									params={{ written: result.written.length, skipped: formatNumber(result.skipped.length) }}
+									tags={{ b: <strong /> }}
+								/>
+							) : (
+								<T text="{written, plural, one {<b>#</b> file written.} other {<b>#</b> files written.}}" params={{ written: result.written.length }} tags={{ b: <strong /> }} />
+							)}
 						</p>
 						{result.written.length > 0 ? (
 							<ul className="scrollbar-thin max-h-48 overflow-y-auto rounded-lg bg-surface-2 py-1">
@@ -194,12 +201,12 @@ export default function FilesApplyDialog({ task, onClose }: { task: Task; onClos
 						) : null}
 						{result.skipped.length > 0 ? (
 							<div className="flex flex-col gap-1">
-								<h3 className="text-2xs font-semibold uppercase tracking-wider text-subtle">Skipped</h3>
+								<h3 className="text-2xs font-semibold uppercase tracking-wider text-subtle">{t("Skipped")}</h3>
 								<ul className="scrollbar-thin max-h-48 overflow-y-auto rounded-lg bg-surface-2 py-1">
 									{result.skipped.map((s) => (
 										<li key={s.path} className="flex flex-wrap items-baseline gap-x-2 px-3 py-1">
 											<span className="break-all font-mono text-xs">{s.path}</span>
-											<span className="text-2xs text-subtle">{SKIP_REASON[s.reason]}</span>
+											<span className="text-2xs text-subtle">{tr(SKIP_REASON[s.reason])}</span>
 										</li>
 									))}
 								</ul>
@@ -207,29 +214,29 @@ export default function FilesApplyDialog({ task, onClose }: { task: Task; onClos
 						) : null}
 						<DialogFooter className="sticky bottom-0 -mx-1 bg-overlay px-1 pt-1">
 							<Button variant="ghost" onClick={onClose}>
-								Close
+								{t("Close")}
 							</Button>
 							<Button asChild variant="primary">
 								<Link to="/projects/$projectId" params={{ projectId }} onClick={onClose}>
-									<FolderOpen /> Open project
+									<FolderOpen /> {t("Open project")}
 								</Link>
 							</Button>
 						</DialogFooter>
 					</div>
 				) : (
 					<div className="scrollbar-thin -mx-1 flex min-h-0 flex-col gap-3 overflow-y-auto px-1">
-						<Field label="Apply to project" hint="Only projects on this machine. Files are written relative to the project folder.">
+						<Field label={t("Apply to project")} hint={t("Only projects on this machine. Files are written relative to the project folder.")}>
 							{() => (
 								<Select value={projectId} onValueChange={(v) => setProjectId(v)} disabled={apply.isPending}>
 									<SelectTrigger>
-										<SelectValue placeholder={projects.isPending ? "Loading projects…" : "Choose a project"} />
+										<SelectValue placeholder={projects.isPending ? t("Loading projects…") : t("Choose a project")} />
 									</SelectTrigger>
 									<SelectContent>
 										{sorted.map((p) => (
 											<SelectItem key={p.id} value={p.id}>
 												<span className="inline-flex items-center gap-2">
 													{p.name}
-													<span className="text-2xs text-subtle">{p.vcs === "git" ? "git" : p.managed ? "managed folder" : "folder"}</span>
+													<span className="text-2xs text-subtle">{p.vcs === "git" ? "git" : p.managed ? t("managed folder") : t("folder")}</span>
 												</span>
 											</SelectItem>
 										))}
@@ -239,16 +246,16 @@ export default function FilesApplyDialog({ task, onClose }: { task: Task; onClos
 						</Field>
 						{projects.isError ? (
 							<p role="alert" className="flex items-center gap-2 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
-								<span className="min-w-0 flex-1">{errorMessage(projects.error)}</span>
+								<span className="min-w-0 flex-1">{errorText(projects.error)}</span>
 								<Button type="button" size="sm" variant="ghost" onClick={() => void projects.refetch()}>
-									<RotateCw /> Retry
+									<RotateCw /> {t("Retry")}
 								</Button>
 							</p>
 						) : null}
-						{projects.isSuccess && sorted.length === 0 ? <p className="rounded-lg bg-surface-2 px-3 py-2 text-[13px] text-muted-foreground">There is no project on this machine yet. Create a project first, then apply the files into it.</p> : null}
+						{projects.isSuccess && sorted.length === 0 ? <p className="rounded-lg bg-surface-2 px-3 py-2 text-[13px] text-muted-foreground">{t("There is no project on this machine yet. Create a project first, then apply the files into it.")}</p> : null}
 
 						{!projectId ? null : preview.isPending ? (
-							<div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading preview">
+							<div className="flex flex-col gap-2" aria-busy="true" aria-label={t("Loading preview")}>
 								<Skeleton className="h-8" />
 								<Skeleton className="h-11" />
 								<Skeleton className="h-11" />
@@ -257,13 +264,13 @@ export default function FilesApplyDialog({ task, onClose }: { task: Task; onClos
 						) : preview.isError ? (
 							<div role="alert" className="flex items-start gap-2 rounded-lg bg-danger/10 px-3 py-2.5 text-[13px] text-danger">
 								<CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-								<span className="min-w-0 flex-1">{errorMessage(preview.error)}</span>
+								<span className="min-w-0 flex-1">{errorText(preview.error)}</span>
 								<Button type="button" size="sm" variant="outline" onClick={() => void preview.refetch()}>
-									<RotateCw /> Retry
+									<RotateCw /> {t("Retry")}
 								</Button>
 							</div>
 						) : (files?.length ?? 0) === 0 ? (
-							<p className="rounded-lg bg-surface-2 px-3 py-2 text-[13px] text-muted-foreground">The executor's bundle contains no files.</p>
+							<p className="rounded-lg bg-surface-2 px-3 py-2 text-[13px] text-muted-foreground">{t("The executor's bundle contains no files.")}</p>
 						) : (
 							<>
 								<div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -272,25 +279,25 @@ export default function FilesApplyDialog({ task, onClose }: { task: Task; onClos
 									</p>
 									<div className="flex items-center gap-1 sm:ml-auto">
 										<Button type="button" size="sm" variant="ghost" onClick={() => setSelected(new Set((files ?? []).filter((f) => f.status === "new" || f.status === "update").map((f) => f.path)))}>
-											Select all
+											{t("Select all")}
 										</Button>
 										<Button type="button" size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
-											Select none
+											{t("Select none")}
 										</Button>
 									</div>
 								</div>
-								<div role="group" aria-label="Filter by status" className="flex flex-wrap gap-1.5">
+								<div role="group" aria-label={t("Filter by status")} className="flex flex-wrap gap-1.5">
 									<FilterChip active={filter === null} onClick={() => setFilter(null)}>
-										All {files?.length}
+										{t("All {count}", { count: formatNumber(files?.length ?? 0) })}
 									</FilterChip>
 									{STATUS_ORDER.filter((s) => counts[s] > 0).map((s) => (
 										<FilterChip key={s} active={filter === s} onClick={() => setFilter(filter === s ? null : s)}>
-											{STATUS_META[s].label} {counts[s]}
+											{tr(STATUS_META[s].label)} {formatNumber(counts[s])}
 										</FilterChip>
 									))}
 								</div>
-								<p className="text-2xs text-subtle">“Select all” picks new and updated files. Conflicts are never selected for you.</p>
-								<ul className="scrollbar-thin max-h-[40dvh] min-h-24 overflow-y-auto rounded-lg shadow-[inset_0_0_0_1px_var(--border)]" aria-label="Files">
+								<p className="text-2xs text-subtle">{t("“Select all” picks new and updated files. Conflicts are never selected for you.")}</p>
+								<ul className="scrollbar-thin max-h-[40dvh] min-h-24 overflow-y-auto rounded-lg shadow-[inset_0_0_0_1px_var(--border)]" aria-label={t("Files")}>
 									{visible.map((row) => (
 										<FileRow key={row.path} row={row} checked={selected.has(row.path)} diff={preview.data?.diffs[row.path]} onToggle={() => toggle(row.path)} />
 									))}
@@ -298,7 +305,7 @@ export default function FilesApplyDialog({ task, onClose }: { task: Task; onClos
 								{overwriting > 0 ? (
 									<p role="status" className="flex items-start gap-2 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
 										<TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-										{overwriting} locally changed {overwriting === 1 ? "file" : "files"} will be overwritten.
+										{t("{count, plural, one {# locally changed file will be overwritten.} other {# locally changed files will be overwritten.}}", { count: overwriting })}
 									</p>
 								) : null}
 							</>
@@ -306,15 +313,15 @@ export default function FilesApplyDialog({ task, onClose }: { task: Task; onClos
 
 						{apply.error ? (
 							<p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
-								{errorMessage(apply.error)}
+								{errorText(apply.error)}
 							</p>
 						) : null}
 						<DialogFooter className="sticky bottom-0 -mx-1 bg-overlay px-1 pt-1">
 							<Button variant="ghost" onClick={onClose} disabled={apply.isPending}>
-								Cancel
+								{t("Cancel")}
 							</Button>
 							<Button variant="primary" loading={apply.isPending} disabled={!projectId || !preview.isSuccess || chosen.length === 0} onClick={submit}>
-								Apply {chosen.length} {chosen.length === 1 ? "file" : "files"}
+								{t("{count, plural, one {Apply # file} other {Apply # files}}", { count: chosen.length })}
 							</Button>
 						</DialogFooter>
 					</div>
@@ -331,11 +338,11 @@ function FilterChip({ active, onClick, children }: { active: boolean; onClick: (
 			aria-pressed={active}
 			onClick={onClick}
 			className={cn(
-				"inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium capitalize outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-10",
+				"inline-flex h-7 items-center gap-1 rounded-full px-2.5 text-xs font-medium outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-10",
 				active ? "bg-accent-soft text-accent" : "bg-surface-2 text-muted-foreground hover:text-foreground",
 			)}
 		>
-			{children}
+			<span className="first-letter:uppercase">{children}</span>
 		</button>
 	);
 }

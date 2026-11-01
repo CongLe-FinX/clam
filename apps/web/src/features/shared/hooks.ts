@@ -3,7 +3,8 @@ import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tansta
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
-import { api, errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { api, errorText } from "@/lib/api";
 import { qk, usePeers } from "@/lib/queries";
 import { useTopic } from "@/lib/ws";
 
@@ -192,9 +193,9 @@ export function useRemoveParticipant(sharedId: string) {
 		mutationFn: (nodeId: string) => api.delete<SharedSession>(routes.sharedParticipant(sharedId, nodeId)),
 		onSuccess: (s) => {
 			afterShareChange(qc, s);
-			toast.success("Removed from the team");
+			toast.success(t("Removed from the team"));
 		},
-		onError: (e) => toast.error("Could not remove the participant", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not remove the participant"), { description: errorText(e) }),
 	});
 }
 
@@ -203,7 +204,7 @@ export function usePostSharedMessage(id: string) {
 	return useMutation({
 		mutationFn: (body: { text: string; kind?: "chat" | "instruction" | "answer" | "note"; attachmentIds?: string[]; to?: { mode: "all" | "lead" | "agents"; agents: Array<{ nodeId: string; agentId: string }> } }) => api.post<SharedMessage>(routes.sharedMessages(id), body),
 		onSuccess: (m) => qc.setQueryData<SharedSessionDetail>(qk.sharedDetail(id), (d) => (d ? putMessage(d, m) : d)),
-		onError: (e) => toast.error("Could not send the message", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not send the message"), { description: errorText(e) }),
 	});
 }
 
@@ -225,9 +226,9 @@ export function useCheckpointNow(id: string) {
 		onSuccess: (c) => {
 			qc.setQueryData<SharedSessionDetail>(qk.sharedDetail(id), (d) => (d ? { ...d, checkpoints: upsertCheckpoint(d.checkpoints, c), shared: { ...d.shared, lastCheckpoint: c } } : d));
 			void qc.invalidateQueries({ queryKey: qk.sharedDetail(id) });
-			toast.success(`Checkpoint ${c.seq} saved`, { description: c.pushed ? "Pushed to the shared branch." : c.commit ? "Committed locally; the push was refused or is pending." : "No file changes; the session snapshot was shipped." });
+			toast.success(t("Checkpoint {seq} saved", { seq: c.seq }), { description: c.pushed ? t("Pushed to the shared branch.") : c.commit ? t("Committed locally; the push was refused or is pending.") : t("No file changes; the session snapshot was shipped.") });
 		},
-		onError: (e) => toast.error("Could not take a checkpoint", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not take a checkpoint"), { description: errorText(e) }),
 	});
 }
 
@@ -240,7 +241,7 @@ export function useTakeover(id: string) {
 		onSuccess: (s) => {
 			afterShareChange(qc, s);
 			void qc.invalidateQueries({ queryKey: qk.sharedDetail(s.id) });
-			toast.success("This machine is now driving the session");
+			toast.success(t("This machine is now driving the session"));
 			if (s.localSessionId) void navigate({ to: "/sessions/$sessionId", params: { sessionId: s.localSessionId } });
 		},
 	});
@@ -270,7 +271,7 @@ export function useCancelTransfer(sharedId: string) {
 	return useMutation({
 		mutationFn: () => api.delete<SharedSession>(routes.sharedTransfer(sharedId)),
 		onSuccess: (s) => putShared(qc, s),
-		onError: (e) => toast.error("Could not cancel the hand-over", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not cancel the hand-over"), { description: errorText(e) }),
 	});
 }
 
@@ -280,9 +281,9 @@ export function useLeaveShared(id: string) {
 		mutationFn: () => api.post<SharedSession>(routes.sharedLeave(id)),
 		onSuccess: (s) => {
 			afterShareChange(qc, s);
-			toast.success("You left the shared session");
+			toast.success(t("You left the shared session"));
 		},
-		onError: (e) => toast.error("Could not leave", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not leave"), { description: errorText(e) }),
 	});
 }
 
@@ -302,7 +303,7 @@ export function useDecideInvite() {
 			void qc.invalidateQueries({ queryKey: qk.shared });
 			void qc.invalidateQueries({ queryKey: qk.sessionsAll });
 			if (v.body.decision === "accept") {
-				toast.success("Joined the shared session", { description: "A live view is being set up on this machine." });
+				toast.success(t("Joined the shared session"), { description: t("A live view is being set up on this machine.") });
 				void qc.invalidateQueries({ queryKey: qk.sharedInvites });
 				void api.get<SharedSession[]>(routes.sharedSessions).then((list) => {
 					qc.setQueryData(qk.shared, list);
@@ -310,10 +311,10 @@ export function useDecideInvite() {
 					if (s?.localSessionId) void navigate({ to: "/sessions/$sessionId", params: { sessionId: s.localSessionId } });
 				});
 			} else {
-				toast.success("Invitation declined");
+				toast.success(t("Invitation declined"));
 			}
 		},
-		onError: (e) => toast.error("Could not answer the invitation", { description: errorMessage(e) }),
+		onError: (e) => toast.error(t("Could not answer the invitation"), { description: errorText(e) }),
 	});
 }
 
@@ -340,7 +341,7 @@ export function useRescueApply(id: string) {
 		mutationFn: (body: ApplyRescueInput) => api.post<FilesApplyResult>(routes.sharedRescueApply(id), body),
 		onSuccess: (r) => {
 			void qc.invalidateQueries({ queryKey: qk.projectsAll });
-			toast.success(`${r.written.length} ${r.written.length === 1 ? "file" : "files"} written`);
+			toast.success(t("{count, plural, one {# file written} other {# files written}}", { count: r.written.length }));
 		},
 	});
 }

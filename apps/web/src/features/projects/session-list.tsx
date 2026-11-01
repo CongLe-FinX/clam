@@ -8,7 +8,8 @@ import { toast } from "sonner";
 import { Link } from "@tanstack/react-router";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { SessionRow } from "@/components/session-row";
-import { api, errorMessage } from "@/lib/api";
+import { t, T } from "@/i18n";
+import { api, errorText } from "@/lib/api";
 import { qk } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
@@ -67,9 +68,9 @@ export function useSessionActions() {
 		},
 		onError: (e, v, ctx) => {
 			rollback(ctx?.snap);
-			toast.error(v.archived ? "Could not archive session" : "Could not restore session", { description: errorMessage(e) });
+			toast.error(v.archived ? t("Could not archive session") : t("Could not restore session"), { description: errorText(e) });
 		},
-		onSuccess: (_d, v) => toast.success(v.archived ? "Session archived" : "Session restored"),
+		onSuccess: (_d, v) => toast.success(v.archived ? t("Session archived") : t("Session restored")),
 		onSettled: settle,
 	});
 
@@ -82,9 +83,9 @@ export function useSessionActions() {
 		},
 		onError: (e, _id, ctx) => {
 			rollback(ctx?.snap);
-			toast.error("Could not delete session", { description: errorMessage(e) });
+			toast.error(t("Could not delete session"), { description: errorText(e) });
 		},
-		onSuccess: () => toast.success("Session deleted"),
+		onSuccess: () => toast.success(t("Session deleted")),
 		onSettled: settle,
 	});
 
@@ -151,28 +152,28 @@ export function SessionList({
 									<SessionRow session={s} projectName={projectNames?.get(s.projectId)} className={cn("min-w-0 flex-1 border-b-0", s.archived && "opacity-60")} />
 									{s.archived ? (
 										<Badge variant="outline" className="mr-1 hidden shrink-0 sm:inline-flex">
-											Archived
+											{t("Archived")}
 										</Badge>
 									) : null}
 									<DropdownMenu>
 										<DropdownMenuTrigger asChild>
-											<Button variant="ghost" size="icon-sm" aria-label={`Actions for ${s.title || "session"}`} className="mr-2 shrink-0">
+											<Button variant="ghost" size="icon-sm" aria-label={t("Actions for {title}", { title: s.title || t("session") })} className="mr-2 shrink-0">
 												<MoreHorizontal />
 											</Button>
 										</DropdownMenuTrigger>
 										<DropdownMenuContent>
 											<DropdownMenuItem asChild>
 												<Link to="/sessions/$sessionId" params={{ sessionId: s.id }}>
-													<ExternalLink /> Open
+													<ExternalLink /> {t("Open")}
 												</Link>
 											</DropdownMenuItem>
 											<DropdownMenuItem onSelect={() => archive.mutate({ id: s.id, archived: !s.archived })}>
 												{s.archived ? <ArchiveRestore /> : <Archive />}
-												{s.archived ? "Restore" : "Archive"}
+												{s.archived ? t("Restore") : t("Archive")}
 											</DropdownMenuItem>
 											<DropdownMenuSeparator />
 											<DropdownMenuItem danger onSelect={() => setPendingDelete(s)}>
-												<Trash2 /> Delete…
+												<Trash2 /> {t("Delete…")}
 											</DropdownMenuItem>
 										</DropdownMenuContent>
 									</DropdownMenu>
@@ -187,13 +188,15 @@ export function SessionList({
 				onOpenChange={(o) => {
 					if (!o) setPendingDelete(null);
 				}}
-				title="Delete session?"
+				title={t("Delete session?")}
 				description={
-					<>
-						<span className="font-medium text-foreground">{pendingDelete?.title || "Untitled session"}</span> and its history will be permanently removed from this machine.
-					</>
+					<T
+						text="<b>{title}</b> and its history will be permanently removed from this machine."
+						params={{ title: pendingDelete?.title || t("Untitled session") }}
+						tags={{ b: <span className="font-medium text-foreground" /> }}
+					/>
 				}
-				confirmLabel="Delete"
+				confirmLabel={t("Delete")}
 				danger
 				onConfirm={() => {
 					if (pendingDelete) remove.mutate(pendingDelete.id);

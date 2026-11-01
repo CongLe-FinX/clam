@@ -1,3 +1,5 @@
+import { type I18nMessage, i18nMsg } from "@clam/contracts";
+
 export const AGENT_MESSAGE_LIMIT = 12;
 
 export type MessageKind = "instruction" | "question" | "answer" | "note";
@@ -34,9 +36,9 @@ export function canSendKind(
 	role: "sender" | "executor",
 	author: "human" | "agent",
 	kind: MessageKind,
-): { ok: true } | { ok: false; message: string } {
+): { ok: true } | { ok: false; message: I18nMessage } {
 	if (kind === "instruction" && role !== "sender") {
-		return { ok: false, message: "only the task's sender may send an instruction; use question, answer or note" };
+		return { ok: false, message: i18nMsg("only the task's sender may send an instruction; use question, answer or note") };
 	}
 	return { ok: true };
 }

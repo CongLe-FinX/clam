@@ -1,5 +1,6 @@
 import type { ApiErrorBody } from "@clam/contracts";
 import { authGate } from "@/features/auth/gate.ts";
+import { t } from "@/i18n";
 import { ApiError } from "./api.ts";
 
 export interface UploadHandle<T> {
@@ -20,8 +21,8 @@ export function uploadFile<T>(url: string, file: File, onProgress?: (sent: numbe
 		xhr.upload.onprogress = (e) => {
 			if (e.lengthComputable) onProgress?.(e.loaded, e.total);
 		};
-		xhr.onerror = () => reject(new ApiError(0, "network", "Cannot reach the CL Agent Mesh server. Is it running?"));
-		xhr.onabort = () => reject(new DOMException("Upload cancelled", "AbortError"));
+		xhr.onerror = () => reject(new ApiError(0, "network", t("Cannot reach the CL Agent Mesh server. Is it running?")));
+		xhr.onabort = () => reject(new DOMException(t("Upload cancelled"), "AbortError"));
 		xhr.onload = () => {
 			let json: unknown;
 			try {
@@ -36,7 +37,7 @@ export function uploadFile<T>(url: string, file: File, onProgress?: (sent: numbe
 			}
 			const err = (json as ApiErrorBody | undefined)?.error;
 			if (xhr.status === 401 && err?.code === "auth_required") authGate.require();
-			reject(new ApiError(xhr.status, err?.code ?? `http_${xhr.status}`, err?.message ?? (xhr.statusText || `Upload failed (${xhr.status})`), err?.details));
+			reject(new ApiError(xhr.status, err?.code ?? `http_${xhr.status}`, err?.message ?? (xhr.statusText || t("Upload failed ({status})", { status: xhr.status })), err?.details, err?.i18n));
 		};
 		xhr.send(file);
 	});

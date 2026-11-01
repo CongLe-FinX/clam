@@ -1,4 +1,4 @@
-import { CreateProjectBody, type Project, routes, UpdateProjectBody } from "@clam/contracts";
+import { CreateProjectBody, type Project, routes, UpdateProjectBody, i18nMsg } from "@clam/contracts";
 import { agentSessions, projects, workspaces } from "@clam/database";
 import { and, eq, sql } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
@@ -82,7 +82,7 @@ export default async function projectRoutes(app: FastifyInstance, { ctx }: Route
 		}
 		const dir = await canonicalProjectDir(body.path);
 		if (ctx.db.select({ id: projects.id }).from(projects).where(and(eq(projects.workspaceId, body.workspaceId), eq(projects.path, dir))).get()) {
-			throw ApiError.conflict(`This workspace already has a project at ${dir}`);
+			throw ApiError.conflict(i18nMsg("This workspace already has a project at {dir}", { dir }));
 		}
 		const id = newId("prj");
 		ctx.db.insert(projects).values({ id, workspaceId: body.workspaceId, name: body.name, path: dir }).run();
@@ -115,7 +115,7 @@ export default async function projectRoutes(app: FastifyInstance, { ctx }: Route
 		const row = requireProject(ctx, req.params.id);
 		const query = DeleteQuery.parse(req.query);
 		const deleteFiles = query.deleteFiles === "true" || query.deleteFiles === "1";
-		if (deleteFiles && !row.managed) throw ApiError.conflict("Only a folder CL Agent Mesh created (a managed project) can be deleted with the project; this project points at a folder you chose");
+		if (deleteFiles && !row.managed) throw ApiError.conflict(i18nMsg("Only a folder CL Agent Mesh created (a managed project) can be deleted with the project; this project points at a folder you chose"));
 		const sessionIds = await teardownProjectSessions(ctx, [row.id]);
 		ctx.db.delete(projects).where(eq(projects.id, row.id)).run();
 		if (deleteFiles) await deleteManagedFolder(ctx, row);

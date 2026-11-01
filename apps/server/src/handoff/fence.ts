@@ -1,4 +1,4 @@
-import type { TaskStatus } from "@clam/contracts";
+import { i18nMsg, type TaskStatus } from "@clam/contracts";
 import type { SourceState } from "@clam/handoff-engine";
 import { bootFenceDecision } from "@clam/handoff-engine";
 import { isTerminalStatus } from "@clam/task-engine";
@@ -38,10 +38,10 @@ export class FenceService implements FenceApi {
 
 	freeze(taskId: string, handoffId: string): void {
 		const row = this.tasks.get(taskId);
-		if (row.fenced) throw new ApiError(409, "task_fenced", "This node no longer owns the task", { epoch: row.highestSeenEpoch });
+		if (row.fenced) throw new ApiError(409, "task_fenced", i18nMsg("This node no longer owns the task"), { epoch: row.highestSeenEpoch });
 		const holder = execState(row).handoffId;
 		if (holder !== undefined && holder !== handoffId) {
-			throw new ApiError(409, "handoff_in_progress", `Task ${taskId} is already held by handoff ${holder}`, { handoffId: holder });
+			throw new ApiError(409, "handoff_in_progress", i18nMsg("Task {taskId} is already held by handoff {handoffId}", { taskId, handoffId: holder }), { handoffId: holder });
 		}
 		if (holder === handoffId) return;
 		this.tasks.patchExecState(taskId, { handoffId });
@@ -68,10 +68,10 @@ export class FenceService implements FenceApi {
 	assertOwner(taskId: string, expectedEpoch?: number): void {
 		const row = this.tasks.get(taskId);
 		if (row.fenced || row.highestSeenEpoch > row.epoch) {
-			throw new ApiError(409, "task_fenced", `This node no longer owns task ${taskId}: it continues at epoch ${Math.max(row.highestSeenEpoch, row.epoch)}`, { currentEpoch: Math.max(row.highestSeenEpoch, row.epoch) });
+			throw new ApiError(409, "task_fenced", i18nMsg("This node no longer owns task {taskId}: it continues at epoch {epoch}", { taskId, epoch: Math.max(row.highestSeenEpoch, row.epoch) }), { currentEpoch: Math.max(row.highestSeenEpoch, row.epoch) });
 		}
 		if (expectedEpoch !== undefined && row.epoch !== expectedEpoch) {
-			throw new ApiError(409, "stale_epoch", `Task ${taskId} is at epoch ${row.epoch}, not ${expectedEpoch}`, { currentEpoch: row.epoch });
+			throw new ApiError(409, "stale_epoch", i18nMsg("Task {taskId} is at epoch {epoch}, not {expected}", { taskId, epoch: row.epoch, expected: expectedEpoch }), { currentEpoch: row.epoch });
 		}
 	}
 
@@ -127,11 +127,11 @@ export class FenceService implements FenceApi {
 	guardPrompt: SessionPromptGuard = (row, input) => {
 		const task = this.tasks.byExecutorSession(row.id);
 		if (!task) return;
-		if (task.fenced) throw new ApiError(409, "task_fenced", `Task ${task.id} continues on another node; this session no longer owns it`, { currentEpoch: Math.max(task.highestSeenEpoch, task.epoch) });
+		if (task.fenced) throw new ApiError(409, "task_fenced", i18nMsg("Task {taskId} continues on another node; this session no longer owns it", { taskId: task.id }), { currentEpoch: Math.max(task.highestSeenEpoch, task.epoch) });
 		const handoffId = execState(task).handoffId;
 		if (handoffId === undefined) return;
 		if (input?.clientId.startsWith(HANDOFF_PROMPT_PREFIX)) return;
-		throw new ApiError(409, "handoff_in_progress", `Task ${task.id} is being handed over (handoff ${handoffId}); it cannot be prompted now`, { handoffId });
+		throw new ApiError(409, "handoff_in_progress", i18nMsg("Task {taskId} is being handed over (handoff {handoffId}); it cannot be prompted now", { taskId: task.id, handoffId }), { handoffId });
 	};
 
 	private markFenced(row: TaskRow, epoch: number): void {

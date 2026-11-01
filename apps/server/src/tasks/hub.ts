@@ -1,5 +1,5 @@
 import type { wire } from "@clam/agent-network";
-import type { DecideTaskBody, TaskConstraints, TaskDeliverAs, TaskMessage } from "@clam/contracts";
+import type { DecideTaskBody, I18nMessage, TaskConstraints, TaskDeliverAs, TaskMessage } from "@clam/contracts";
 import type { z } from "zod";
 import type { MessageKind } from "@clam/task-engine";
 import type { FastifyBaseLogger } from "fastify";
@@ -115,7 +115,7 @@ export interface ExecutorApi {
 	 * Cancel a task this node executes: aborts the run, never destroys work. Terminal tasks are returned unchanged
 	 * (idempotent). `by` is who asked: the sender over the wire, or the human on this node.
 	 */
-	cancel(taskId: string, options: { reason: string | null; by: "sender" | "local" | "handoff" }): Promise<TaskRow>;
+	cancel(taskId: string, options: { reason: string | I18nMessage | null; by: "sender" | "local" | "handoff" }): Promise<TaskRow>;
 	/** `mesh_complete` from the executing agent's session. Resolves with the text of the tool result. */
 	complete(sessionId: string, input: { taskId?: string; outcome: "succeeded" | "failed" | "blocked"; summary: string }): Promise<string>;
 	/** A message was injected into the executing session (an answer/instruction unblocks a task waiting for it). */
@@ -149,6 +149,12 @@ export interface InjectorApi {
 	injectStatusNote(task: TaskRow): Promise<boolean>;
 	/** Re-inject what could not be injected before (boot, session became available). Never throws. */
 	retryPending(): Promise<void>;
+	/**
+	 * Run `work` in the injection chain of `sessionId`: no task message or status note is injected into that session until it settled, and
+	 * work that was already queued runs first. The handoff target sends its brief this way, so a message that reaches the node meanwhile waits
+	 * behind the brief instead of racing it for the first prompt. Rejects with whatever `work` rejects with.
+	 */
+	exclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T>;
 	start(): void;
 	stop(): void;
 }

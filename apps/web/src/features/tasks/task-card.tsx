@@ -2,7 +2,8 @@ import type { Task } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
 import { FileArchive, FolderGit2, GitBranch, MessageSquare } from "lucide-react";
 import { memo } from "react";
-import { cn, formatCost } from "@/lib/utils";
+import { t } from "@/i18n";
+import { cn, formatCost, formatDateTime, formatNumber } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { DirectionChip, PartyChip, TaskStatusPill } from "./components.tsx";
 import { formatAge, otherParty } from "./format.ts";
@@ -25,19 +26,19 @@ export const TaskCard = memo(function TaskCard({ task, projectName, now, classNa
 				<TaskStatusPill status={task.status} />
 				<DirectionChip direction={task.direction} />
 				{task.unreadMessages > 0 ? (
-					<Badge variant="accent" className="gap-1" aria-label={`${task.unreadMessages} unread ${task.unreadMessages === 1 ? "message" : "messages"}`}>
+					<Badge variant="accent" className="gap-1" aria-label={t("{count, plural, one {# unread message} other {# unread messages}}", { count: task.unreadMessages })}>
 						<MessageSquare aria-hidden />
 						{task.unreadMessages}
 					</Badge>
 				) : null}
-				<span className="tabular ml-auto font-mono text-2xs text-subtle" title={new Date(task.updatedAt).toLocaleString()}>
+				<span className="tabular ml-auto font-mono text-2xs text-subtle" title={formatDateTime(task.updatedAt)}>
 					{formatAge(task.updatedAt, now)}
 				</span>
 			</div>
 			<h3 className="line-clamp-2 text-[13px] font-medium leading-snug">{task.title}</h3>
 			<div className="flex flex-col gap-1 text-xs">
 				<div className="flex items-center gap-1 text-muted-foreground">
-					<span className="shrink-0 text-subtle">{task.direction === "incoming" ? "from" : "to"}</span>
+					<span className="shrink-0 text-subtle">{task.direction === "incoming" ? t("from") : t("to")}</span>
 					<PartyChip party={other} role={task.direction === "incoming" ? "sender" : "executor"} />
 				</div>
 				<div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-2xs text-subtle">
@@ -49,14 +50,15 @@ export const TaskCard = memo(function TaskCard({ task, projectName, now, classNa
 					) : null}
 					{task.deliverAs === "branch" ? (
 						<span className="inline-flex items-center gap-1">
-							<GitBranch className="size-3" aria-hidden /> branch
+							<GitBranch className="size-3" aria-hidden /> {t("branch")}
 						</span>
 					) : task.deliverAs === "files" ? (
 						<span className="inline-flex items-center gap-1">
-							<FileArchive className="size-3" aria-hidden /> files{task.result?.files ? ` · ${task.result.files.fileCount}` : ""}
+							<FileArchive className="size-3" aria-hidden /> {t("files")}
+							{task.result?.files ? ` · ${formatNumber(task.result.files.fileCount)}` : ""}
 						</span>
 					) : null}
-					{task.repo === null && task.deliverAs !== "summary" ? <span>no repository</span> : null}
+					{task.repo === null && task.deliverAs !== "summary" ? <span>{t("no repository")}</span> : null}
 					{task.cost !== null ? <span className="tabular ml-auto font-mono">{formatCost(task.cost)}</span> : null}
 				</div>
 			</div>

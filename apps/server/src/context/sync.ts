@@ -1,3 +1,4 @@
+import { i18nMsg } from "@clam/contracts";
 import {
 	ContextSyncResponse,
 	MAX_HAVE,
@@ -282,7 +283,7 @@ export class ContextSync {
 	receive(peerId: string, request: ContextSyncRequest): ContextSyncResponse {
 		const { workspaceId } = request;
 		if (!this.hub.workspace(workspaceId) || !this.hub.members.isActiveMember(workspaceId, peerId)) {
-			throw new ApiError(403, "forbidden", "This node does not share that workspace with you");
+			throw new ApiError(403, "forbidden", i18nMsg("This node does not share that workspace with you"));
 		}
 		const peer = this.hub.ctx.network.peers.row(peerId);
 		const from = { nodeId: peerId, nodeName: peer?.name ?? peerId };

@@ -4,6 +4,8 @@ import { KeyRound, Link2, TriangleAlert, UserMinus, UserPlus, Users } from "luci
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { T, msg, t, tr, type Msg } from "@/i18n";
+import { PEER_STATUS_LABEL } from "@/features/network/format";
 import { useMemberMutations, useMembers } from "@/features/context/hooks.ts";
 import { NODE_STATUS_LABEL, nodeDot } from "@/features/shared/format.ts";
 import { errorMessage } from "@/lib/api";
@@ -21,18 +23,18 @@ import { StatusDot } from "@/ui/status-dot";
 import { Table, TBody, Td, Th, THead, Tr } from "@/ui/table";
 import { Tip } from "@/ui/tooltip";
 
-const CAPABILITY_HINT: Partial<Record<Capability, string>> = {
-	"context.sync": "Receive and send shareable contexts for this workspace",
-	"sessions.share": "Take part in shared sessions (mirror, checkpoints, hand-over)",
-	"tasks.send": "Send tasks to this machine",
-	"tasks.receive": "Receive tasks from this machine",
-	"tasks.cancel": "Cancel tasks it sent",
-	"agents.read": "List this machine's agents",
-	"events.read": "Follow this machine's events",
-	"artifacts.read": "Read artifacts",
-	"artifacts.write": "Write artifacts",
-	"handoff.send": "Hand work over to this machine",
-	"handoff.receive": "Receive hand-overs from this machine",
+const CAPABILITY_HINT: Partial<Record<Capability, Msg>> = {
+	"context.sync": msg("Receive and send shareable contexts for this workspace"),
+	"sessions.share": msg("Take part in shared sessions (mirror, checkpoints, hand-over)"),
+	"tasks.send": msg("Send tasks to this machine"),
+	"tasks.receive": msg("Receive tasks from this machine"),
+	"tasks.cancel": msg("Cancel tasks it sent"),
+	"agents.read": msg("List this machine's agents"),
+	"events.read": msg("Follow this machine's events"),
+	"artifacts.read": msg("Read artifacts"),
+	"artifacts.write": msg("Write artifacts"),
+	"handoff.send": msg("Hand work over to this machine"),
+	"handoff.receive": msg("Receive hand-overs from this machine"),
 };
 
 // ───────────────────────────── add member ─────────────────────────────
@@ -46,9 +48,9 @@ function PeerChoice({ peer, checked, onSelect }: { peer: Peer; checked: boolean;
 			)}
 		>
 			<input type="radio" name="member-peer" checked={checked} onChange={onSelect} className="size-4 shrink-0 accent-[var(--accent)] coarse:size-5" />
-			<StatusDot status={peer.status === "online" ? "online" : peer.status === "degraded" ? "degraded" : "offline"} label={peer.status} />
+			<StatusDot status={peer.status === "online" ? "online" : peer.status === "degraded" ? "degraded" : "offline"} label={tr(PEER_STATUS_LABEL[peer.status])} />
 			<span className="min-w-0 flex-1 truncate font-medium">{peer.name}</span>
-			<span className="shrink-0 text-2xs text-subtle">{peer.status}</span>
+			<span className="shrink-0 text-2xs text-subtle">{tr(PEER_STATUS_LABEL[peer.status])}</span>
 		</label>
 	);
 }
@@ -85,10 +87,10 @@ function AddMemberDialog({ workspaceId, members, onClose }: { workspaceId: strin
 			{ nodeId: peer.id, permissions: [...perms] },
 			{
 				onSuccess: () => {
-					toast.success(`${peer.name} added to the workspace`);
+					toast.success(t("{name} added to the workspace", { name: peer.name }));
 					onClose();
 				},
-				onError: (e) => toast.error("Could not add member", { description: errorMessage(e) }),
+				onError: (e) => toast.error(t("Could not add member"), { description: errorMessage(e) }),
 			},
 		);
 	};
@@ -105,12 +107,12 @@ function AddMemberDialog({ workspaceId, members, onClose }: { workspaceId: strin
 		body = (
 			<EmptyState
 				icon={TriangleAlert}
-				title="Could not load paired machines"
+				title={t("Could not load paired machines")}
 				description={errorMessage(peers.error)}
 				className="py-6"
 				action={
 					<Button variant="outline" onClick={() => void peers.refetch()}>
-						Retry
+						{t("Retry")}
 					</Button>
 				}
 			/>
@@ -119,8 +121,8 @@ function AddMemberDialog({ workspaceId, members, onClose }: { workspaceId: strin
 		body = (
 			<EmptyState
 				icon={Link2}
-				title="No machine to add"
-				description={(peers.data ?? []).some((p) => p.status !== "revoked") ? "Every paired machine is already a member." : "Pair another machine first, then add it here."}
+				title={t("No machine to add")}
+				description={(peers.data ?? []).some((p) => p.status !== "revoked") ? t("Every paired machine is already a member.") : t("Pair another machine first, then add it here.")}
 				className="py-6"
 				action={
 					<div className="flex flex-wrap justify-center gap-2">
@@ -131,7 +133,7 @@ function AddMemberDialog({ workspaceId, members, onClose }: { workspaceId: strin
 								openDialog({ kind: "invite-node", workspaceId });
 							}}
 						>
-							Invite a machine
+							{t("Invite a machine")}
 						</Button>
 						<Button
 							variant="outline"
@@ -140,7 +142,7 @@ function AddMemberDialog({ workspaceId, members, onClose }: { workspaceId: strin
 								openDialog({ kind: "join-node" });
 							}}
 						>
-							Join a machine
+							{t("Join a machine")}
 						</Button>
 					</div>
 				}
@@ -149,15 +151,15 @@ function AddMemberDialog({ workspaceId, members, onClose }: { workspaceId: strin
 	} else {
 		body = (
 			<div className="scrollbar-thin flex min-h-0 flex-col gap-3 overflow-y-auto">
-				<div role="radiogroup" aria-label="Paired machine" className="flex flex-col gap-1.5">
+				<div role="radiogroup" aria-label={t("Paired machine")} className="flex flex-col gap-1.5">
 					{candidates.map((p) => (
 						<PeerChoice key={p.id} peer={p} checked={p.id === peerId} onSelect={() => select(p)} />
 					))}
 				</div>
 				{peer ? (
 					<fieldset className="flex flex-col gap-1.5">
-						<legend className="mb-1 text-xs font-medium text-muted-foreground">Permissions in this workspace</legend>
-						{peer.grantedCapabilities.length === 0 ? <p className="text-xs text-subtle">You have not granted this machine any capability.</p> : null}
+						<legend className="mb-1 text-xs font-medium text-muted-foreground">{t("Permissions in this workspace")}</legend>
+						{peer.grantedCapabilities.length === 0 ? <p className="text-xs text-subtle">{t("You have not granted this machine any capability.")}</p> : null}
 						{peer.grantedCapabilities.map((cap) => (
 							<label key={cap} className="flex min-h-8 cursor-pointer items-start gap-2.5 py-1 coarse:min-h-11 coarse:items-center">
 								<input
@@ -168,7 +170,7 @@ function AddMemberDialog({ workspaceId, members, onClose }: { workspaceId: strin
 								/>
 								<span className="flex min-w-0 flex-col">
 									<span className="font-mono text-xs">{cap}</span>
-									{CAPABILITY_HINT[cap] ? <span className="text-2xs text-subtle">{CAPABILITY_HINT[cap]}</span> : null}
+									{CAPABILITY_HINT[cap] ? <span className="text-2xs text-subtle">{tr(CAPABILITY_HINT[cap])}</span> : null}
 								</span>
 							</label>
 						))}
@@ -176,11 +178,10 @@ function AddMemberDialog({ workspaceId, members, onClose }: { workspaceId: strin
 							<div role="alert" className="flex items-start gap-2 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning shadow-[inset_0_0_0_1px_var(--warning)]">
 								<TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
 								<p>
-									This machine can't receive shared context until you grant context.sync on its{" "}
-									<Link to="/network/nodes/$peerId" params={{ peerId: peer.id }} onClick={onClose} className="font-medium underline">
-										Machines page
-									</Link>
-									.
+									<T
+										text="This machine can't receive shared context until you grant context.sync on its <link>Machines page</link>."
+										tags={{ link: <Link to="/network/nodes/$peerId" params={{ peerId: peer.id }} onClick={onClose} className="font-medium underline" /> }}
+									/>
 								</p>
 							</div>
 						) : null}
@@ -194,16 +195,16 @@ function AddMemberDialog({ workspaceId, members, onClose }: { workspaceId: strin
 		<Dialog open onOpenChange={(o) => !o && onClose()}>
 			<DialogContent sheetOnMobile>
 				<DialogHeader>
-					<DialogTitle>Add member</DialogTitle>
-					<DialogDescription>Members receive this workspace's shareable contexts. Private contexts never leave this machine.</DialogDescription>
+					<DialogTitle>{t("Add member")}</DialogTitle>
+					<DialogDescription>{t("Members receive this workspace's shareable contexts. Private contexts never leave this machine.")}</DialogDescription>
 				</DialogHeader>
 				{body}
 				<DialogFooter>
 					<Button variant="ghost" onClick={onClose}>
-						Cancel
+						{t("Cancel")}
 					</Button>
 					<Button variant="primary" onClick={submit} loading={add.isPending} disabled={!peer}>
-						<UserPlus /> Add member
+						<UserPlus /> {t("Add member")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>
@@ -214,8 +215,8 @@ function AddMemberDialog({ workspaceId, members, onClose }: { workspaceId: strin
 // ───────────────────────────── list ─────────────────────────────
 
 function removeBlocker(m: WorkspaceMember): string | null {
-	if (m.nodeStatus === "self") return "This machine can't be removed from its own workspace.";
-	if (m.role === "owner") return "The owner can't be removed.";
+	if (m.nodeStatus === "self") return t("This machine can't be removed from its own workspace.");
+	if (m.role === "owner") return t("The owner can't be removed.");
 	return null;
 }
 
@@ -226,7 +227,7 @@ function RemoveButton({ member, onRemove }: { member: WorkspaceMember; onRemove:
 			<Tip label={blocker}>
 				<span tabIndex={0} className="inline-flex rounded-lg outline-none focus-visible:shadow-[0_0_0_2px_var(--accent)]" aria-label={blocker}>
 					<Button size="sm" variant="ghost" disabled>
-						<UserMinus /> Remove
+						<UserMinus /> {t("Remove")}
 					</Button>
 				</span>
 			</Tip>
@@ -234,14 +235,14 @@ function RemoveButton({ member, onRemove }: { member: WorkspaceMember; onRemove:
 	}
 	if (member.nodeStatus === "revoked" && member.revokedAt) return null;
 	return (
-		<Button size="sm" variant="ghost" className="text-danger hover:text-danger" onClick={() => onRemove(member)} aria-label={`Remove ${member.nodeName}`}>
-			<UserMinus /> Remove
+		<Button size="sm" variant="ghost" className="text-danger hover:text-danger" onClick={() => onRemove(member)} aria-label={t("Remove {name}", { name: member.nodeName })}>
+			<UserMinus /> {t("Remove")}
 		</Button>
 	);
 }
 
 function Perms({ perms }: { perms: string[] }) {
-	if (perms.length === 0) return <span className="text-2xs text-subtle">none</span>;
+	if (perms.length === 0) return <span className="text-2xs text-subtle">{t("none")}</span>;
 	return (
 		<span className="flex flex-wrap gap-1">
 			{perms.map((p) => (
@@ -256,30 +257,31 @@ function Perms({ perms }: { perms: string[] }) {
 function NodeCell({ m }: { m: WorkspaceMember }) {
 	return (
 		<span className="flex min-w-0 items-center gap-2">
-			<StatusDot status={nodeDot(m.nodeStatus)} label={NODE_STATUS_LABEL[m.nodeStatus]} />
+			<StatusDot status={nodeDot(m.nodeStatus)} label={tr(NODE_STATUS_LABEL[m.nodeStatus])} />
 			<span className="min-w-0 truncate font-medium" title={m.nodeName}>
 				{m.nodeName}
 			</span>
-			{m.nodeStatus === "self" ? <Badge variant="outline">this machine</Badge> : null}
+			{m.nodeStatus === "self" ? <Badge variant="outline">{t("This machine")}</Badge> : null}
 		</span>
 	);
 }
 
-const when = (m: WorkspaceMember) => (m.revokedAt ? `removed ${relativeTime(m.revokedAt)}` : m.joinedAt ? `joined ${relativeTime(m.joinedAt)}` : "—");
+const when = (m: WorkspaceMember) =>
+	m.revokedAt ? t("removed {time}", { time: relativeTime(m.revokedAt) }) : m.joinedAt ? t("joined {time}", { time: relativeTime(m.joinedAt) }) : "—";
 
 function MembersTable({ members, onRemove }: { members: WorkspaceMember[]; onRemove: (m: WorkspaceMember) => void }) {
 	return (
 		<Card className="hidden overflow-hidden md:block">
-			<Table aria-label="Workspace members">
+			<Table aria-label={t("Workspace members")}>
 				<THead>
 					<tr>
-						<Th>Machine</Th>
-						<Th>Role</Th>
-						<Th>Status</Th>
-						<Th>Permissions</Th>
-						<Th>Since</Th>
+						<Th>{t("Machine")}</Th>
+						<Th>{t("Role")}</Th>
+						<Th>{t("Status")}</Th>
+						<Th>{t("Permissions")}</Th>
+						<Th>{t("Since")}</Th>
 						<Th className="text-right">
-							<span className="sr-only">Actions</span>
+							<span className="sr-only">{t("Actions")}</span>
 						</Th>
 					</tr>
 				</THead>
@@ -290,9 +292,9 @@ function MembersTable({ members, onRemove }: { members: WorkspaceMember[]; onRem
 								<NodeCell m={m} />
 							</Td>
 							<Td>
-								<Badge variant={m.role === "owner" ? "accent" : "neutral"}>{m.role === "owner" ? "Owner" : "Member"}</Badge>
+								<Badge variant={m.role === "owner" ? "accent" : "neutral"}>{m.role === "owner" ? t("Owner") : t("Member")}</Badge>
 							</Td>
-							<Td className="text-muted-foreground">{NODE_STATUS_LABEL[m.nodeStatus]}</Td>
+							<Td className="text-muted-foreground">{tr(NODE_STATUS_LABEL[m.nodeStatus])}</Td>
 							<Td className="max-w-72">
 								<Perms perms={m.permissions} />
 							</Td>
@@ -310,17 +312,17 @@ function MembersTable({ members, onRemove }: { members: WorkspaceMember[]; onRem
 
 function MembersCards({ members, onRemove }: { members: WorkspaceMember[]; onRemove: (m: WorkspaceMember) => void }) {
 	return (
-		<ul className="flex flex-col gap-2 md:hidden" aria-label="Workspace members">
+		<ul className="flex flex-col gap-2 md:hidden" aria-label={t("Workspace members")}>
 			{members.map((m) => (
 				<li key={m.nodeId} className="flex flex-col gap-2 rounded-xl bg-surface-1 p-3 shadow-[inset_0_0_0_1px_var(--border)]">
 					<div className="flex min-w-0 items-center gap-2">
 						<div className="min-w-0 flex-1">
 							<NodeCell m={m} />
 						</div>
-						<Badge variant={m.role === "owner" ? "accent" : "neutral"}>{m.role === "owner" ? "Owner" : "Member"}</Badge>
+						<Badge variant={m.role === "owner" ? "accent" : "neutral"}>{m.role === "owner" ? t("Owner") : t("Member")}</Badge>
 					</div>
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-subtle">
-						<span>{NODE_STATUS_LABEL[m.nodeStatus]}</span>
+						<span>{tr(NODE_STATUS_LABEL[m.nodeStatus])}</span>
 						<span>{when(m)}</span>
 					</div>
 					<Perms perms={m.permissions} />
@@ -361,20 +363,20 @@ export default function MembersPage() {
 			<PageHeader
 				eyebrow={
 					<Link to="/workspaces/$workspaceId" params={{ workspaceId }} className="rounded-sm outline-none hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)]">
-						{ws.data?.name ?? "Workspace"}
+						{ws.data?.name ?? t("Workspace")}
 					</Link>
 				}
-				title="Members"
-				description="Machines that take part in this workspace. Shareable contexts sync with members machine-to-machine; private contexts never leave their machine."
+				title={t("Members")}
+				description={t("Machines that take part in this workspace. Shareable contexts sync with members machine-to-machine; private contexts never leave their machine.")}
 				actions={
 					<Button variant="primary" onClick={() => setAdding(true)} disabled={!q.isSuccess}>
-						<UserPlus /> Add member
+						<UserPlus /> {t("Add member")}
 					</Button>
 				}
 			/>
 
 			{q.isPending ? (
-				<div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading members">
+				<div className="flex flex-col gap-2" aria-busy="true" aria-label={t("Loading members")}>
 					<Skeleton className="h-14 rounded-xl" />
 					<Skeleton className="h-14 rounded-xl" />
 					<Skeleton className="h-14 rounded-xl" />
@@ -382,11 +384,11 @@ export default function MembersPage() {
 			) : q.isError ? (
 				<EmptyState
 					icon={TriangleAlert}
-					title="Could not load members"
+					title={t("Could not load members")}
 					description={errorMessage(q.error)}
 					action={
 						<Button variant="outline" loading={q.isFetching} onClick={() => void q.refetch()}>
-							Retry
+							{t("Retry")}
 						</Button>
 					}
 				/>
@@ -397,19 +399,19 @@ export default function MembersPage() {
 					{alone ? (
 						<EmptyState
 							icon={Users}
-							title="Only this machine is a member"
-							description="Pair another machine, then add it here to share contexts and hand off tasks."
+							title={t("Only this machine is a member")}
+							description={t("Pair another machine, then add it here to share contexts and hand off tasks.")}
 							className="rounded-xl bg-surface-1 py-10 shadow-[inset_0_0_0_1px_var(--border)]"
 							action={
 								<div className="flex flex-wrap justify-center gap-2">
 									<Button variant="outline" onClick={() => openDialog({ kind: "invite-node", workspaceId })}>
-										<KeyRound /> Invite a machine
+										<KeyRound /> {t("Invite a machine")}
 									</Button>
 									<Button variant="outline" onClick={() => openDialog({ kind: "join-node" })}>
-										<Link2 /> Join a machine
+										<Link2 /> {t("Join a machine")}
 									</Button>
 									<Button variant="primary" onClick={() => setAdding(true)}>
-										<UserPlus /> Add member
+										<UserPlus /> {t("Add member")}
 									</Button>
 								</div>
 							}
@@ -422,19 +424,19 @@ export default function MembersPage() {
 			<ConfirmDialog
 				open={removing !== null}
 				onOpenChange={(o) => !o && setRemoving(null)}
-				title={`Remove ${removing?.nodeName ?? "member"}?`}
-				description="This stops syncing shareable contexts with that machine. Copies it already holds stay on that machine."
-				confirmLabel="Remove"
+				title={t("Remove {name}?", { name: removing?.nodeName ?? t("member") })}
+				description={t("This stops syncing shareable contexts with that machine. Copies it already holds stay on that machine.")}
+				confirmLabel={t("Remove")}
 				danger
 				loading={remove.isPending}
 				onConfirm={() =>
 					removing &&
 					remove.mutate(removing.nodeId, {
 						onSuccess: () => {
-							toast.success(`${removing.nodeName} removed`);
+							toast.success(t("{name} removed", { name: removing.nodeName }));
 							setRemoving(null);
 						},
-						onError: (e) => toast.error("Could not remove member", { description: errorMessage(e) }),
+						onError: (e) => toast.error(t("Could not remove member"), { description: errorMessage(e) }),
 					})
 				}
 			/>

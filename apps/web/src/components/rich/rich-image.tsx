@@ -2,6 +2,7 @@ import { ExternalLink, ImageOff } from "lucide-react";
 import { useCallback, useState } from "react";
 import { cn } from "@/lib/utils";
 import { LazyLightbox } from "./lazy-lightbox.tsx";
+import { t } from "@/i18n";
 
 /** Shown when a picture cannot be loaded: names the path instead of a broken-image icon. */
 export function BrokenImageCard({ label, detail, className }: { label: string; detail?: string; className?: string }) {
@@ -10,7 +11,7 @@ export function BrokenImageCard({ label, detail, className }: { label: string; d
 			<ImageOff aria-hidden className="size-4 shrink-0 text-subtle" />
 			<span className="min-w-0">
 				<span className="block truncate text-[13px] font-medium text-foreground">{label}</span>
-				<span className="block text-2xs text-subtle">{detail ?? "Image not available"}</span>
+				<span className="block text-2xs text-subtle">{detail ?? t("Image not available")}</span>
 			</span>
 		</span>
 	);
@@ -30,13 +31,13 @@ export function RemoteImageCard({ src, alt, className }: { src: string; alt?: st
 				<ExternalLink className="size-4" />
 			</span>
 			<span className="min-w-0">
-				<span className="block truncate text-[13px] font-medium text-foreground">{alt || "Remote image"}</span>
+				<span className="block truncate text-[13px] font-medium text-foreground">{alt || t("Remote image")}</span>
 				<span className="block truncate text-2xs text-subtle" title={src}>
 					{host} · {src}
 				</span>
 			</span>
 			<a href={src} target="_blank" rel="noreferrer noopener" className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-accent outline-none hover:bg-accent-soft focus-visible:ring-2 focus-visible:ring-ring coarse:py-2.5">
-				Open image
+				{t("Open image")}
 			</a>
 		</span>
 	);
@@ -61,7 +62,7 @@ export function RichImage({ src, alt = "", className, label }: RichImageProps) {
 			<button
 				type="button"
 				onClick={() => setOpen(true)}
-				aria-label={alt ? `View image: ${alt}` : "View image"}
+				aria-label={alt ? t("View image: {alt}", { alt }) : t("View image")}
 				className={cn(
 					"relative block max-w-full overflow-hidden rounded-lg bg-surface-2 align-middle shadow-[inset_0_0_0_1px_var(--border)] outline-none focus-visible:ring-2 focus-visible:ring-ring",
 					state === "loading" && "aspect-[16/10] w-full max-w-sm animate-pulse",
@@ -78,7 +79,7 @@ export function RichImage({ src, alt = "", className, label }: RichImageProps) {
 					className={cn("block max-h-[min(26rem,60dvh)] max-w-full cursor-zoom-in object-contain transition-opacity duration-200", state === "loading" ? "size-full opacity-0" : "opacity-100")}
 				/>
 			</button>
-			{open ? <LazyLightbox items={[{ src, alt: alt || label || "Image", name: label || alt }]} index={0} onIndexChange={() => undefined} onClose={close} /> : null}
+			{open ? <LazyLightbox items={[{ src, alt: alt || label || t("Image"), name: label || alt }]} index={0} onIndexChange={() => undefined} onClose={close} /> : null}
 		</>
 	);
 }

@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Brain, Check, ChevronDown, Cpu, RefreshCw, Search } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { api, errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { api, errorText } from "@/lib/api";
 import { qk } from "@/lib/queries";
 import { cn, formatCompact } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -64,7 +65,7 @@ function ModelList({ stream, onChosen, autoFocus }: { stream: SessionStream; onC
 	const choose = (m: ModelInfo) => {
 		onChosen();
 		if (m.selector === current) return;
-		stream.setModel(m.selector, { provider: m.provider, id: m.id, name: m.name }).catch((e) => toast.error(`Could not switch model: ${errorMessage(e)}`));
+		stream.setModel(m.selector, { provider: m.provider, id: m.id, name: m.name }).catch((e) => toast.error(t("Could not switch model: {error}", { error: errorText(e) })));
 	};
 
 	let idx = -1;
@@ -89,15 +90,15 @@ function ModelList({ stream, onChosen, autoFocus }: { stream: SessionStream; onC
 							if (m) choose(m);
 						}
 					}}
-					placeholder="Search models…"
-					aria-label="Search models"
+					placeholder={t("Search models…")}
+					aria-label={t("Search models")}
 					role="combobox"
 					aria-expanded
 					aria-controls="model-listbox"
 					className="h-10 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-subtle md:text-[13px] coarse:h-12"
 				/>
 			</div>
-			<div ref={listRef} id="model-listbox" role="listbox" aria-label="Models" className="scrollbar-thin max-h-[min(55dvh,380px)] overflow-y-auto p-1">
+			<div ref={listRef} id="model-listbox" role="listbox" aria-label={t("Models")} className="scrollbar-thin max-h-[min(55dvh,380px)] overflow-y-auto p-1">
 				{models.isPending ? (
 					<div className="flex flex-col gap-1.5 p-2">
 						<Skeleton className="h-8" />
@@ -106,13 +107,13 @@ function ModelList({ stream, onChosen, autoFocus }: { stream: SessionStream; onC
 					</div>
 				) : models.isError ? (
 					<div className="flex flex-col items-start gap-2 p-3 text-[13px]">
-						<span className="text-danger">{errorMessage(models.error)}</span>
+						<span className="text-danger">{errorText(models.error)}</span>
 						<Button size="sm" variant="outline" onClick={() => void models.refetch()}>
-							<RefreshCw /> Retry
+							<RefreshCw /> {t("Retry")}
 						</Button>
 					</div>
 				) : flat.length === 0 ? (
-					<div className="p-4 text-center text-[13px] text-muted-foreground">{models.data?.length ? "No models match your search." : "No models available. Log in to a provider in Settings."}</div>
+					<div className="p-4 text-center text-[13px] text-muted-foreground">{models.data?.length ? t("No models match your search.") : t("No models available. Log in to a provider in Settings.")}</div>
 				) : (
 					groups.map((g) => (
 						<div key={g.provider} role="group" aria-label={g.provider}>
@@ -137,8 +138,8 @@ function ModelList({ stream, onChosen, autoFocus }: { stream: SessionStream; onC
 											<span className="truncate font-mono text-2xs text-subtle">{m.id}</span>
 										</span>
 										{m.contextWindow ? <span className="tabular shrink-0 font-mono text-2xs text-subtle">{formatCompact(m.contextWindow)}</span> : null}
-										{m.reasoning ? <Brain className="size-3.5 shrink-0 text-subtle" aria-label="Supports reasoning" /> : null}
-										{selected ? <Check className="size-3.5 shrink-0 text-accent" aria-label="Current model" /> : <span className="size-3.5 shrink-0" />}
+										{m.reasoning ? <Brain className="size-3.5 shrink-0 text-subtle" aria-label={t("Supports reasoning")} /> : null}
+										{selected ? <Check className="size-3.5 shrink-0 text-accent" aria-label={t("Current model")} /> : <span className="size-3.5 shrink-0" />}
 									</button>
 								);
 							})}
@@ -157,11 +158,11 @@ export function ModelPicker({ stream, className }: { stream: SessionStream; clas
 	const current = model ? `${model.provider}/${model.id}` : null;
 	return (
 		<Popover open={open} onOpenChange={setOpen}>
-			<Tip label="Switch model">
+			<Tip label={t("Switch model")}>
 				<PopoverTrigger asChild>
-					<button type="button" disabled={!ready} aria-label={`Model: ${model?.name ?? current ?? "none"}. Change model`} className={cn(chip, className)}>
+					<button type="button" disabled={!ready} aria-label={t("Model: {name}. Change model", { name: model?.name ?? current ?? t("none") })} className={cn(chip, className)}>
 						<Cpu aria-hidden />
-						<span className="truncate font-mono">{model ? (model.name ?? model.id) : ready ? "No model" : "—"}</span>
+						<span className="truncate font-mono">{model ? (model.name ?? model.id) : ready ? t("No model") : "—"}</span>
 						<ChevronDown className="!size-3 opacity-60" aria-hidden />
 					</button>
 				</PopoverTrigger>
@@ -182,21 +183,21 @@ export function ThinkingPicker({ stream, className }: { stream: SessionStream; c
 	const empty = !levels || levels.length === 0;
 	return (
 		<DropdownMenu>
-			<Tip label={empty ? "This model has no thinking levels" : "Thinking level"}>
+			<Tip label={empty ? t("This model has no thinking levels") : t("Thinking level")}>
 				<DropdownMenuTrigger asChild>
-					<button type="button" disabled={empty} aria-label={`Thinking level: ${auto ? "auto, currently " : ""}${level ?? "none"}. Change`} className={cn(chip, className)}>
+					<button type="button" disabled={empty} aria-label={auto ? t("Thinking level: auto, currently {level}. Change", { level: level ?? t("none") }) : t("Thinking level: {level}. Change", { level: level ?? t("none") })} className={cn(chip, className)}>
 						<Brain aria-hidden />
-						<span>{auto ? `Auto · ${level ?? "off"}` : (level ?? "off")}</span>
+						<span>{auto ? t("Auto · {level}", { level: level ?? t("off") }) : (level ?? t("off"))}</span>
 						<ChevronDown className="!size-3 opacity-60" aria-hidden />
 					</button>
 				</DropdownMenuTrigger>
 			</Tip>
 			<DropdownMenuContent align="start" className="min-w-40">
-				<DropdownMenuLabel>Thinking level</DropdownMenuLabel>
+				<DropdownMenuLabel>{t("Thinking level")}</DropdownMenuLabel>
 				<DropdownMenuRadioGroup
 					value={auto ? "" : (level ?? "")}
 					onValueChange={(v) => {
-						if (auto || v !== level) stream.setThinking(v).catch((e) => toast.error(`Could not change thinking level: ${errorMessage(e)}`));
+						if (auto || v !== level) stream.setThinking(v).catch((e) => toast.error(t("Could not change thinking level: {error}", { error: errorText(e) })));
 					}}
 				>
 					{(levels ?? []).map((l) => (
@@ -215,9 +216,9 @@ function ThinkingLevels({ stream }: { stream: SessionStream }) {
 	const level = useStreamMeta(stream, (m) => m.live?.thinkingLevel ?? null);
 	const auto = useStreamMeta(stream, (m) => m.live?.thinkingSelector === "auto");
 	const levels = useStreamMeta(stream, (m) => m.live?.availableThinkingLevels);
-	if (!levels || levels.length === 0) return <p className="px-3 py-2.5 text-xs text-subtle">This model has no thinking levels.</p>;
+	if (!levels || levels.length === 0) return <p className="px-3 py-2.5 text-xs text-subtle">{t("This model has no thinking levels.")}</p>;
 	return (
-		<div role="radiogroup" aria-label="Thinking level" className="flex flex-wrap gap-1 px-3 py-2.5">
+		<div role="radiogroup" aria-label={t("Thinking level")} className="flex flex-wrap gap-1 px-3 py-2.5">
 			{levels.map((l) => {
 				const on = !auto && l === level;
 				return (
@@ -227,7 +228,7 @@ function ThinkingLevels({ stream }: { stream: SessionStream }) {
 						role="radio"
 						aria-checked={on}
 						onClick={() => {
-							if (!on) stream.setThinking(l).catch((e) => toast.error(`Could not change thinking level: ${errorMessage(e)}`));
+							if (!on) stream.setThinking(l).catch((e) => toast.error(t("Could not change thinking level: {error}", { error: errorText(e) })));
 						}}
 						className={cn("h-8 rounded-lg px-3 text-xs font-medium capitalize outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-11", on ? "bg-accent text-accent-foreground" : "bg-surface-2 text-muted-foreground hover:bg-surface-3 hover:text-foreground")}
 					>
@@ -250,12 +251,12 @@ export function ModelSettings({ stream, className }: { stream: SessionStream; cl
 	const auto = useStreamMeta(stream, (m) => m.live?.thinkingSelector === "auto");
 	const hasLevels = useStreamMeta(stream, (m) => (m.live?.availableThinkingLevels?.length ?? 0) > 0);
 	const [open, setOpen] = useState(false);
-	const name = model ? (model.name ?? model.id) : ready ? "No model" : "—";
-	const thinking = hasLevels ? (auto ? "auto" : (level ?? "off")) : null;
+	const name = model ? (model.name ?? model.id) : ready ? t("No model") : "—";
+	const thinking = hasLevels ? (auto ? t("auto") : (level ?? t("off"))) : null;
 	return (
 		<Sheet open={open} onOpenChange={setOpen}>
 			<SheetTrigger asChild>
-				<button type="button" disabled={!ready} aria-label={`Model ${name}${thinking ? `, thinking ${thinking}` : ""}. Change`} className={cn(chip, "min-w-0", className)}>
+				<button type="button" disabled={!ready} aria-label={thinking ? t("Model {name}, thinking {thinking}. Change", { name, thinking }) : t("Model {name}. Change", { name })} className={cn(chip, "min-w-0", className)}>
 					<Cpu aria-hidden />
 					<span className="min-w-0 truncate">
 						{name}
@@ -265,10 +266,10 @@ export function ModelSettings({ stream, className }: { stream: SessionStream; cl
 				</button>
 			</SheetTrigger>
 			<SheetContent side="bottom" aria-describedby={undefined} className="p-0">
-				<SheetTitle className="px-4 pb-1 pt-3">Model and thinking</SheetTitle>
-				<div className="text-2xs font-medium uppercase tracking-wider text-subtle px-4 pt-1">Thinking</div>
+				<SheetTitle className="px-4 pb-1 pt-3">{t("Model and thinking")}</SheetTitle>
+				<div className="text-2xs font-medium uppercase tracking-wider text-subtle px-4 pt-1">{t("Thinking")}</div>
 				<ThinkingLevels stream={stream} />
-				<div className="text-2xs font-medium uppercase tracking-wider text-subtle px-4 pb-1">Model</div>
+				<div className="text-2xs font-medium uppercase tracking-wider text-subtle px-4 pb-1">{t("Model")}</div>
 				<div className="flex min-h-0 flex-1 flex-col border-t">{open ? <ModelList stream={stream} onChosen={() => setOpen(false)} autoFocus={false} /> : null}</div>
 			</SheetContent>
 		</Sheet>

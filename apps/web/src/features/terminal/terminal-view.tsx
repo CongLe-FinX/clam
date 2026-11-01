@@ -9,6 +9,7 @@ import "./terminal.css";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronDown, ChevronUp, ClipboardPaste, Search, X } from "lucide-react";
 import { type RefObject, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { type ConnectionState, TerminalConnection } from "./connection";
@@ -344,7 +345,7 @@ export default function TerminalView({ session, blocked, fontSize, onFontSize, t
 					const text = await navigator.clipboard.readText();
 					if (text) termRef.current?.paste(text);
 				} catch {
-					toast.error("The browser blocked clipboard access. Paste with your keyboard shortcut instead.");
+					toast.error(t("The browser blocked clipboard access. Paste with your keyboard shortcut instead."));
 				}
 				termRef.current?.focus();
 			},
@@ -388,21 +389,21 @@ export default function TerminalView({ session, blocked, fontSize, onFontSize, t
 									termRef.current?.focus();
 								}
 							}}
-							placeholder="Find in output"
-							aria-label="Find in terminal output"
+							placeholder={t("Find in output")}
+							aria-label={t("Find in terminal output")}
 							aria-invalid={noMatch || undefined}
 							className={cn("h-8 w-40 bg-transparent px-1 text-base outline-none placeholder:text-subtle sm:w-52 sm:text-[13px] coarse:h-11", noMatch && "text-danger")}
 						/>
-						<Button variant="ghost" size="icon-sm" aria-label="Previous match" onClick={() => findNext(false)}>
+						<Button variant="ghost" size="icon-sm" aria-label={t("Previous match")} onClick={() => findNext(false)}>
 							<ChevronUp />
 						</Button>
-						<Button variant="ghost" size="icon-sm" aria-label="Next match" onClick={() => findNext(true)}>
+						<Button variant="ghost" size="icon-sm" aria-label={t("Next match")} onClick={() => findNext(true)}>
 							<ChevronDown />
 						</Button>
 						<Button
 							variant="ghost"
 							size="icon-sm"
-							aria-label="Close search"
+							aria-label={t("Close search")}
 							onClick={() => {
 								setSearchOpen(false);
 								searchRef.current?.clearDecorations();
@@ -415,22 +416,22 @@ export default function TerminalView({ session, blocked, fontSize, onFontSize, t
 				) : null}
 			</div>
 			{touchKeys ? (
-				<div className="scrollbar-none flex shrink-0 items-center gap-1.5 overflow-x-auto border-t bg-surface-2 px-2 py-1.5" role="toolbar" aria-label="Terminal keys">
+				<div className="scrollbar-none flex shrink-0 items-center gap-1.5 overflow-x-auto border-t bg-surface-2 px-2 py-1.5" role="toolbar" aria-label={t("Terminal keys")}>
 					<KeyButton label="Esc" onPress={send("\x1b")} />
 					<KeyButton label="Tab" onPress={send("\t")} />
 					<KeyButton label="Ctrl" active={mods.ctrl} onPress={() => setModifier("ctrl", !modifiers.current.ctrl)} />
 					<KeyButton label="Alt" active={mods.alt} onPress={() => setModifier("alt", !modifiers.current.alt)} />
 					<span aria-hidden className="mx-0.5 h-6 w-px shrink-0 bg-border-strong" />
-					<KeyButton label="Left arrow" onPress={arrow("left")}>
+					<KeyButton label={t("Left arrow")} onPress={arrow("left")}>
 						<ArrowLeft className="size-4" />
 					</KeyButton>
-					<KeyButton label="Down arrow" onPress={arrow("down")}>
+					<KeyButton label={t("Down arrow")} onPress={arrow("down")}>
 						<ArrowDown className="size-4" />
 					</KeyButton>
-					<KeyButton label="Up arrow" onPress={arrow("up")}>
+					<KeyButton label={t("Up arrow")} onPress={arrow("up")}>
 						<ArrowUp className="size-4" />
 					</KeyButton>
-					<KeyButton label="Right arrow" onPress={arrow("right")}>
+					<KeyButton label={t("Right arrow")} onPress={arrow("right")}>
 						<ArrowRight className="size-4" />
 					</KeyButton>
 					<span aria-hidden className="mx-0.5 h-6 w-px shrink-0 bg-border-strong" />
@@ -438,7 +439,7 @@ export default function TerminalView({ session, blocked, fontSize, onFontSize, t
 					<KeyButton label="~" onPress={send("~")} />
 					<KeyButton label="/" onPress={send("/")} />
 					<KeyButton label="-" onPress={send("-")} />
-					<KeyButton label="Paste" onPress={() => void controlsRef.current?.paste()}>
+					<KeyButton label={t("Paste")} onPress={() => void controlsRef.current?.paste()}>
 						<ClipboardPaste className="size-4" />
 					</KeyButton>
 				</div>

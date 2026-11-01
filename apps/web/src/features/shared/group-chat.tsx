@@ -3,6 +3,7 @@ import { BarChart3, Camera, Check, FileText, Film, Search, Users } from "lucide-
 import { type ComponentType, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { useOmpStateOptional, useOptionalOmpStore } from "@/features/session/omp/omp-store.ts";
 import { AGENT_MESSAGE_LIMIT } from "@/features/tasks/format";
+import { type Msg, msg, renderServerText, t, tr } from "@/i18n";
 import { useNode } from "@/lib/queries";
 import { hasFiles } from "@/lib/upload";
 import { cn, relativeTime } from "@/lib/utils";
@@ -22,13 +23,13 @@ import { CheckpointFacts, ModeLabel } from "./mode.tsx";
 // ───────────────────────────── header ─────────────────────────────
 
 function Avatar({ p, lead }: { p: Participant; lead: boolean }) {
-	const who = p.agentName ? `${p.agentName} on ${p.nodeName}` : p.nodeName;
-	const label = `${who}${lead ? " · lead" : ""} · ${NODE_STATUS_LABEL[p.nodeStatus]}`;
+	const who = p.agentName ? t("{agent} on {machine}", { agent: p.agentName, machine: p.nodeName }) : p.nodeName;
+	const label = t("{who}{lead} · {status}", { who, lead: lead ? ` · ${t("lead")}` : "", status: tr(NODE_STATUS_LABEL[p.nodeStatus]) });
 	return (
 		<Tip label={label}>
 			<span className="relative inline-grid" role="img" aria-label={label}>
 				<AuthorAvatar name={p.agentName ?? p.nodeName} hue={hueOf(p.nodeId, p.agentId)} agent={p.agentId !== null} badge={false} className={cn("size-7 coarse:size-8", lead && "shadow-[0_0_0_2px_var(--accent)]")} />
-				<StatusDot status={nodeDot(p.nodeStatus)} label={NODE_STATUS_LABEL[p.nodeStatus]} className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full shadow-[0_0_0_2px_var(--surface-1)] [&>span]:size-2.5" />
+				<StatusDot status={nodeDot(p.nodeStatus)} label={tr(NODE_STATUS_LABEL[p.nodeStatus])} className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full shadow-[0_0_0_2px_var(--surface-1)] [&>span]:size-2.5" />
 			</span>
 		</Tip>
 	);
@@ -41,16 +42,16 @@ function CheckpointsPopover({ shared, checkpoints, onOpenTeam }: { shared: Share
 	return (
 		<Popover>
 			<PopoverTrigger asChild>
-				<Button size="sm" variant="ghost" className="shrink-0 text-muted-foreground" aria-label="Checkpoints">
-					<Camera /> <span className="tabular max-sm:hidden">{last ? `#${last.seq} · ${relativeTime(last.at)}` : "No checkpoint"}</span>
+				<Button size="sm" variant="ghost" className="shrink-0 text-muted-foreground" aria-label={t("Checkpoints")}>
+					<Camera /> <span className="tabular max-sm:hidden">{last ? `#${last.seq} · ${relativeTime(last.at)}` : t("No checkpoint")}</span>
 				</Button>
 			</PopoverTrigger>
 			<PopoverContent align="end" className="w-80">
 				<div className="flex flex-col gap-2.5">
 					<p className="text-xs text-muted-foreground">
-						{shared.vcs === "git" ? "A checkpoint commits the lead's work to the shared branch and ships a snapshot to every machine in the group." : "A checkpoint bundles the working folder (no Git needed) and ships it with a snapshot to every machine in the group."}
+						{shared.vcs === "git" ? t("A checkpoint commits the lead's work to the shared branch and ships a snapshot to every machine in the group.") : t("A checkpoint bundles the working folder (no Git needed) and ships it with a snapshot to every machine in the group.")}
 					</p>
-					{recent.length === 0 ? <p className="text-xs text-subtle">No checkpoints yet.</p> : null}
+					{recent.length === 0 ? <p className="text-xs text-subtle">{t("No checkpoints yet.")}</p> : null}
 					<ul className="flex flex-col gap-1.5">
 						{recent.map((c) => {
 							const git = shared.vcs === "git";
@@ -61,10 +62,10 @@ function CheckpointsPopover({ shared, checkpoints, onOpenTeam }: { shared: Share
 									{c.commit || c.files ? <CheckpointFacts shared={shared} c={c} className="text-muted-foreground" /> : null}
 									{git && c.commit && c.pushed ? (
 										<span className="inline-flex items-center gap-0.5 text-success">
-											<Check className="size-3" aria-hidden /> pushed
+											<Check className="size-3" aria-hidden /> {t("pushed")}
 										</span>
 									) : git && c.commit ? (
-										<span className="text-warning">not pushed</span>
+										<span className="text-warning">{t("not pushed")}</span>
 									) : null}
 								</li>
 							);
@@ -73,11 +74,11 @@ function CheckpointsPopover({ shared, checkpoints, onOpenTeam }: { shared: Share
 					<div className="flex flex-wrap gap-2">
 						{shared.localRole === "driver" ? (
 							<Button size="sm" variant="outline" loading={now.isPending} onClick={() => now.mutate(undefined)}>
-								<Camera /> Checkpoint now
+								<Camera /> {t("Checkpoint now")}
 							</Button>
 						) : null}
 						<Button size="sm" variant="ghost" onClick={onOpenTeam}>
-							All checkpoints
+							{t("All checkpoints")}
 						</Button>
 					</div>
 				</div>
@@ -98,7 +99,7 @@ function BudgetChip({ left: budget }: { left: number }) {
 			<PopoverTrigger asChild>
 				<button
 					type="button"
-					aria-label={left === 0 ? "Agent messages used up on this machine" : `Agent messages left on this machine: ${left} of ${AGENT_MESSAGE_LIMIT}`}
+					aria-label={left === 0 ? t("Agent messages used up on this machine") : t("Agent messages left on this machine: {left} of {limit}", { left, limit: AGENT_MESSAGE_LIMIT })}
 					className={cn("inline-flex shrink-0 items-center gap-1.5 rounded-lg px-1.5 py-1 text-2xs outline-none hover:bg-surface-2 focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:min-h-11", low ? "text-warning" : "text-muted-foreground")}
 				>
 					<svg viewBox="0 0 18 18" className="size-4 -rotate-90" aria-hidden>
@@ -112,7 +113,7 @@ function BudgetChip({ left: budget }: { left: number }) {
 			</PopoverTrigger>
 			<PopoverContent align="end" className="w-72">
 				<p className="text-xs text-muted-foreground">
-					<span className={cn("font-medium", left === 0 ? "text-warning" : "text-foreground")}>{left === 0 ? "Agent messages used up — a person must continue." : `${left} of ${AGENT_MESSAGE_LIMIT} agent messages left on this machine.`}</span> Each machine lets its agents post this many messages in a group, so two agents cannot talk forever. A person can always continue the chat, and your message resets the count.
+					<span className={cn("font-medium", left === 0 ? "text-warning" : "text-foreground")}>{left === 0 ? t("Agent messages used up — a person must continue.") : t("{left} of {limit} agent messages left on this machine.", { left, limit: AGENT_MESSAGE_LIMIT })}</span> {t("Each machine lets its agents post this many messages in a group, so two agents cannot talk forever. A person can always continue the chat, and your message resets the count.")}
 				</p>
 			</PopoverContent>
 		</Popover>
@@ -130,8 +131,8 @@ function ChatHeader({ detail, onOpenTeam }: { detail: SharedSessionDetail; onOpe
 				<button
 					type="button"
 					onClick={onOpenTeam}
-					aria-label={lead ? `Open the team. ${members.length} in the group, lead ${participantLabel(lead)}` : "Open the team"}
-					title={lead ? `Lead: ${participantLabel(lead)}` : undefined}
+					aria-label={lead ? t("Open the team. {count} in the group, lead {lead}", { count: members.length, lead: participantLabel(lead) }) : t("Open the team")}
+					title={lead ? t("Lead: {name}", { name: participantLabel(lead) }) : undefined}
 					className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-0.5 text-left outline-none hover:bg-surface-2 focus-visible:bg-surface-2 coarse:py-1.5"
 				>
 					<span className="flex shrink-0 -space-x-1.5">
@@ -140,11 +141,11 @@ function ChatHeader({ detail, onOpenTeam }: { detail: SharedSessionDetail; onOpe
 						))}
 					</span>
 					<span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-						<span className="shrink-0 font-medium text-foreground">{members.length} in the group</span>
+						<span className="shrink-0 font-medium text-foreground">{t("{count} in the group", { count: members.length })}</span>
 						{lead && leadName ? (
 							<span className="flex min-w-0 items-center gap-1.5 max-sm:hidden">
 								<span aria-hidden>·</span>
-								<span className="shrink-0">lead</span>
+								<span className="shrink-0">{t("lead")}</span>
 								<span className="truncate font-medium text-foreground">{leadName}</span>
 								{lead.agentName ? <MachineChip name={lead.nodeName} /> : null}
 							</span>
@@ -163,11 +164,11 @@ function ChatHeader({ detail, onOpenTeam }: { detail: SharedSessionDetail; onOpe
 
 // ───────────────────────────── empty state ─────────────────────────────
 
-const EXAMPLES: Array<{ icon: ComponentType<{ className?: string }>; title: string; prompt: string }> = [
-	{ icon: Search, title: "Research", prompt: "Research how teams keep long-running AI agents reliable. Compare three approaches, cite your sources and end with a recommendation." },
-	{ icon: FileText, title: "Report", prompt: "Write a one-page report on what we have learned so far, as a PDF, and share it here." },
-	{ icon: BarChart3, title: "Chart", prompt: "Plot the numbers from the data files in the project as a chart and show it in the chat." },
-	{ icon: Film, title: "Media", prompt: "Make a short screen recording or a screenshot of the finished feature and share it here." },
+const EXAMPLES: Array<{ icon: ComponentType<{ className?: string }>; title: Msg; prompt: Msg }> = [
+	{ icon: Search, title: msg("Research"), prompt: msg("Research how teams keep long-running AI agents reliable. Compare three approaches, cite your sources and end with a recommendation.") },
+	{ icon: FileText, title: msg("Report"), prompt: msg("Write a one-page report on what we have learned so far, as a PDF, and share it here.") },
+	{ icon: BarChart3, title: msg("Chart"), prompt: msg("Plot the numbers from the data files in the project as a chart and show it in the chat.") },
+	{ icon: Film, title: msg("Media"), prompt: msg("Make a short screen recording or a screenshot of the finished feature and share it here.") },
 ];
 
 function GroupEmpty({ onPick }: { onPick: (text: string) => void }) {
@@ -178,23 +179,23 @@ function GroupEmpty({ onPick }: { onPick: (text: string) => void }) {
 					<Users className="size-5" aria-hidden />
 				</span>
 				<div className="flex flex-col gap-1.5">
-					<h2 className="text-[15px] font-semibold">Nobody has said anything yet</h2>
+					<h2 className="text-[15px] font-semibold">{t("Nobody has said anything yet")}</h2>
 					<p className="text-[13px] text-muted-foreground">
-						People and agents on every machine talk here. Messages go to the lead agent unless you @mention someone or write @all. Agents answer with text, files, images, charts and diagrams, and they all show up in this chat.
+						{t("People and agents on every machine talk here. Messages go to the lead agent unless you @mention someone or write @all. Agents answer with text, files, images, charts and diagrams, and they all show up in this chat.")}
 					</p>
 				</div>
 				<ul className="grid w-full gap-2 sm:grid-cols-2">
 					{EXAMPLES.map((x) => (
-						<li key={x.title}>
+						<li key={tr(x.title)}>
 							<button
 								type="button"
-								onClick={() => onPick(x.prompt)}
+								onClick={() => onPick(tr(x.prompt))}
 								className="flex min-h-11 w-full flex-col gap-1 rounded-xl bg-surface-1 p-3 text-left shadow-[inset_0_0_0_1px_var(--border)] outline-none transition-colors hover:bg-surface-2 focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]"
 							>
 								<span className="flex items-center gap-1.5 text-xs font-medium">
-									<x.icon className="size-3.5 text-accent" aria-hidden /> {x.title}
+									<x.icon className="size-3.5 text-accent" aria-hidden /> {tr(x.title)}
 								</span>
-								<span className="line-clamp-3 text-xs text-muted-foreground">{x.prompt}</span>
+								<span className="line-clamp-3 text-xs text-muted-foreground">{tr(x.prompt)}</span>
 							</button>
 						</li>
 					))}
@@ -292,7 +293,7 @@ export function GroupChat({
 			<GroupComposer detail={detail} uploads={uploads} keyboardOpen={keyboardOpen} fill={fill} />
 			{dragging ? (
 				<div aria-hidden className="pointer-events-none absolute inset-2 z-20 grid place-items-center rounded-2xl bg-accent-soft/90 text-sm font-medium text-accent shadow-[inset_0_0_0_2px_var(--accent)]">
-					Drop files to share them with the group
+					{t("Drop files to share them with the group")}
 				</div>
 			) : null}
 		</div>
@@ -310,14 +311,14 @@ export function GroupBar({ detail, onOpenChat, className }: { detail: SharedSess
 				<span className="min-w-0 flex-1 truncate">
 					{last ? (
 						<>
-							<span className="font-medium text-foreground">{last.author.kind === "system" ? "System" : last.author.kind === "agent" ? `${last.author.agentName ?? "agent"}@${last.author.nodeName}` : `human@${last.author.nodeName}`}</span>: {last.text || `shared ${last.attachments.length} file${last.attachments.length === 1 ? "" : "s"}`}
+							<span className="font-medium text-foreground">{last.author.kind === "system" ? t("System") : last.author.kind === "agent" ? `${last.author.agentName ?? t("agent")}@${last.author.nodeName}` : `${t("human")}@${last.author.nodeName}`}</span>: {last.text ? (last.kind === "system" || last.author.kind === "system" ? renderServerText(last.text, last.i18n) : last.text) : t("{count, plural, one {shared # file} other {shared # files}}", { count: last.attachments.length })}
 						</>
 					) : (
-						"This is a read-only workspace — talk to the group in the group chat"
+						t("This is a read-only workspace — talk to the group in the group chat")
 					)}
 				</span>
 				{unread > 0 ? <span className="tabular grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-2xs font-semibold text-accent-foreground">{unread}</span> : null}
-				<span className="shrink-0 font-medium text-accent">Open group chat</span>
+				<span className="shrink-0 font-medium text-accent">{t("Open group chat")}</span>
 			</button>
 		</div>
 	);

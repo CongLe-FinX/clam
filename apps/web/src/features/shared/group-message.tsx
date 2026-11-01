@@ -6,7 +6,8 @@ import { LazyMarkdown } from "@/components/lazy-markdown";
 import { attachmentAssets } from "@/components/rich/assets.ts";
 import { DeliveryMark } from "@/features/tasks/components";
 import { KIND_META } from "@/features/tasks/format";
-import { cn } from "@/lib/utils";
+import { renderServerText, t, tr } from "@/i18n";
+import { cn, formatDateTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { AttachmentCards } from "./attachments.tsx";
 import { clockTime, remoteSessionUrl } from "./format.ts";
@@ -31,12 +32,12 @@ export function workspaceOf(shared: SharedSession, nodeId: string, selfNodeId: s
 
 /** Who a message is addressed to, for the header (`null` = the default, the lead). */
 export function recipients(m: SharedMessage, participants: Participant[]): string | null {
-	if (m.to.mode === "all") return "everyone";
+	if (m.to.mode === "all") return t("everyone");
 	if (m.to.mode === "agents" && m.to.agents.length > 0) {
 		return m.to.agents
 			.map((a) => {
 				const p = participants.find((x) => x.agentId === a.agentId && x.nodeId === a.nodeId);
-				if (!p) return "agent";
+				if (!p) return t("agent");
 				const name = p.agentName ?? p.nodeName;
 				// Same agent name on several machines (the default agent): the machine tells them apart.
 				return participants.filter((x) => x.agentName === p.agentName).length > 1 ? `${name} (${p.nodeName})` : name;
@@ -51,7 +52,7 @@ function ExternalLive({ target }: { target: Extract<WorkspaceTarget, { kind: "ex
 	if (!ui) return null;
 	return (
 		<a href={remoteSessionUrl(ui, target.sessionId)} target="_blank" rel="noreferrer noopener" className={LIVE_LINK}>
-			<ExternalLink className="size-3" aria-hidden /> Live view on {target.nodeName}
+			<ExternalLink className="size-3" aria-hidden /> {t("Live view on {name}", { name: target.nodeName })}
 		</a>
 	);
 }
@@ -107,7 +108,7 @@ export const GroupMessage = memo(function GroupMessage({ message, sharedId, grou
 			{day ? <DayDivider label={day} /> : null}
 			{system ? (
 				<div data-message-id={message.id} data-author-kind="system" className={cn("flex justify-center py-1", fresh && ENTER)}>
-					<p className="max-w-[92%] rounded-full bg-surface-2 px-3 py-1 text-center text-2xs leading-snug text-muted-foreground [overflow-wrap:anywhere]">{text}</p>
+					<p className="max-w-[92%] rounded-full bg-surface-2 px-3 py-1 text-center text-2xs leading-snug text-muted-foreground [overflow-wrap:anywhere]">{renderServerText(text, message.i18n)}</p>
 				</div>
 			) : (
 				<AuthorLine
@@ -125,7 +126,7 @@ export const GroupMessage = memo(function GroupMessage({ message, sharedId, grou
 						<>
 							{hasText ? (
 								<div
-									title={grouped ? new Date(created).toLocaleString() : undefined}
+									title={grouped ? formatDateTime(created) : undefined}
 									className={cn(
 										"min-w-0 rounded-2xl px-3.5 py-2 text-sm leading-relaxed shadow-[inset_0_0_0_1px_var(--border)]",
 										wide ? "max-w-full" : "max-w-[min(100%,72ch)]",
@@ -161,8 +162,8 @@ function AuthorLine({
 }: Pick<GroupMessageProps, "message" | "grouped" | "mine" | "lead" | "to" | "hue" | "target" | "fresh" | "onOpenWorkspace"> & { created: number; body: ReactNode }) {
 	const { author } = message;
 	const agent = author.kind === "agent";
-	const name = mine ? "You" : agent ? (author.agentName ?? "agent") : "Person";
-	const fullId = agent ? `${author.agentName ?? "agent"}@${author.nodeName}` : `${mine ? "You" : "Person"}@${author.nodeName}`;
+	const name = mine ? t("You") : agent ? (author.agentName ?? t("agent")) : t("Person");
+	const fullId = `${name}@${author.nodeName}`;
 	const legacy = message.kind !== "chat" && message.kind !== "reply" && message.kind !== "system" ? KIND_META[message.kind] : null;
 	return (
 		<div data-message-id={message.id} data-author-kind={author.kind} style={hueStyle(hue)} className={cn("group/msg flex items-start gap-2.5", mine && "flex-row-reverse", fresh && ENTER)}>
@@ -180,20 +181,20 @@ function AuthorLine({
 							{name}
 						</span>
 						<MachineChip name={author.nodeName} />
-						{lead ? <Badge variant="accent">lead</Badge> : null}
-						{legacy ? <Badge variant={legacy.variant}>{legacy.label}</Badge> : null}
+						{lead ? <Badge variant="accent">{t("lead")}</Badge> : null}
+						{legacy ? <Badge variant={legacy.variant}>{tr(legacy.label)}</Badge> : null}
 						{to ? <span className="max-w-[60vw] truncate text-subtle">→ {to}</span> : null}
-						<time dateTime={message.createdAt} className="tabular text-subtle" title={new Date(created).toLocaleString()}>
+						<time dateTime={message.createdAt} className="tabular text-subtle" title={formatDateTime(created)}>
 							{clockTime(created)}
 						</time>
 						{target?.kind === "here" ? (
 							<button type="button" onClick={onOpenWorkspace} className={LIVE_LINK}>
-								<ExternalLink className="size-3" aria-hidden /> Live view
+								<ExternalLink className="size-3" aria-hidden /> {t("Live view")}
 							</button>
 						) : null}
 						{target?.kind === "session" ? (
 							<Link to="/sessions/$sessionId" params={{ sessionId: target.sessionId }} className={LIVE_LINK}>
-								<ExternalLink className="size-3" aria-hidden /> Live view
+								<ExternalLink className="size-3" aria-hidden /> {t("Live view")}
 							</Link>
 						) : null}
 						{target?.kind === "external" ? <ExternalLive target={target} /> : null}

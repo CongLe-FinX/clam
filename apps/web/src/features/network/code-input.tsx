@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { t } from "@/i18n";
 
 export const CODE_LENGTH = 8;
 const sanitize = (raw: string): string => raw.replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, CODE_LENGTH);
@@ -60,7 +61,7 @@ export function CodeInput({ id, value, onChange, invalid, autoFocus, disabled }:
 				autoCorrect="off"
 				autoComplete="one-time-code"
 				spellCheck={false}
-				aria-label="Invitation code, 8 characters"
+				aria-label={t("Invitation code, 8 characters")}
 				aria-invalid={invalid}
 				data-testid="code-input"
 				className="absolute inset-0 size-full cursor-text bg-transparent text-transparent caret-transparent opacity-0 outline-none"

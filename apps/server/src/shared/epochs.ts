@@ -1,6 +1,6 @@
 import type { wire } from "@clam/agent-network";
 import { NetworkError, wire as wireSchemas } from "@clam/agent-network";
-import type { SharedSession } from "@clam/contracts";
+import { i18nMsg, type SharedSession } from "@clam/contracts";
 import { agentSessions, agents, projects } from "@clam/database";
 import { buildContinuationNote, buildMeshMessage, slugify } from "@clam/task-engine";
 import type { SetupReport } from "@clam/handoff-engine";
@@ -122,21 +122,21 @@ export class EpochService implements EpochApi {
 
 	private async performTakeover(sharedId: string, options: { reason: "takeover" | "transfer"; force: boolean; checkpointSeq?: number; interrupted?: boolean }): Promise<void> {
 		const shared = this.store.get(sharedId);
-		if (shared.state !== "active") throw new ApiError(409, "not_a_participant", "This node left the shared session");
-		if (shared.localRole === "driver") throw new ApiError(409, "already_driver", "This node already drives the shared session");
-		if (!shared.localProjectId) throw new ApiError(409, "no_local_clone", "No local clone of the repository is linked to this shared session");
+		if (shared.state !== "active") throw new ApiError(409, "not_a_participant", i18nMsg("This node left the shared session"));
+		if (shared.localRole === "driver") throw new ApiError(409, "already_driver", i18nMsg("This node already drives the shared session"));
+		if (!shared.localProjectId) throw new ApiError(409, "no_local_clone", i18nMsg("No local clone of the repository is linked to this shared session"));
 		const project = this.ctx.db.select().from(projects).where(eq(projects.id, shared.localProjectId)).get();
-		if (!project) throw new ApiError(409, "no_local_clone", "The local clone of this shared session no longer exists");
+		if (!project) throw new ApiError(409, "no_local_clone", i18nMsg("The local clone of this shared session no longer exists"));
 		const driver = this.ctx.network.peers.row(shared.driverNodeId);
 		const driverOnline = driver !== undefined && (driver.status === "online" || driver.status === "degraded");
 		if (options.reason === "takeover" && driverOnline && !options.force) {
-			throw new ApiError(409, "driver_online", `${driver.name} is the driver and is online. Ask it to transfer the work, or confirm continuing here anyway (it will then become a participant).`, { driverNodeId: driver.id });
+			throw new ApiError(409, "driver_online", i18nMsg("{name} is the driver and is online. Ask it to transfer the work, or confirm continuing here anyway (it will then become a participant).", { name: driver.name }), { driverNodeId: driver.id });
 		}
 		const held = options.checkpointSeq !== undefined ? this.store.checkpoint(sharedId, options.checkpointSeq) : this.store.latestHeldCheckpoint(sharedId);
-		if (!held || !held.snapshotPath || !held.snapshotSha256) throw new ApiError(409, "no_snapshot", "No session snapshot has been received yet; a takeover needs one. Wait for the driver's next checkpoint.");
+		if (!held || !held.snapshotPath || !held.snapshotSha256) throw new ApiError(409, "no_snapshot", i18nMsg("No session snapshot has been received yet; a takeover needs one. Wait for the driver's next checkpoint."));
 
 		const filesMode = shared.vcs === "files";
-		if (filesMode && !held.filesPath) throw new ApiError(409, "no_files", "No folder bundle has been received for that checkpoint yet; wait for the driver's next checkpoint.");
+		if (filesMode && !held.filesPath) throw new ApiError(409, "no_files", i18nMsg("No folder bundle has been received for that checkpoint yet; wait for the driver's next checkpoint."));
 		// Git mode: align the clone with the shared branch. Files mode: restore the folder from the checkpoint's bundle (refuses on local edits unless forced; nothing is deleted).
 		const aligned = filesMode ? { headCommit: null, treeNote: null } : await this.alignWorkingTree(shared, held);
 		const restored = filesMode ? await this.hub.files.restore(shared, held, { force: options.force, reason: options.reason }) : null;
@@ -144,7 +144,7 @@ export class EpochService implements EpochApi {
 		try {
 			sessionFile = (await this.ctx.ompCli.sessionUnpack(this.hub.checkpoints.snapshotFile(sharedId, held.seq).path, project.path)).sessionFile;
 		} catch (error) {
-			if (error instanceof AgentRuntimeError && error.code === "invalid_archive") throw new ApiError(409, "snapshot_invalid", `The session snapshot is not usable: ${error.message}`);
+			if (error instanceof AgentRuntimeError && error.code === "invalid_archive") throw new ApiError(409, "snapshot_invalid", i18nMsg("The session snapshot is not usable: {error}", { error: error.message }));
 			throw error;
 		}
 		const selfRow = this.store.participant(sharedId, this.self);
@@ -197,7 +197,7 @@ export class EpochService implements EpochApi {
 			}
 		}
 		this.hub.mirror.publish(sharedId);
-		this.hub.discussion.note(sharedId, options.reason === "transfer" ? `${nodeName} took over as driver (epoch ${epoch}) from ${oldDriverName}.` : `${nodeName} continues as driver (epoch ${epoch}) from checkpoint ${held.seq}; ${oldDriverName} did not hand over.`);
+		this.hub.discussion.note(sharedId, options.reason === "transfer" ? i18nMsg("{name} took over as driver (epoch {epoch}) from {old}.", { name: nodeName, epoch, old: oldDriverName }) : i18nMsg("{name} continues as driver (epoch {epoch}) from checkpoint {seq}; {old} did not hand over.", { name: nodeName, epoch, seq: held.seq, old: oldDriverName }));
 		this.hub.changed(sharedId);
 		const text = buildContinuationNote({
 			sharedSessionId: sharedId,
@@ -293,18 +293,18 @@ export class EpochService implements EpochApi {
 		const { gitService } = this.ctx;
 		if (!held.commit) return { headCommit: null, treeNote: "The checkpoint recorded no commit, so the working tree was left as it is." };
 		let status = await gitService.status(projectId);
-		if (!status.isRepo) throw new ApiError(409, "not_a_git_repo", "The local clone is not a git repository");
-		if (status.operation) throw new ApiError(409, "git_operation_in_progress", `A ${status.operation} is in progress in the local clone; finish or abort it, then continue.`);
+		if (!status.isRepo) throw new ApiError(409, "not_a_git_repo", i18nMsg("The local clone is not a git repository"));
+		if (status.operation) throw new ApiError(409, "git_operation_in_progress", i18nMsg("A {operation} is in progress in the local clone; finish or abort it, then continue.", { operation: status.operation }));
 		try {
 			await gitService.fetch(projectId);
 		} catch (error) {
-			throw new ApiError(409, "git_fetch_failed", `Could not fetch the repository (is origin reachable?): ${errorText(error, 200)}`);
+			throw new ApiError(409, "git_fetch_failed", i18nMsg("Could not fetch the repository (is origin reachable?): {error}", { error: errorText(error, 200) }));
 		}
 		if (status.branch !== shared.branch) {
 			try {
 				status = await gitService.checkout(projectId, shared.branch as string);
 			} catch (error) {
-				throw new ApiError(409, "git_checkout_failed", `Could not check out ${shared.branch}: ${errorText(error, 300)} Local changes were left untouched.`);
+				throw new ApiError(409, "git_checkout_failed", i18nMsg("Could not check out {branch}: {error} Local changes were left untouched.", { branch: String(shared.branch), error: errorText(error, 300) }));
 			}
 		}
 		try {
@@ -329,15 +329,15 @@ export class EpochService implements EpochApi {
 	async receiveTransfer(peerId: string, sharedId: string, request: wire.SharedTransferRequest): Promise<wire.SharedTransferAccepted> {
 		const shared = this.store.find(sharedId);
 		if (!shared || shared.state !== "active") throw ApiError.notFound("Shared session");
-		if (peerId !== shared.driverNodeId || shared.localRole === "driver") throw new ApiError(403, "forbidden", "Only the driver of the shared session may hand it over");
-		if (request.epoch !== shared.epoch) throw new ApiError(409, "stale_epoch", `The transfer carries epoch ${request.epoch}; the shared session is at epoch ${shared.epoch}`, { currentEpoch: shared.epoch });
+		if (peerId !== shared.driverNodeId || shared.localRole === "driver") throw new ApiError(403, "forbidden", i18nMsg("Only the driver of the shared session may hand it over"));
+		if (request.epoch !== shared.epoch) throw new ApiError(409, "stale_epoch", i18nMsg("The transfer carries epoch {epoch}; the shared session is at epoch {current}", { epoch: request.epoch, current: shared.epoch }), { currentEpoch: shared.epoch });
 		const held = this.store.checkpoint(sharedId, request.checkpointSeq);
-		if (!held?.snapshotPath || held.snapshotSha256 !== request.sha256 || (held.files !== null && !held.filesPath)) throw new ApiError(409, "no_snapshot", "This node does not hold the snapshot (and folder bundle) of that checkpoint");
+		if (!held?.snapshotPath || held.snapshotSha256 !== request.sha256 || (held.files !== null && !held.filesPath)) throw new ApiError(409, "no_snapshot", i18nMsg("This node does not hold the snapshot (and folder bundle) of that checkpoint"));
 		this.track(
 			this.lock
 				.run(sharedId, () => this.performTakeover(sharedId, { reason: "transfer", force: true, checkpointSeq: request.checkpointSeq, interrupted: request.interrupted === true }))
 				.catch((error: unknown) => {
-					this.hub.discussion.note(sharedId, `Taking over from ${shared.driverNodeName} failed: ${errorText(error, 300)}`);
+					this.hub.discussion.note(sharedId, i18nMsg("Taking over from {name} failed: {error}", { name: shared.driverNodeName, error: errorText(error, 300) }));
 					this.hub.log.warn({ err: errorText(error), sharedId }, "transfer takeover failed");
 				}),
 		);
@@ -351,11 +351,11 @@ export class EpochService implements EpochApi {
 			const shared = this.store.find(sharedId);
 			if (!shared) throw ApiError.notFound("Shared session");
 			const sender = this.store.participant(sharedId, peerId);
-			if (!sender || sender.state !== "active") throw new ApiError(403, "forbidden", "Only participants of the shared session may announce a new driver");
-			if (notice.epoch < shared.epoch) throw new ApiError(409, "stale_epoch", `The notice carries epoch ${notice.epoch}; the shared session is at epoch ${shared.epoch}`, { currentEpoch: shared.epoch, driverNodeId: shared.driverNodeId });
+			if (!sender || sender.state !== "active") throw new ApiError(403, "forbidden", i18nMsg("Only participants of the shared session may announce a new driver"));
+			if (notice.epoch < shared.epoch) throw new ApiError(409, "stale_epoch", i18nMsg("The notice carries epoch {epoch}; the shared session is at epoch {current}", { epoch: notice.epoch, current: shared.epoch }), { currentEpoch: shared.epoch, driverNodeId: shared.driverNodeId });
 			if (notice.epoch === shared.epoch) {
 				if (shared.driverNodeId === peerId) return; // a duplicate delivery
-				throw new ApiError(409, "split_brain", `Two nodes claim to drive at epoch ${notice.epoch}`, { driverNodeId: shared.driverNodeId });
+				throw new ApiError(409, "split_brain", i18nMsg("Two nodes claim to drive at epoch {epoch}", { epoch: notice.epoch }), { driverNodeId: shared.driverNodeId });
 			}
 			const peer = this.ctx.network.peers.row(peerId);
 			await this.apply(shared, {
@@ -485,7 +485,7 @@ export class EpochService implements EpochApi {
 			this.hub.sharing.ensureParticipantAgent(sharedId);
 			void this.hub.sharing.briefPending();
 			this.store.patchMeta(sharedId, { pendingFormerDriver: null });
-			if (rescue) this.hub.discussion.note(sharedId, `${this.hub.nodeName()} had work that is not on the shared branch; it was saved on ${rescue}.`);
+			if (rescue) this.hub.discussion.note(sharedId, i18nMsg("{node} had work that is not on the shared branch; it was saved on {branch}.", { node: this.hub.nodeName(), branch: rescue }));
 			this.hub.changed(sharedId);
 		});
 	}
@@ -502,7 +502,7 @@ export class EpochService implements EpochApi {
 			const unpushed = status.upstream !== null && status.ahead > 0;
 			if (!dirty && !unpushed) return null;
 			if (status.operation) {
-				this.hub.discussion.note(shared.id, `A ${status.operation} is in progress in the clone, so its work could not be moved to a rescue branch; nothing was discarded.`);
+				this.hub.discussion.note(shared.id, i18nMsg("A {operation} is in progress in the clone, so its work could not be moved to a rescue branch; nothing was discarded.", { operation: status.operation }));
 				return null;
 			}
 			const name = `clam/rescue/${shared.id}-${slugify(this.hub.nodeName(), 30)}`;
@@ -523,12 +523,12 @@ export class EpochService implements EpochApi {
 			try {
 				await gitService.push(projectId, { setUpstream: true });
 			} catch (error) {
-				this.hub.discussion.note(shared.id, `The rescue branch ${name} could not be pushed (${errorText(error, 160)}); it is committed locally.`);
+				this.hub.discussion.note(shared.id, i18nMsg("The rescue branch {name} could not be pushed ({error}); it is committed locally.", { name, error: errorText(error, 160) }));
 			}
 			return name;
 		} catch (error) {
 			this.hub.log.warn({ err: errorText(error), sharedId: shared.id }, "rescuing the work of the former driver failed; nothing was discarded");
-			this.hub.discussion.note(shared.id, `Saving the former driver's work on a rescue branch failed: ${errorText(error, 200)}. The clone was not touched further.`);
+			this.hub.discussion.note(shared.id, i18nMsg("Saving the former driver's work on a rescue branch failed: {error}. The clone was not touched further.", { error: errorText(error, 200) }));
 			return null;
 		}
 	}

@@ -1,5 +1,6 @@
 import { ChevronDown, PanelRight, Users } from "lucide-react";
 import { memo, useMemo, useState } from "react";
+import { t } from "@/i18n";
 import { cn, formatCost } from "@/lib/utils";
 import { Tip } from "@/ui/tooltip";
 import { Skeleton } from "@/ui/skeleton";
@@ -20,8 +21,8 @@ function plannedTasks(args: unknown): PlannedTask[] {
 	const out: PlannedTask[] = [];
 	for (const raw of items) {
 		if (!raw || typeof raw !== "object") continue;
-		const t = raw as { name?: unknown; agent?: unknown; task?: unknown };
-		out.push({ name: typeof t.name === "string" && t.name ? t.name : `Agent ${out.length + 1}`, agent: typeof t.agent === "string" && t.agent ? t.agent : "task", task: typeof t.task === "string" ? t.task : "" });
+		const item = raw as { name?: unknown; agent?: unknown; task?: unknown };
+		out.push({ name: typeof item.name === "string" && item.name ? item.name : t("Agent {number}", { number: out.length + 1 }), agent: typeof item.agent === "string" && item.agent ? item.agent : "task", task: typeof item.task === "string" ? item.task : "" });
 	}
 	return out;
 }
@@ -35,7 +36,7 @@ function PlannedRow({ planned, index, settled }: { planned: PlannedTask; index: 
 					<span className="min-w-0 truncate text-[13px] font-semibold">{planned.name}</span>
 					<span className="shrink-0 rounded bg-surface-3 px-1.5 py-0.5 text-2xs text-muted-foreground">{planned.agent}</span>
 					<span className="flex-1" />
-					{settled ? <span className="shrink-0 rounded-md bg-surface-3 px-1.5 py-0.5 text-2xs font-medium leading-none text-muted-foreground">No live data</span> : <StatusChip status="pending" />}
+					{settled ? <span className="shrink-0 rounded-md bg-surface-3 px-1.5 py-0.5 text-2xs font-medium leading-none text-muted-foreground">{t("No live data")}</span> : <StatusChip status="pending" />}
 				</span>
 				{planned.task ? <span className="line-clamp-2 break-words text-xs text-muted-foreground">{planned.task}</span> : null}
 			</div>
@@ -78,10 +79,10 @@ export const TeamCard = memo(function TeamCard({ store, toolCallId, args, toolRu
 					<span aria-hidden className="grid size-6 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
 						<Users className="size-3.5" />
 					</span>
-					<span className="text-[13px] font-semibold">Team</span>
+					<span className="text-[13px] font-semibold">{t("Team")}</span>
 					{count > 0 ? (
 						<span className="tabular text-xs text-muted-foreground">
-							{count} {count === 1 ? "agent" : "agents"}
+							{t("{count, plural, one {# agent} other {# agents}}", { count })}
 						</span>
 					) : null}
 					{running > 0 ? (
@@ -90,19 +91,19 @@ export const TeamCard = memo(function TeamCard({ store, toolCallId, args, toolRu
 								<span className="absolute inline-flex size-full animate-[clam-pulse-ring_1.6s_ease-out_infinite] rounded-full bg-accent" />
 								<span className="relative size-1.5 rounded-full bg-accent" />
 							</span>
-							{running} running
+							{t("{count} running", { count: running })}
 						</span>
 					) : done ? (
-						<span className="rounded-md bg-success/12 px-1.5 py-0.5 text-2xs font-medium text-success">All finished</span>
+						<span className="rounded-md bg-success/12 px-1.5 py-0.5 text-2xs font-medium text-success">{t("All finished")}</span>
 					) : null}
 					<span className="flex-1" />
 					{cost > 0 ? <span className="tabular font-mono text-2xs text-subtle">{formatCost(cost)}</span> : null}
 					<ChevronDown className={cn("size-3.5 shrink-0 text-subtle transition-transform duration-150", !open && "-rotate-90")} aria-hidden />
 				</button>
-				<Tip label="All subagents in the side panel">
+				<Tip label={t("All subagents in the side panel")}>
 					<button
 						type="button"
-						aria-label="Show all subagents in the side panel"
+						aria-label={t("Show all subagents in the side panel")}
 						onClick={() => store.openPanel()}
 						className="grid size-7 shrink-0 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground focus-visible:bg-surface-3 coarse:size-11"
 					>
@@ -119,7 +120,7 @@ export const TeamCard = memo(function TeamCard({ store, toolCallId, args, toolRu
 						<PlannedRow key={`planned:${p.name}`} planned={p} index={team.length + i} settled={!toolRunning} />
 					))}
 					{waiting || loading ? (
-						<div className="flex items-center gap-3 px-3 py-3" aria-busy="true" aria-label="Spawning agents">
+						<div className="flex items-center gap-3 px-3 py-3" aria-busy="true" aria-label={t("Spawning agents")}>
 							<Skeleton className="size-8 rounded-lg" />
 							<div className="flex flex-1 flex-col gap-1.5">
 								<Skeleton className="h-3.5 w-1/3" />
@@ -127,7 +128,7 @@ export const TeamCard = memo(function TeamCard({ store, toolCallId, args, toolRu
 							</div>
 						</div>
 					) : null}
-					{team.length === 0 && planned.length === 0 && !toolRunning && loaded ? <p className="px-3 py-3 text-xs text-muted-foreground">No subagents were reported for this call.</p> : null}
+					{team.length === 0 && planned.length === 0 && !toolRunning && loaded ? <p className="px-3 py-3 text-xs text-muted-foreground">{t("No subagents were reported for this call.")}</p> : null}
 				</div>
 			) : null}
 		</div>

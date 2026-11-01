@@ -1,22 +1,23 @@
 import type { Handoff, SetupCommand } from "@clam/contracts";
 import { Check, Loader2, ShieldQuestion, X } from "lucide-react";
 import { useEffect, useRef } from "react";
+import { type Msg, msg, t, tr } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
 import type { HandoffActions } from "./actions.ts";
 
-const STATE: Record<SetupCommand["state"], { label: string; variant: "neutral" | "accent" | "success" | "warning" | "danger" }> = {
-	pending_approval: { label: "Needs approval", variant: "warning" },
-	approved: { label: "Approved", variant: "accent" },
-	denied: { label: "Denied", variant: "danger" },
-	running: { label: "Running", variant: "accent" },
-	succeeded: { label: "Succeeded", variant: "success" },
-	failed: { label: "Failed", variant: "danger" },
-	skipped: { label: "Skipped", variant: "neutral" },
+const STATE: Record<SetupCommand["state"], { label: Msg; variant: "neutral" | "accent" | "success" | "warning" | "danger" }> = {
+	pending_approval: { label: msg("Needs approval"), variant: "warning" },
+	approved: { label: msg("Approved"), variant: "accent" },
+	denied: { label: msg("Denied"), variant: "danger" },
+	running: { label: msg("Running"), variant: "accent" },
+	succeeded: { label: msg("Succeeded"), variant: "success" },
+	failed: { label: msg("Failed"), variant: "danger" },
+	skipped: { label: msg("Skipped"), variant: "neutral" },
 };
-const PURPOSE: Record<SetupCommand["purpose"], string> = { install: "Install", setup: "Setup", check: "Check" };
+const PURPOSE: Record<SetupCommand["purpose"], Msg> = { install: msg("Install"), setup: msg("Setup"), check: msg("Check") };
 
 function OutputTail({ text }: { text: string }) {
 	const ref = useRef<HTMLPreElement>(null);
@@ -29,7 +30,7 @@ function OutputTail({ text }: { text: string }) {
 		<pre
 			ref={ref}
 			tabIndex={0}
-			aria-label="Command output"
+			aria-label={t("Command output")}
 			className="scrollbar-thin max-h-48 overflow-auto whitespace-pre-wrap break-all rounded-lg bg-surface-0 p-2.5 font-mono text-xs leading-relaxed text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		>
 			{text}
@@ -51,17 +52,17 @@ export function SetupPanel({ h, actions }: { h: Handoff; actions: HandoffActions
 			<CardHeader>
 				<div className="min-w-0">
 					<CardTitle className="flex items-center gap-1.5">
-						<ShieldQuestion className="size-4 text-subtle" aria-hidden /> Setup commands
+						<ShieldQuestion className="size-4 text-subtle" aria-hidden /> {t("Setup commands")}
 					</CardTitle>
 					<p className="mt-1 text-xs text-muted-foreground">
 						{h.role === "target"
-							? "These run in the restored folder on this machine. Read them before approving; they come from the source's project."
-							: "The target machine runs these to set up the work. It reviews them first."}
+							? t("These run in the restored folder on this machine. Read them before approving; they come from the source's project.")
+							: t("The target machine runs these to set up the work. It reviews them first.")}
 					</p>
 				</div>
 				{canApprove && pending.length > 1 ? (
 					<Button size="sm" variant="primary" loading={busy} onClick={() => decide(pending.map((c) => c.id), [])}>
-						<Check /> Approve all
+						<Check /> {t("Approve all")}
 					</Button>
 				) : null}
 			</CardHeader>
@@ -73,12 +74,12 @@ export function SetupPanel({ h, actions }: { h: Handoff; actions: HandoffActions
 							<div className="flex flex-wrap items-center gap-1.5">
 								<Badge variant={s.variant}>
 									{c.state === "running" ? <Loader2 className="animate-spin" aria-hidden /> : null}
-									{s.label}
+									{tr(s.label)}
 								</Badge>
-								<Badge variant="outline">{PURPOSE[c.purpose]}</Badge>
+								<Badge variant="outline">{tr(PURPOSE[c.purpose])}</Badge>
 								{c.exitCode !== null ? (
 									<Badge variant={c.exitCode === 0 ? "success" : "danger"} className="font-mono">
-										exit {c.exitCode}
+										{t("exit {code}", { code: c.exitCode })}
 									</Badge>
 								) : null}
 							</div>
@@ -86,18 +87,18 @@ export function SetupPanel({ h, actions }: { h: Handoff; actions: HandoffActions
 								<span className="select-none text-subtle">$ </span>
 								{c.command}
 							</code>
-							<span className="break-all font-mono text-2xs text-subtle">in {c.cwd}</span>
+							<span className="break-all font-mono text-2xs text-subtle">{t("in {path}", { path: c.cwd })}</span>
 							{c.outputTail ? <OutputTail text={c.outputTail} /> : null}
 							{c.state === "pending_approval" && (canApprove || canDeny) ? (
 								<div className="flex flex-wrap gap-2">
 									{canApprove ? (
 										<Button size="sm" variant={pending.length > 1 ? "secondary" : "primary"} disabled={busy} onClick={() => decide([c.id], [])}>
-											<Check /> Approve
+											<Check /> {t("Approve")}
 										</Button>
 									) : null}
 									{canDeny ? (
 										<Button size="sm" variant="outline" className="text-danger" disabled={busy} onClick={() => decide([], [c.id])}>
-											<X /> Deny
+											<X /> {t("Deny")}
 										</Button>
 									) : null}
 								</div>

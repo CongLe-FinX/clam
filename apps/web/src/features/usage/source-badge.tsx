@@ -1,31 +1,32 @@
 import type { DataSource } from "@clam/contracts";
+import { msg, tr, type Msg } from "@/i18n";
 import { Badge } from "@/ui/badge";
 import { Tip } from "@/ui/tooltip";
 
-const META: Record<DataSource, { label: string; variant: "accent" | "success" | "warning"; hint: string }> = {
+const META: Record<DataSource, { label: Msg; variant: "accent" | "success" | "warning"; hint: Msg }> = {
 	"omp-recorded": {
-		label: "OMP recorded",
+		label: msg("OMP recorded"),
 		variant: "accent",
-		hint: "Actual requests logged by OMP on this machine (omp stats). Cost uses OMP's model price table.",
+		hint: msg("Actual requests logged by OMP on this machine (omp stats). Cost uses OMP's model price table."),
 	},
 	"provider-reported": {
-		label: "Provider reported",
+		label: msg("Provider reported"),
 		variant: "success",
-		hint: "Quota and limits returned by the provider's own usage API through OMP (omp usage).",
+		hint: msg("Quota and limits returned by the provider's own usage API through OMP (omp usage)."),
 	},
 	"clam-estimated": {
-		label: "Estimated",
+		label: msg("Estimated"),
 		variant: "warning",
-		hint: "Derived by CL Agent Mesh from per-session OMP statistics; not authoritative.",
+		hint: msg("Derived by CL Agent Mesh from per-session OMP statistics; not authoritative."),
 	},
 };
 
 export function SourceBadge({ source }: { source: DataSource }) {
 	const m = META[source];
 	return (
-		<Tip label={m.hint}>
+		<Tip label={tr(m.hint)}>
 			<Badge variant={m.variant} className="cursor-help whitespace-nowrap">
-				{m.label}
+				{tr(m.label)}
 			</Badge>
 		</Tip>
 	);

@@ -1,7 +1,8 @@
 import type { GitStatus } from "@clam/contracts";
 import { CircleCheck, ShieldAlert, ShieldCheck, TriangleAlert, X } from "lucide-react";
 import { useEffect } from "react";
-import { errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { useConflictCheck } from "./hooks.ts";
@@ -20,18 +21,18 @@ export function ConflictCheck({ projectId, status }: { projectId: string; status
 		<div className="shrink-0 border-b px-2.5 py-1.5">
 			<div className="flex items-center gap-2">
 				<Button size="sm" variant="ghost" onClick={() => check.mutate()} loading={check.isPending} className="-ml-1.5">
-					<ShieldCheck /> Check for conflicts
+					<ShieldCheck /> {t("Check for conflicts")}
 				</Button>
-				<span className="min-w-0 truncate text-2xs text-subtle">against {status.upstream}</span>
+				<span className="min-w-0 truncate text-2xs text-subtle">{t("against {upstream}", { upstream: status.upstream })}</span>
 				{r ? (
-					<button type="button" aria-label="Dismiss conflict report" onClick={() => check.reset()} className="ml-auto grid size-6 place-items-center rounded-md text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-9">
+					<button type="button" aria-label={t("Dismiss conflict report")} onClick={() => check.reset()} className="ml-auto grid size-6 place-items-center rounded-md text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-9">
 						<X className="size-3.5" />
 					</button>
 				) : null}
 			</div>
 			{check.error ? (
 				<p role="alert" className="mt-1 text-xs text-danger">
-					{errorMessage(check.error)}
+					{errorText(check.error)}
 				</p>
 			) : null}
 			{r ? (
@@ -45,10 +46,10 @@ export function ConflictCheck({ projectId, status }: { projectId: string; status
 					<p className="flex items-center gap-1.5 font-medium">
 						{!r.clean ? <ShieldAlert className="size-4 shrink-0" /> : overlap.length > 0 ? <TriangleAlert className="size-4 shrink-0" /> : <CircleCheck className="size-4 shrink-0" />}
 						{!r.clean
-							? `Merging with ${r.against} would conflict in ${r.conflicts.length} ${r.conflicts.length === 1 ? "file" : "files"}`
+							? t("Merging with {against} would conflict in {count, plural, one {# file} other {# files}}", { against: r.against, count: r.conflicts.length })
 							: overlap.length > 0
-								? "No merge conflicts, but a pull would be refused"
-								: `No conflicts with ${r.against}`}
+								? t("No merge conflicts, but a pull would be refused")
+								: t("No conflicts with {against}", { against: r.against })}
 						<span className="ml-auto shrink-0 font-mono text-2xs font-normal text-muted-foreground">
 							↑{r.ahead} ↓{r.behind}
 						</span>
@@ -65,7 +66,7 @@ export function ConflictCheck({ projectId, status }: { projectId: string; status
 					) : null}
 					{overlap.length > 0 ? (
 						<div className="text-foreground">
-							<p className="mb-0.5 text-2xs text-muted-foreground">Uncommitted local files that are also changed upstream — commit or discard them before pulling:</p>
+							<p className="mb-0.5 text-2xs text-muted-foreground">{t("Uncommitted local files that are also changed upstream — commit or discard them before pulling:")}</p>
 							<ul className="flex flex-col gap-0.5">
 								{overlap.map((p) => (
 									<li key={p} className="truncate font-mono text-2xs">

@@ -34,7 +34,7 @@ export function readNodeSettings(db: ClamDb): NodeSettings {
 }
 
 export function writeNodeSettings(db: ClamDb, patch: NodeSettingsPatch): NodeSettings {
-	const { autoStartDetail: _derived, ...stored } = NodeSettings.parse({ ...readNodeSettings(db), ...patch });
+	const { autoStartDetail: _derived, autoStartI18n: _derivedI18n, ...stored } = NodeSettings.parse({ ...readNodeSettings(db), ...patch });
 	const next: NodeSettings = stored;
 	const value = JSON.stringify(next);
 	const updatedAt = new Date().toISOString();

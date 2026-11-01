@@ -1,6 +1,7 @@
 import type { Task } from "@clam/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { qk } from "@/lib/queries";
 import { ws } from "@/lib/ws";
 
@@ -15,22 +16,22 @@ export function startTaskBridge(qc: QueryClient, openTask: (taskId: string) => v
 		"tasks",
 		(e) => {
 			if (e.type !== "task") return;
-			const t = e.task;
-			qc.setQueryData<Task[]>(qk.tasks, (d) => (d ? (d.some((x) => x.id === t.id) ? d.map((x) => (x.id === t.id ? t : x)) : [t, ...d]) : d));
-			qc.setQueryData<{ task: Task }>(qk.task(t.id), (d) => (d ? { ...d, task: t } : d));
+			const task = e.task;
+			qc.setQueryData<Task[]>(qk.tasks, (d) => (d ? (d.some((x) => x.id === task.id) ? d.map((x) => (x.id === task.id ? task : x)) : [task, ...d]) : d));
+			qc.setQueryData<{ task: Task }>(qk.task(task.id), (d) => (d ? { ...d, task } : d));
 			void qc.invalidateQueries({ queryKey: qk.activityAll });
-			if (t.direction === "incoming" && t.status === "offered") {
+			if (task.direction === "incoming" && task.status === "offered") {
 				// One notice per offer (the task frame also fires on every new message); none while its page is open.
-				if (offerToasted[t.id] || location.pathname === `/tasks/${t.id}`) return;
-				offerToasted[t.id] = true;
-				toast(`Task offered by ${t.sender.nodeName}`, {
-					id: `task-offer-${t.id}`,
-					description: t.title,
+				if (offerToasted[task.id] || location.pathname === `/tasks/${task.id}`) return;
+				offerToasted[task.id] = true;
+				toast(t("Task offered by {name}", { name: task.sender.nodeName }), {
+					id: `task-offer-${task.id}`,
+					description: task.title,
 					duration: 20_000,
-					action: { label: "Review", onClick: () => openTask(t.id) },
+					action: { label: t("Review"), onClick: () => openTask(task.id) },
 				});
 			} else {
-				toast.dismiss(`task-offer-${t.id}`);
+				toast.dismiss(`task-offer-${task.id}`);
 			}
 		},
 		() => {

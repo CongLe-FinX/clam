@@ -51,6 +51,7 @@ export function applyRecord(hub: TaskHub, taskId: string, record: wire.TaskRecor
 	const patch: Partial<TaskInsert> = {};
 	if (record.status !== current.status) patch.status = record.status;
 	if ((record.reason ?? null) !== current.reason) patch.reason = record.reason ?? null;
+	if (JSON.stringify(record.reasonI18n ?? null) !== JSON.stringify(current.reasonI18n ?? null)) patch.reasonI18n = record.reasonI18n ?? null;
 	if (record.agentId != null && record.agentId !== current.executorAgentId) patch.executorAgentId = record.agentId;
 	if (record.agentName != null && record.agentName !== current.executorAgentName) patch.executorAgentName = record.agentName;
 	if (record.startedAt != null && record.startedAt !== current.startedAt) patch.startedAt = record.startedAt;

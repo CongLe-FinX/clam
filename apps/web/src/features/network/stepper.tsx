@@ -1,16 +1,17 @@
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { type Msg, t, tr } from "@/i18n";
 
 /** Horizontal progress through a wizard. `current === steps.length` means every step is done. Labels collapse to the current one on phones. */
-export function Stepper({ steps, current, className }: { steps: readonly string[]; current: number; className?: string }) {
+export function Stepper({ steps, current, className }: { steps: readonly Msg[]; current: number; className?: string }) {
 	return (
 		<div className={cn("flex flex-col gap-1.5", className)}>
-			<ol className="flex items-center" aria-label="Progress">
+			<ol className="flex items-center" aria-label={t("Progress")}>
 				{steps.map((label, i) => {
 					const done = i < current;
 					const now = i === current;
 					return (
-						<li key={label} aria-current={now ? "step" : undefined} className={cn("flex items-center", i < steps.length - 1 && "min-w-0 flex-1")}>
+						<li key={tr(label)} aria-current={now ? "step" : undefined} className={cn("flex items-center", i < steps.length - 1 && "min-w-0 flex-1")}>
 							<span className="flex items-center gap-2">
 								<span
 									className={cn(
@@ -22,7 +23,7 @@ export function Stepper({ steps, current, className }: { steps: readonly string[
 								>
 									{done ? <Check className="size-3.5 animate-pop-in" strokeWidth={3} /> : i + 1}
 								</span>
-								<span className={cn("hidden whitespace-nowrap text-xs font-medium md:inline", now ? "text-foreground" : "text-subtle")}>{label}</span>
+								<span className={cn("hidden whitespace-nowrap text-xs font-medium md:inline", now ? "text-foreground" : "text-subtle")}>{tr(label)}</span>
 							</span>
 							{i < steps.length - 1 ? (
 								<span aria-hidden className="relative mx-2 h-0.5 min-w-3 flex-1 overflow-hidden rounded-full bg-surface-3">
@@ -34,7 +35,7 @@ export function Stepper({ steps, current, className }: { steps: readonly string[
 				})}
 			</ol>
 			<span className="text-xs font-medium text-muted-foreground md:hidden" aria-hidden>
-				{current >= steps.length ? "Done" : `Step ${current + 1} of ${steps.length} · ${steps[current]}`}
+				{current >= steps.length ? t("Done") : t("Step {current} of {total} · {label}", { current: current + 1, total: steps.length, label: tr(steps[current] as Msg) })}
 			</span>
 		</div>
 	);

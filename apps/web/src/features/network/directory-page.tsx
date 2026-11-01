@@ -3,10 +3,11 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Link } from "@tanstack/react-router";
 import { Bot, ChevronRight, Clock, RefreshCw, Plug, Search, Send } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { errorMessage } from "@/lib/api";
+import { type Msg, msg, t, tr } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { isActiveTask, useDirectory, usePeers, useTasks } from "@/lib/queries";
 import { useUi } from "@/lib/store";
-import { cn, relativeTime } from "@/lib/utils";
+import { cn, formatDateTime, formatNumber, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
@@ -27,10 +28,11 @@ interface Group {
 	fetchedAt: string | null;
 	agents: DirectoryAgent[];
 }
-type Row = { kind: "header"; key: string; group: Group } | { kind: "agent"; key: string; group: Group; agent: DirectoryAgent } | { kind: "empty"; key: string; text: string };
+type Row = { kind: "header"; key: string; group: Group } | { kind: "agent"; key: string; group: Group; agent: DirectoryAgent } | { kind: "empty"; key: string; text: Msg };
 
 const NODE_RANK: Record<NodeStatus, number> = { self: 0, online: 1, degraded: 2, offline: 3, revoked: 4 };
 const AGENT_STATUS = ["online", "busy", "offline"] as const;
+const AGENT_STATUS_LABEL: Record<(typeof AGENT_STATUS)[number], Msg> = { online: msg("Online"), busy: msg("Busy"), offline: msg("Offline") };
 
 export default function AgentDirectoryPage() {
 	const directory = useDirectory();
@@ -84,7 +86,7 @@ export default function AgentDirectoryPage() {
 				.sort((a, b) => a.name.localeCompare(b.name));
 			if (filtering && agents.length === 0) continue;
 			out.push({ kind: "header", key: `h:${g.nodeId}`, group: g });
-			if (agents.length === 0) out.push({ kind: "empty", key: `e:${g.nodeId}`, text: "No agents reported by this machine yet." });
+			if (agents.length === 0) out.push({ kind: "empty", key: `e:${g.nodeId}`, text: msg("No agents reported by this machine yet.") });
 			for (const a of agents) out.push({ kind: "agent", key: `a:${g.nodeId}:${a.agentId}`, group: g, agent: a });
 		}
 		return out;
@@ -104,43 +106,42 @@ export default function AgentDirectoryPage() {
 		<div className="flex h-full flex-col">
 			<div className="mx-auto flex w-full max-w-[1400px] shrink-0 flex-col gap-4 px-4 pb-3 pt-5 sm:px-6 lg:px-8 lg:pt-7">
 				<PageHeader
-					eyebrow="Agent Network"
-					title="Agent Directory"
-					description="Every agent on this machine and on the machines you paired with. Remote entries are cached and refreshed when a machine reports a change."
+					eyebrow={t("Agent Network")}
+					title={t("Agent Directory")}
+					description={t("Every agent on this machine and on the machines you paired with. Remote entries are cached and refreshed when a machine reports a change.")}
 					actions={
 						<Button variant="outline" onClick={() => setChooser(true)}>
-							<Plug /> Connect a machine
+							<Plug /> {t("Connect a machine")}
 						</Button>
 					}
 				/>
 				<div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1fr)_12rem_10rem]">
 					<div className="relative col-span-2 sm:col-span-1">
 						<Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle" />
-						<Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search name, role, runtime, capability…" aria-label="Search agents" className="pl-8" />
+						<Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("Search name, role, runtime, capability…")} aria-label={t("Search agents")} className="pl-8" />
 					</div>
 					<Select value={node} onValueChange={setNode}>
-						<SelectTrigger aria-label="Filter by machine">
+						<SelectTrigger aria-label={t("Filter by machine")}>
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="all">All machines</SelectItem>
+							<SelectItem value="all">{t("All machines")}</SelectItem>
 							{groups.map((g) => (
 								<SelectItem key={g.nodeId} value={g.nodeId}>
-									{g.status === "self" ? `${g.nodeName} (this machine)` : g.nodeName}
+									{g.status === "self" ? t("{name} (this machine)", { name: g.nodeName }) : g.nodeName}
 								</SelectItem>
 							))}
 						</SelectContent>
 					</Select>
 					<Select value={status} onValueChange={setStatus}>
-						<SelectTrigger aria-label="Filter by agent status">
+						<SelectTrigger aria-label={t("Filter by agent status")}>
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="all">Any status</SelectItem>
+							<SelectItem value="all">{t("Any status")}</SelectItem>
 							{AGENT_STATUS.map((s) => (
 								<SelectItem key={s} value={s}>
-									{s[0]?.toUpperCase()}
-									{s.slice(1)}
+									{tr(AGENT_STATUS_LABEL[s])}
 								</SelectItem>
 							))}
 						</SelectContent>
@@ -159,19 +160,19 @@ export default function AgentDirectoryPage() {
 					) : directory.error ? (
 						<EmptyState
 							icon={Bot}
-							title="Could not load the directory"
-							description={errorMessage(directory.error)}
+							title={t("Could not load the directory")}
+							description={errorText(directory.error)}
 							action={
 								<Button size="sm" variant="outline" onClick={() => void directory.refetch()}>
-									<RefreshCw /> Retry
+									<RefreshCw /> {t("Retry")}
 								</Button>
 							}
 						/>
 					) : rows.length === 0 ? (
 						<EmptyState
 							icon={Bot}
-							title={total === 0 && !filtering ? "No agents yet" : "No agents match"}
-							description={total === 0 && !filtering ? "Agents of this machine and of connected machines appear here." : "Try another search or clear the filters."}
+							title={total === 0 && !filtering ? t("No agents yet") : t("No agents match")}
+							description={total === 0 && !filtering ? t("Agents of this machine and of connected machines appear here.") : t("Try another search or clear the filters.")}
 							action={
 								filtering || node !== "all" ? (
 									<Button
@@ -183,7 +184,7 @@ export default function AgentDirectoryPage() {
 											setNode("all");
 										}}
 									>
-										Clear filters
+										{t("Clear filters")}
 									</Button>
 								) : undefined
 							}
@@ -198,7 +199,7 @@ export default function AgentDirectoryPage() {
 										{row.kind === "header" ? (
 											<GroupHeader group={row.group} now={now} />
 										) : row.kind === "empty" ? (
-											<p className="px-3 py-2.5 text-[13px] text-subtle">{row.text}</p>
+											<p className="px-3 py-2.5 text-[13px] text-subtle">{tr(row.text)}</p>
 										) : (
 											<AgentRow
 												agent={row.agent}
@@ -236,12 +237,12 @@ function GroupHeader({ group, now }: { group: Group; now: number }) {
 	const inner = (
 		<>
 			<span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{group.nodeName}</span>
-			{group.status === "self" ? <Badge variant="accent">This machine</Badge> : <PeerStatusBadge status={group.status} />}
-			<span className="font-mono text-2xs text-subtle">{group.agents.length} {group.agents.length === 1 ? "agent" : "agents"}</span>
+			{group.status === "self" ? <Badge variant="accent">{t("This machine")}</Badge> : <PeerStatusBadge status={group.status} />}
+			<span className="font-mono text-2xs text-subtle">{t("{count, plural, one {# agent} other {# agents}}", { count: group.agents.length })}</span>
 			{group.fetchedAt && group.status !== "self" ? (
-				<span className={cn("hidden items-center gap-1 text-2xs sm:inline-flex", stale ? "text-warning" : "text-subtle")} title={new Date(group.fetchedAt).toLocaleString()}>
+				<span className={cn("hidden items-center gap-1 text-2xs sm:inline-flex", stale ? "text-warning" : "text-subtle")} title={formatDateTime(group.fetchedAt)}>
 					<Clock className="size-3" />
-					{stale ? "stale · " : ""}
+					{stale ? t("stale · ") : ""}
 					{relativeTime(group.fetchedAt, now)}
 				</span>
 			) : null}
@@ -264,20 +265,20 @@ function AgentRow({ agent, nodeStatus, taskCount, onDelegate }: { agent: Directo
 	return (
 		<div className={cn("flex min-h-[4.5rem] flex-col justify-center gap-1 border-b px-3 py-2.5", dim && "opacity-60")}>
 			<div className="flex items-center gap-2.5">
-				<StatusDot status={dim && agent.status !== "offline" ? "offline" : agent.status} label={dim ? `${agent.status} (last known)` : agent.status} />
+				<StatusDot status={dim && agent.status !== "offline" ? "offline" : agent.status} label={dim ? t("{status} (last known)", { status: tr(AGENT_STATUS_LABEL[agent.status]) }) : tr(AGENT_STATUS_LABEL[agent.status])} />
 				<span className="truncate text-[13px] font-medium">{agent.name}</span>
-				{agent.status === "busy" && !dim ? <span className="text-2xs font-medium text-accent">busy</span> : null}
+				{agent.status === "busy" && !dim ? <span className="text-2xs font-medium text-accent">{t("busy")}</span> : null}
 				<span className="min-w-0 flex-1 truncate text-xs text-subtle">{agent.role}</span>
 				<Badge>{agent.runtime}</Badge>
-				{agent.activeSessions > 0 ? <Badge variant="accent">{agent.activeSessions} active</Badge> : null}
+				{agent.activeSessions > 0 ? <Badge variant="accent">{t("{count} active", { count: formatNumber(agent.activeSessions) })}</Badge> : null}
 				{taskCount > 0 ? (
-					<Badge variant="warning" title={nodeStatus === "self" ? "Delegated tasks this agent is working on" : "Tasks you delegated to this agent that are not finished"}>
-						{taskCount} {taskCount === 1 ? "task" : "tasks"}
+					<Badge variant="warning" title={nodeStatus === "self" ? t("Delegated tasks this agent is working on") : t("Tasks you delegated to this agent that are not finished")}>
+						{t("{count, plural, one {# task} other {# tasks}}", { count: taskCount })}
 					</Badge>
 				) : null}
 				{onDelegate ? (
-					<Button size="sm" variant="outline" className="shrink-0 coarse:h-11" onClick={onDelegate} aria-label={`Delegate a task to ${agent.name}`}>
-						<Send /> Delegate
+					<Button size="sm" variant="outline" className="shrink-0 coarse:h-11" onClick={onDelegate} aria-label={t("Delegate a task to {name}", { name: agent.name })}>
+						<Send /> {t("Delegate")}
 					</Button>
 				) : null}
 			</div>

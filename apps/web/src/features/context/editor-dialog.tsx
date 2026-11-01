@@ -2,7 +2,8 @@ import type { Context, ContextType } from "@clam/contracts";
 import { useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { errorMessage } from "@/lib/api";
+import { t, tr } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { useProjects, useWorkspaces } from "@/lib/queries";
 import { Button } from "@/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
@@ -55,11 +56,11 @@ export default function ContextEditorDialog({
 			{ workspaceId: ws, projectId: scope === WORKSPACE_SCOPE ? undefined : scope, type, title: title.trim(), body, shareable },
 			{
 				onSuccess: (c) => {
-					toast.success(`${contextTypeInfo(c.type).label} saved`, { description: c.shareable ? "Shareable — it will sync to member machines." : "Private — it stays on this machine." });
+					toast.success(t("{type} saved", { type: tr(contextTypeInfo(c.type).label) }), { description: c.shareable ? t("Shareable — it will sync to member machines.") : t("Private — it stays on this machine.") });
 					onSaved?.(c);
 					onClose();
 				},
-				onError: (e) => toast.error("Could not save", { description: errorMessage(e) }),
+				onError: (e) => toast.error(t("Could not save"), { description: errorText(e) }),
 			},
 		);
 	};
@@ -69,8 +70,8 @@ export default function ContextEditorDialog({
 			<Dialog open onOpenChange={(o) => !o && requestClose()}>
 				<DialogContent sheetOnMobile className="max-w-2xl">
 					<DialogHeader>
-						<DialogTitle>New context</DialogTitle>
-						<DialogDescription>Durable knowledge for this workspace that you, your teammates and their agents can build on.</DialogDescription>
+						<DialogTitle>{t("New context")}</DialogTitle>
+						<DialogDescription>{t("Durable knowledge for this workspace that you, your teammates and their agents can build on.")}</DialogDescription>
 					</DialogHeader>
 					<form
 						className="flex min-h-0 flex-1 flex-col gap-4"
@@ -81,12 +82,12 @@ export default function ContextEditorDialog({
 					>
 						<div className="scrollbar-thin -mx-1 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-1 pb-1">
 							{presetWorkspace ? null : (
-								<Field label="Workspace" hint={wsList.length === 0 && !workspaces.isPending ? "Create a workspace first." : undefined}>
+								<Field label={t("Workspace")} hint={wsList.length === 0 && !workspaces.isPending ? t("Create a workspace first.") : undefined}>
 									{(id) => (
 										<Select value={ws ?? ""} onValueChange={(v) => { setPickedWorkspace(v);
 											setScopePick(WORKSPACE_SCOPE); }} disabled={create.isPending || workspaces.isPending}>
-											<SelectTrigger id={id} aria-label="Workspace">
-												<SelectValue placeholder={workspaces.isPending ? "Loading…" : "Choose a workspace"} />
+											<SelectTrigger id={id} aria-label={t("Workspace")}>
+												<SelectValue placeholder={workspaces.isPending ? t("Loading…") : t("Choose a workspace")} />
 											</SelectTrigger>
 											<SelectContent>
 												{wsList.map((w) => (
@@ -100,14 +101,14 @@ export default function ContextEditorDialog({
 								</Field>
 							)}
 							<div className="grid gap-4 sm:grid-cols-2">
-								<Field label="Type" hint={contextTypeInfo(type).hint}>
+								<Field label={t("Type")} hint={tr(contextTypeInfo(type).hint)}>
 									{(id) => <TypeSelect id={id} value={type} onChange={setType} disabled={create.isPending} />}
 								</Field>
-								<Field label="Scope" hint="Workspace-wide, or tied to one project.">
-									{(id) => (ws ? <ScopeSelect id={id} workspaceId={ws} value={scope} onChange={setScopePick} disabled={create.isPending} /> : <Input id={id} disabled value="Choose a workspace first" readOnly />)}
+								<Field label={t("Scope")} hint={t("Workspace-wide, or tied to one project.")}>
+									{(id) => (ws ? <ScopeSelect id={id} workspaceId={ws} value={scope} onChange={setScopePick} disabled={create.isPending} /> : <Input id={id} disabled value={t("Choose a workspace first")} readOnly />)}
 								</Field>
 							</div>
-							<Field label="Title">
+							<Field label={t("Title")}>
 								{(id) => (
 									<Input
 										id={id}
@@ -115,7 +116,7 @@ export default function ContextEditorDialog({
 										maxLength={200}
 										onChange={(e) => setTitle(e.target.value)}
 										disabled={create.isPending}
-										placeholder="Short, descriptive title"
+										placeholder={t("Short, descriptive title")}
 										// biome-ignore lint/a11y/noAutofocus: modal opened for typing
 										autoFocus
 									/>
@@ -126,10 +127,10 @@ export default function ContextEditorDialog({
 						</div>
 						<DialogFooter>
 							<Button variant="ghost" onClick={requestClose} disabled={create.isPending}>
-								Cancel
+								{t("Cancel")}
 							</Button>
 							<Button type="submit" variant="primary" loading={create.isPending} disabled={!canSave}>
-								Save
+								{t("Save")}
 							</Button>
 						</DialogFooter>
 					</form>
@@ -138,9 +139,9 @@ export default function ContextEditorDialog({
 			<ConfirmDialog
 				open={confirmClose}
 				onOpenChange={setConfirmClose}
-				title="Discard this draft?"
-				description="Nothing has been saved yet. Your text will be lost."
-				confirmLabel="Discard"
+				title={t("Discard this draft?")}
+				description={t("Nothing has been saved yet. Your text will be lost.")}
+				confirmLabel={t("Discard")}
 				danger
 				onConfirm={() => {
 					setConfirmClose(false);

@@ -1,4 +1,4 @@
-import type { Capability, Peer, PeerStatus } from "@clam/contracts";
+import { i18nMsg, type Capability, type Peer, type PeerStatus } from "@clam/contracts";
 import { peerAgents, peers, workspaceMembers } from "@clam/database";
 import type { ClamDb } from "@clam/database";
 import type { PeerKey } from "@clam/agent-network";
@@ -137,7 +137,7 @@ export class PeerService {
 	addPaired(input: NewPeer, executor: Pick<ClamDb, "transaction"> = this.deps.db): Peer {
 		const now = new Date().toISOString();
 		const existing = this.row(input.id);
-		if (existing && existing.status !== "revoked") throw ApiError.conflict("This node is already paired", { code: "already_paired" });
+		if (existing && existing.status !== "revoked") throw ApiError.conflict(i18nMsg("This node is already paired"), { code: "already_paired" });
 		executor.transaction((tx) => {
 			const values = {
 				name: input.name,
@@ -184,7 +184,7 @@ export class PeerService {
 	update(id: string, patch: { name?: string; grantedCapabilities?: Capability[]; autoAcceptTasks?: boolean }): Peer {
 		const row = this.row(id);
 		if (!row) throw ApiError.notFound("Peer");
-		if (row.status === "revoked") throw ApiError.conflict("This peer is revoked; pair again to restore access");
+		if (row.status === "revoked") throw ApiError.conflict(i18nMsg("This peer is revoked; pair again to restore access"));
 		const now = new Date().toISOString();
 		const capabilities = patch.grantedCapabilities ? [...new Set(patch.grantedCapabilities)] : undefined;
 		const changedCapabilities = capabilities !== undefined && JSON.stringify([...capabilities].sort()) !== JSON.stringify([...(row.grantedCapabilities as string[])].sort());

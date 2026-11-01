@@ -6,6 +6,7 @@ import path from "node:path";
 import { pipeline } from "node:stream/promises";
 import type { Readable, Writable } from "node:stream";
 import { Transform } from "node:stream";
+import { type I18nMessage, i18nMsg } from "@clam/contracts";
 import type { BrowserDownload, BrowserExecutable, BrowserStatus, BrowserTab, ListeningPort } from "@clam/contracts";
 import { projects } from "@clam/database";
 import type { ServerContext } from "../context.ts";
@@ -123,7 +124,7 @@ export class BrowserService {
 	}
 
 	install(): BrowserStatus {
-		if (this.executable()) throw ApiError.conflict("A browser is already available on this machine");
+		if (this.executable()) throw ApiError.conflict(i18nMsg("A browser is already available on this machine"));
 		this.installer.start();
 		return this.status();
 	}
@@ -196,7 +197,7 @@ export class BrowserService {
 
 	private async launch(): Promise<Running> {
 		const executable = this.executable();
-		if (!executable) throw ApiError.unavailable("No Chromium-based browser was found on this machine. Install Chromium from the Browser page, or set CLAM_BROWSER_PATH.");
+		if (!executable) throw ApiError.unavailable(i18nMsg("No Chromium-based browser was found on this machine. Install Chromium from the Browser page, or set CLAM_BROWSER_PATH."));
 		this.state = "starting";
 		this.error = null;
 		mkdirSync(this.profileDir, { recursive: true, mode: 0o700 });
@@ -270,7 +271,7 @@ export class BrowserService {
 		this.state = "failed";
 		this.error = message;
 		this.ctx.log.warn({ error: message }, "machine browser failed to start");
-		throw ApiError.unavailable(`The browser could not be started: ${message}`);
+		throw ApiError.unavailable(i18nMsg("The browser could not be started: {message}", { message }));
 	}
 
 	private onExit(running: Running, code: number | null, signal: NodeJS.Signals | null, stderr: string): void {
@@ -411,7 +412,7 @@ export class BrowserService {
 				const tab = new Tab(targetId, sessionId, running.cdp, {
 					log: this.ctx.log,
 					changed: () => this.scheduleTabsBroadcast(),
-					navigate: (t, input) => this.navigateTab(t, input),
+					navigate: async (t, input) => (await this.navigateTab(t, input))?.text ?? null,
 					takeUploads: (uploadId) => this.takeUploads(uploadId),
 					checkLocation: (url) => isPermittedLocation(url, this.policy()),
 					downloads: () => this.listDownloads(),
@@ -477,10 +478,10 @@ export class BrowserService {
 			return blank.snapshot();
 		}
 		const running = this.running;
-		if (!running) throw ApiError.unavailable("The browser is not running");
+		if (!running) throw ApiError.unavailable(i18nMsg("The browser is not running"));
 		const { targetId } = await running.cdp.send<{ targetId: string }>("Target.createTarget", { url: "about:blank" });
 		const tab = await this.attachTab(targetId);
-		if (!tab) throw ApiError.unavailable("The new tab could not be opened");
+		if (!tab) throw ApiError.unavailable(i18nMsg("The new tab could not be opened"));
 		if (url) await tab.navigateTo(url);
 		return tab.snapshot();
 	}
@@ -500,7 +501,7 @@ export class BrowserService {
 		return tab.snapshot();
 	}
 
-	private async navigateTab(tab: Tab, input: string): Promise<string | null> {
+	private async navigateTab(tab: Tab, input: string): Promise<I18nMessage | null> {
 		const verdict = this.normalize(input);
 		if (!verdict.ok) return verdict.message;
 		await tab.navigateTo(verdict.url);
@@ -564,7 +565,7 @@ export class BrowserService {
 			await pipeline(body, limit, createWriteStream(target, { mode: 0o600 }));
 		} catch (error) {
 			rmSync(target, { force: true });
-			throw error instanceof Error && error.message === "upload too large" ? new ApiError(413, "too_large", "That file is too large to upload") : error;
+			throw error instanceof Error && error.message === "upload too large" ? new ApiError(413, "too_large", i18nMsg("That file is too large to upload")) : error;
 		}
 	}
 

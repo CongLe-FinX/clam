@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import type { wire } from "@clam/agent-network";
-import type { DecideHandoffBody, HandoffFailureCode, HandoffState, SetupDecisionBody } from "@clam/contracts";
+import { type DecideHandoffBody, type HandoffFailureCode, type HandoffState, type I18nMessage, i18nMsg, plainMsg, type SetupDecisionBody } from "@clam/contracts";
 import { projects, workspaceMembers, workspaces } from "@clam/database";
 import { buildResumePrompt, canTransition, checkHandoffEpochs, HandoffManifest, hasPassed, makeFencingToken, restoreDeadlineFrom, type SetupReport, TARGET_STEPS, verifyReceivedManifest } from "@clam/handoff-engine";
 import { formatAuthor, strictestApprovalMode, type MessageKind } from "@clam/task-engine";
@@ -23,8 +23,8 @@ import { acquireTaskRow, classifyTask, discardCreatedProject, discardTaskRow, pe
 /** What one step reports: the state it reaches and what is persisted with it. `wait` leaves the step running (a user decision is pending). */
 interface StepResult {
 	to: HandoffState;
-	summary: string;
-	detail?: string;
+	summary: I18nMessage;
+	detail?: string | I18nMessage;
 	skipped?: boolean;
 	patch?: Partial<HandoffInsert>;
 	enqueue?: HandoffOutboxItem[];
@@ -42,6 +42,9 @@ const RESUME_ATTEMPTS = 3;
 const THREAD_PROMPT_CHARS = 30_000;
 
 const stateMoved = (error: unknown): boolean => error instanceof ApiError && error.status === 409 && (error.code === "conflict" || error.code === "illegal_transition");
+
+/** The source's own wording of a state notice (with its structured twin when it sent one), else our default. */
+const peerSummary = (request: wire.HandoffStateRequest, fallback: I18nMessage): I18nMessage => (request.summary ? { text: request.summary, ...(request.summaryI18n && { i18n: request.summaryI18n }) } : fallback);
 
 /**
  * Target side of a task handoff (docs/handoff-protocol.md §3.2, §4 steps 1–10, §6.2). Every step is driven from the persisted state
@@ -85,11 +88,11 @@ export class TargetFlow implements TargetApi {
 		// No await before the insert: a concurrent duplicate delivery cannot interleave between the lookup and the insert.
 		const existing = store.find(request.handoffId);
 		if (existing) {
-			if (existing.peerId !== peerId || existing.role !== "target") throw new ApiError(409, "idempotency_conflict", "That handoff id belongs to another handoff");
+			if (existing.peerId !== peerId || existing.role !== "target") throw new ApiError(409, "idempotency_conflict", i18nMsg("That handoff id belongs to another handoff"));
 			return { row: existing, created: false };
 		}
 		const peer = ctx.network.peers.row(peerId);
-		if (!peer || peer.status === "revoked") throw new ApiError(403, "forbidden", "The source is not a paired peer");
+		if (!peer || peer.status === "revoked") throw new ApiError(403, "forbidden", i18nMsg("The source is not a paired peer"));
 		// The target answers the source with accept / ack / state calls, which need handoff.receive granted by the source.
 		hub.assertPeerCapable(peerId, "received");
 
@@ -97,16 +100,16 @@ export class TargetFlow implements TargetApi {
 		if (!verified.ok) throw new ApiError(verified.code === "expired" ? 409 : 422, verified.code === "expired" ? "offer_expired" : verified.code, verified.detail);
 		const manifest = verified.manifest;
 		if (manifest.handoffId !== request.handoffId || manifest.task.id !== request.taskId || manifest.fromEpoch !== request.fromEpoch || manifest.toEpoch !== request.toEpoch || manifest.expiresAt !== request.expiresAt) {
-			throw new ApiError(422, "manifest_invalid", "The offer does not match its manifest");
+			throw new ApiError(422, "manifest_invalid", i18nMsg("The offer does not match its manifest"));
 		}
-		if (manifest.source.nodeId !== peerId) throw new ApiError(403, "forbidden", "The manifest names another node as its source than the one offering it");
+		if (manifest.source.nodeId !== peerId) throw new ApiError(403, "forbidden", i18nMsg("The manifest names another node as its source than the one offering it"));
 
 		const classified = classifyTask(hub, manifest);
 		if ("conflict" in classified) throw ApiError.conflict(classified.conflict);
 		const epochs = checkHandoffEpochs(manifest.fromEpoch, manifest.toEpoch, classified.knownEpoch);
 		// A sender's mirror of the epoch may lag behind the executor's (the executor change notice is still on its way): tolerated for `home`.
 		if (!epochs.ok && !(epochs.reason === "epoch_ahead" && classified.mode === "home")) {
-			throw new ApiError(409, "stale_epoch", `This node knows the task at epoch ${epochs.knownEpoch}, the offer starts from ${manifest.fromEpoch}`, { currentEpoch: epochs.knownEpoch });
+			throw new ApiError(409, "stale_epoch", i18nMsg("This node knows the task at epoch {known}, the offer starts from {from}", { known: epochs.knownEpoch ?? "?", from: manifest.fromEpoch }), { currentEpoch: epochs.knownEpoch });
 		}
 
 		const row = store.transaction(() => {
@@ -139,7 +142,7 @@ export class TargetFlow implements TargetApi {
 			});
 			store.initTargetSteps(inserted.id);
 			store.setStep(inserted.id, 1, "running");
-			store.appendEvent(inserted.id, { state: "received", summary: `Offer received from ${manifest.source.name}: “${manifest.task.title}” (epoch ${manifest.fromEpoch} → ${manifest.toEpoch})` });
+			store.appendEvent(inserted.id, { state: "received", summary: i18nMsg("Offer received from {source}: “{title}” (epoch {from} → {to})", { source: manifest.source.name, title: manifest.task.title, from: manifest.fromEpoch, to: manifest.toEpoch }) });
 			return inserted;
 		});
 		hub.changed(row.id);
@@ -147,10 +150,10 @@ export class TargetFlow implements TargetApi {
 		const refusal = this.policyRefusal(row, manifest, classified.mode);
 		if (refusal) {
 			hub.setStep(row.id, 1, "failed", refusal.detail);
-			hub.transition(row.id, "rejected", { from: ["received"], summary: `Refused: ${refusal.detail}`, failure: { code: refusal.code, detail: refusal.detail, step: 1 } });
+			hub.transition(row.id, "rejected", { from: ["received"], summary: i18nMsg("Refused: {detail}", { detail: refusal.detail.text }), failure: { code: refusal.code, detail: refusal.detail, step: 1 } });
 			return { row: store.get(row.id), created: true };
 		}
-		hub.setStep(row.id, 1, "done", "Offer verified (signature, manifest hash, epochs, policy)");
+		hub.setStep(row.id, 1, "done", i18nMsg("Offer verified (signature, manifest hash, epochs, policy)"));
 		hub.faultPoint(row.id); // `received` is entered by the insert above, not by a transition: this is its crash point
 
 		if (readNodeSettings(ctx.db).autoAcceptHandoffs) {
@@ -159,39 +162,39 @@ export class TargetFlow implements TargetApi {
 				this.start(row.id);
 			} catch (error) {
 				if (!(error instanceof ApiError)) throw error;
-				hub.note(row.id, `Not accepted automatically: ${error.message}`);
+				hub.note(row.id, i18nMsg("Not accepted automatically: {error}", { error: error.message }));
 			}
 		}
 		return { row: store.get(row.id), created: true };
 	}
 
 	/** Node policy: capacity, and the task's sender must be someone this node can report to. A refusal is recorded and shown, not thrown. */
-	private policyRefusal(row: HandoffRow, manifest: HandoffManifest, mode: string): { code: HandoffFailureCode; detail: string } | null {
+	private policyRefusal(row: HandoffRow, manifest: HandoffManifest, mode: string): { code: HandoffFailureCode; detail: I18nMessage } | null {
 		const { ctx, store } = this.hub;
 		const settings = readNodeSettings(ctx.db);
 		const inFlight = store.nonTerminal().filter((h) => h.id !== row.id && h.role === "target" && h.kind === "task" && HOLDING_SLOT.includes(h.state as HandoffState)).length;
 		const running = ctx.tasks.store.taskCounts().running;
 		if (running + inFlight >= settings.maxConcurrentRuntimes) {
-			return { code: "capacity", detail: `This node is at its limit of ${settings.maxConcurrentRuntimes} agent session(s) (${running} running, ${inFlight} handoff(s) restoring)` };
+			return { code: "capacity", detail: i18nMsg("This node is at its limit of {max} agent session(s) ({running} running, {inFlight} handoff(s) restoring)", { max: settings.maxConcurrentRuntimes, running, inFlight }) };
 		}
 		if (!ctx.db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.id, manifest.workspaceId)).get()) {
-			return { code: "policy_denied", detail: "The task's workspace does not exist on this node" };
+			return { code: "policy_denied", detail: i18nMsg("The task's workspace does not exist on this node") };
 		}
 		const sender = manifest.task.sender;
-		if (!sender) return { code: "policy_denied", detail: "The manifest names no sender for the task" };
+		if (!sender) return { code: "policy_denied", detail: i18nMsg("The manifest names no sender for the task") };
 		if (sender.nodeId === ctx.identity.nodeId) {
-			return mode === "home" ? null : { code: "policy_denied", detail: "This node is named as the task's sender but never delegated that task" };
+			return mode === "home" ? null : { code: "policy_denied", detail: i18nMsg("This node is named as the task's sender but never delegated that task") };
 		}
 		const senderPeer = ctx.network.peers.row(sender.nodeId);
-		if (!senderPeer || senderPeer.status === "revoked") return { code: "policy_denied", detail: `The task's sender (${sender.nodeName}) is not a paired node of this node` };
+		if (!senderPeer || senderPeer.status === "revoked") return { code: "policy_denied", detail: i18nMsg("The task's sender ({sender}) is not a paired node of this node", { sender: sender.nodeName }) };
 		const member = ctx.db
 			.select()
 			.from(workspaceMembers)
 			.where(and(eq(workspaceMembers.workspaceId, manifest.workspaceId), eq(workspaceMembers.memberId, sender.nodeId), isNull(workspaceMembers.revokedAt)))
 			.get();
-		if (!member) return { code: "policy_denied", detail: `The task's sender (${sender.nodeName}) is not a member of that workspace on this node` };
+		if (!member) return { code: "policy_denied", detail: i18nMsg("The task's sender ({sender}) is not a member of that workspace on this node", { sender: sender.nodeName }) };
 		if (!(senderPeer.receivedCapabilities as string[]).includes("tasks.receive")) {
-			return { code: "policy_denied", detail: `The task's sender (${sender.nodeName}) has not granted this node tasks.receive, so results and events could not be reported to it` };
+			return { code: "policy_denied", detail: i18nMsg("The task's sender ({sender}) has not granted this node tasks.receive, so results and events could not be reported to it", { sender: sender.nodeName }) };
 		}
 		return null;
 	}
@@ -201,9 +204,9 @@ export class TargetFlow implements TargetApi {
 	decide(id: string, body: z.infer<typeof DecideHandoffBody>): Promise<HandoffRow> {
 		return this.hub.lock.run(id, async () => {
 			const row = this.target(id);
-			if (row.state !== "received") throw ApiError.conflict(`Handoff is ${row.state}; only a received offer can be accepted or rejected`, { state: row.state });
+			if (row.state !== "received") throw ApiError.conflict(i18nMsg("Handoff is {state}; only a received offer can be accepted or rejected", { state: row.state }), { state: row.state });
 			if (body.decision === "reject") {
-				return this.hub.transition(id, "rejected", { from: ["received"], summary: `Rejected: ${body.reason}`, failure: { code: "policy_denied", detail: body.reason, step: 1 } });
+				return this.hub.transition(id, "rejected", { from: ["received"], summary: i18nMsg("Rejected: {reason}", { reason: body.reason }), failure: { code: "policy_denied", detail: plainMsg(body.reason), step: 1 } });
 			}
 			const accepted = this.accept(id, { projectId: body.projectId, agentId: body.agentId });
 			this.start(id);
@@ -216,8 +219,8 @@ export class TargetFlow implements TargetApi {
 		const { hub } = this;
 		const { ctx } = hub;
 		const row = this.target(id);
-		if (row.state !== "received") throw ApiError.conflict(`Handoff is ${row.state}, not a received offer`, { state: row.state });
-		if (hasPassed(Date.now(), row.expiresAt)) throw new ApiError(409, "offer_expired", "The offer has expired");
+		if (row.state !== "received") throw ApiError.conflict(i18nMsg("Handoff is {state}, not a received offer", { state: row.state }), { state: row.state });
+		if (hasPassed(Date.now(), row.expiresAt)) throw new ApiError(409, "offer_expired", i18nMsg("The offer has expired"));
 		const manifest = this.manifestOf(row);
 		const agent = resolveTargetAgent(ctx, { agentId: choice.agentId ?? row.targetAgentId });
 		const { project, created } = resolveTargetProject(ctx, manifest, { projectId: choice.projectId, existingProjectId: row.projectId });
@@ -226,7 +229,7 @@ export class TargetFlow implements TargetApi {
 		try {
 			return hub.transition(id, "accepted", {
 				from: ["received"],
-				summary: `Accepted: restoring into ${project.name} with agent ${agent.name}`,
+				summary: i18nMsg("Accepted: restoring into {project} with agent {agent}", { project: project.name, agent: agent.name }),
 				patch: {
 					projectId: project.id,
 					targetAgentId: agent.id,
@@ -248,7 +251,7 @@ export class TargetFlow implements TargetApi {
 
 	async setupDecision(id: string, body: z.infer<typeof SetupDecisionBody>): Promise<HandoffRow> {
 		const row = this.target(id);
-		if (isTerminalState(row)) throw ApiError.conflict(`Handoff is ${row.state}`, { state: row.state });
+		if (isTerminalState(row)) throw ApiError.conflict(i18nMsg("Handoff is {state}", { state: row.state }), { state: row.state });
 		this.hub.setup.decide(id, body);
 		this.start(id);
 		return this.hub.store.get(id);
@@ -261,20 +264,20 @@ export class TargetFlow implements TargetApi {
 			const code = row.failureCode as HandoffFailureCode | null;
 			const step = row.failureStep;
 			if (row.state !== "failed" || code === null || !RETRYABLE.includes(code) || step === null || step < 2 || step > 8) {
-				throw ApiError.conflict("This handoff cannot be retried", { state: row.state, code });
+				throw ApiError.conflict(i18nMsg("This handoff cannot be retried"), { state: row.state, code });
 			}
-			if (hasPassed(Date.now(), row.deadlineAt)) throw ApiError.conflict("The restore deadline has passed; ask the source for a new offer");
+			if (hasPassed(Date.now(), row.deadlineAt)) throw ApiError.conflict(i18nMsg("The restore deadline has passed; ask the source for a new offer"));
 			const previous = step === 2 ? "accepted" : (TARGET_STEPS[step - 2]?.doneState ?? "accepted");
 			try {
 				// `failed` has no way out in the engine's table; a failure the user can fix reopens the SAME row at the state before the failed step.
 				hub.store.transaction(() => {
 					hub.store.update(id, { state: previous, failureCode: null, failureDetail: null, failureStep: null });
 					hub.store.setStep(id, step, "pending", null);
-					hub.store.appendEvent(id, { state: previous, summary: `Retrying step ${step} (${TARGET_STEPS[step - 1]?.name ?? step})` });
+					hub.store.appendEvent(id, { state: previous, summary: i18nMsg("Retrying step {n} ({step})", { n: step, step: TARGET_STEPS[step - 1]?.name ?? step }) });
 				});
 			} catch (error) {
 				if (error instanceof Error && /UNIQUE constraint failed/i.test(error.message)) {
-					throw new ApiError(409, "competing_handoff", "Another handoff of this work already holds that ownership epoch");
+					throw new ApiError(409, "competing_handoff", i18nMsg("Another handoff of this work already holds that ownership epoch"));
 				}
 				throw error;
 			}
@@ -288,9 +291,9 @@ export class TargetFlow implements TargetApi {
 	async cancel(id: string): Promise<HandoffRow> {
 		const row = this.target(id);
 		if (isTerminalState(row)) return row;
-		if (!BEFORE_OWNER.includes(row.state as HandoffState)) throw ApiError.conflict("This node already took the task over; cancel the task instead", { state: row.state });
+		if (!BEFORE_OWNER.includes(row.state as HandoffState)) throw ApiError.conflict(i18nMsg("This node already took the task over; cancel the task instead"), { state: row.state });
 		// Not under the handoff lock: a running step (a long install) must not delay the user. The step finds the state moved and stops.
-		this.endNow(row, "cancelled", "Cancelled on this node");
+		this.endNow(row, "cancelled", i18nMsg("Cancelled on this node"));
 		return this.hub.store.get(id);
 	}
 
@@ -306,22 +309,22 @@ export class TargetFlow implements TargetApi {
 			case "extended":
 				if (request.deadlineAt && !isTerminalState(row)) {
 					hub.store.update(id, { deadlineAt: request.deadlineAt });
-					hub.note(id, `The source extended the restore deadline to ${request.deadlineAt}`);
+					hub.note(id, i18nMsg("The source extended the restore deadline to {deadline}", { deadline: request.deadlineAt }));
 				}
 				break;
 			case "expired":
-				if (state === "received" || state === "accepted") this.endNow(row, "timeout", request.summary ?? "The offer expired on the source");
+				if (state === "received" || state === "accepted") this.endNow(row, "timeout", peerSummary(request, i18nMsg("The offer expired on the source")));
 				break;
 			case "cancelled":
-				if (BEFORE_OWNER.includes(state)) this.endNow(row, "cancelled", request.summary ?? "The source cancelled the handoff");
+				if (BEFORE_OWNER.includes(state)) this.endNow(row, "cancelled", peerSummary(request, i18nMsg("The source cancelled the handoff")));
 				break;
 			case "reclaimed":
-				if (BEFORE_OWNER.includes(state)) this.endNow(row, "superseded", request.summary ?? "The source reclaimed the task (stale epoch)");
-				else if (!isTerminalState(row)) hub.note(id, "The source reports it reclaimed the task after this node took over; the epoch fence decides the owner");
+				if (BEFORE_OWNER.includes(state)) this.endNow(row, "superseded", peerSummary(request, i18nMsg("The source reclaimed the task (stale epoch)")));
+				else if (!isTerminalState(row)) hub.note(id, i18nMsg("The source reports it reclaimed the task after this node took over; the epoch fence decides the owner"));
 				break;
 			case "released":
 				if (state === "resumed") {
-					hub.transition(id, "completed", { from: ["resumed"], summary: "The source released the task; the handoff is complete" });
+					hub.transition(id, "completed", { from: ["resumed"], summary: i18nMsg("The source released the task; the handoff is complete") });
 				} else if (state === "owner") {
 					hub.store.patchMeta(id, { sourceReleased: true });
 				} else if (state === "acked") {
@@ -336,7 +339,7 @@ export class TargetFlow implements TargetApi {
 	}
 
 	/** End a handoff that has not reached ownership (`failed(code)`, or `cancelled` where the table has that edge) and clean up in the background. */
-	private endNow(row: HandoffRow, code: HandoffFailureCode, summary: string): void {
+	private endNow(row: HandoffRow, code: HandoffFailureCode, summary: I18nMessage): void {
 		const state = row.state as HandoffState;
 		const to: HandoffState = code === "cancelled" && canTransition("target", state, "cancelled") ? "cancelled" : "failed";
 		try {
@@ -408,17 +411,17 @@ export class TargetFlow implements TargetApi {
 			const refusal = "conflict" in classified ? { code: "superseded" as const, detail: classified.conflict } : this.policyRefusal(row, manifest, classified.mode);
 			if (refusal) {
 				hub.setStep(row.id, 1, "failed", refusal.detail);
-				hub.transition(row.id, "rejected", { from: ["received"], summary: `Refused: ${refusal.detail}`, failure: { code: refusal.code, detail: refusal.detail, step: 1 } });
+				hub.transition(row.id, "rejected", { from: ["received"], summary: i18nMsg("Refused: {detail}", { detail: refusal.detail.text }), failure: { code: refusal.code, detail: refusal.detail, step: 1 } });
 				return "stop";
 			}
-			hub.setStep(row.id, 1, "done", "Offer verified (signature, manifest hash, epochs, policy)");
+			hub.setStep(row.id, 1, "done", i18nMsg("Offer verified (signature, manifest hash, epochs, policy)"));
 		}
 		if (!readNodeSettings(ctx.db).autoAcceptHandoffs) return "stop";
 		try {
 			this.accept(row.id, {});
 		} catch (error) {
 			if (!(error instanceof ApiError)) throw error;
-			hub.note(row.id, `Not accepted automatically: ${error.message}`);
+			hub.note(row.id, i18nMsg("Not accepted automatically: {error}", { error: error.message }));
 			return "stop";
 		}
 		return "next";
@@ -453,9 +456,9 @@ export class TargetFlow implements TargetApi {
 		const failure = this.stepFailure(row, n, error);
 		const current = hub.store.get(row.id);
 		if (isTerminalState(current)) return "stop"; // cancelled / superseded while the step ran: that outcome stands
-		hub.setStep(row.id, n, "failed", failure.message);
+		hub.setStep(row.id, n, "failed", failure.detail);
 		try {
-			hub.transition(row.id, "failed", { from: [current.state as HandoffState], summary: `Step ${n} (${TARGET_STEPS[n - 1]?.name ?? n}) failed: ${failure.message}`, failure: { code: failure.code, detail: failure.message, step: failure.step ?? n } });
+			hub.transition(row.id, "failed", { from: [current.state as HandoffState], summary: i18nMsg("Step {n} ({step}) failed: {detail}", { n, step: TARGET_STEPS[n - 1]?.name ?? n, detail: failure.message }), failure: { code: failure.code, detail: failure.detail, step: failure.step ?? n } });
 		} catch (moved) {
 			if (stateMoved(moved)) return "stop";
 			throw moved;
@@ -467,9 +470,9 @@ export class TargetFlow implements TargetApi {
 
 	private stepFailure(row: HandoffRow, n: number, error: unknown): HandoffStepError {
 		if (error instanceof HandoffStepError) return error;
-		if (error instanceof Error && "code" in error && error.code === "ENOSPC") return new HandoffStepError("disk_full", "The disk is full", n);
+		if (error instanceof Error && "code" in error && error.code === "ENOSPC") return new HandoffStepError("disk_full", i18nMsg("The disk is full"), n);
 		const byStep: Record<number, HandoffFailureCode> = { 2: "manifest_invalid", 3: row.vcs === "git" ? "git_unavailable" : "manifest_invalid", 4: "manifest_invalid", 5: "deps_failed", 6: "validation_failed", 7: "session_failed", 8: "session_failed" };
-		return new HandoffStepError(byStep[n] ?? "manifest_invalid", errorText(error), n);
+		return new HandoffStepError(byStep[n] ?? "manifest_invalid", plainMsg(errorText(error)), n);
 	}
 
 	// ------------------------------------------------------------------ steps 2–8
@@ -478,28 +481,29 @@ export class TargetFlow implements TargetApi {
 		await downloadManifestArtifacts(this.hub, row, manifest);
 		const project = this.project(row);
 		const agent = { id: row.targetAgentId ?? "", name: row.targetAgentName ?? "" };
-		if (agent.id === "") throw new HandoffStepError("manifest_invalid", "No agent was chosen for the handoff", 2);
+		if (agent.id === "") throw new HandoffStepError("manifest_invalid", i18nMsg("No agent was chosen for the handoff"), 2);
 		const mode = persistTaskRow(this.hub, row, manifest, project, agent);
 		const files = this.hub.store.artifacts(row.id).length;
-		return { to: "persisted", summary: `Stored the task (${mode === "new" ? "new task record" : mode === "home" ? "the task returned to its sender" : "taken back after an earlier handoff"}) and ${files} file(s) of the handoff`, detail: `${files} artifact(s) verified` };
+		const stored = mode === "new" ? i18nMsg("Stored the task (new task record) and {files} file(s) of the handoff", { files }) : mode === "home" ? i18nMsg("Stored the task (the task returned to its sender) and {files} file(s) of the handoff", { files }) : i18nMsg("Stored the task (taken back after an earlier handoff) and {files} file(s) of the handoff", { files });
+		return { to: "persisted", summary: stored, detail: i18nMsg("{files, plural, one {# artifact verified} other {# artifacts verified}}", { files }) };
 	}
 
 	private async restoreFiles(row: HandoffRow, manifest: HandoffManifest): Promise<StepResult> {
-		if (manifest.vcs === "none") return { to: "files_restored", summary: "Nothing to restore (no project files were handed over)", skipped: true, detail: "vcs none" };
+		if (manifest.vcs === "none") return { to: "files_restored", summary: i18nMsg("Nothing to restore (no project files were handed over)"), skipped: true, detail: i18nMsg("No project files") };
 		const project = this.project(row);
 		if (manifest.vcs === "git") {
 			const restored = await restoreGit(this.hub, row, manifest, project);
 			if (manifest.task.deliverAs === "branch") this.hub.ctx.tasks.store.patchExecState(manifest.task.id, { prepared: restored.prepared });
-			return { to: "files_restored", summary: `Files restored: ${restored.detail}`, detail: restored.detail };
+			return { to: "files_restored", summary: i18nMsg("Files restored: {detail}", { detail: restored.detail.text }), detail: restored.detail };
 		}
 		const detail = await restoreFilesBundle(this.hub, row, manifest, project);
-		return { to: "files_restored", summary: `Files restored: ${detail}`, detail };
+		return { to: "files_restored", summary: i18nMsg("Files restored: {detail}", { detail: detail.text }), detail };
 	}
 
 	private async restoreContext(row: HandoffRow, manifest: HandoffManifest): Promise<StepResult> {
-		if (manifest.contexts.length === 0) return { to: "context_restored", summary: "No shared context was referenced", skipped: true };
+		if (manifest.contexts.length === 0) return { to: "context_restored", summary: i18nMsg("No shared context was referenced"), skipped: true };
 		const detail = await restoreContexts(this.hub, row, manifest);
-		return { to: "context_restored", summary: `Context restored: ${detail}`, detail };
+		return { to: "context_restored", summary: i18nMsg("Context restored: {detail}", { detail: detail.text }), detail };
 	}
 
 	private async setupDependencies(row: HandoffRow, manifest: HandoffManifest): Promise<StepResult> {
@@ -516,13 +520,13 @@ export class TargetFlow implements TargetApi {
 			const waitingFor = JSON.stringify(outcome.pending);
 			if (row.meta.waitingFor !== waitingFor) {
 				hub.store.patchMeta(row.id, { waitingFor });
-				hub.note(row.id, `Waiting for approval of ${outcome.pending.length} setup command(s)`);
+				hub.note(row.id, i18nMsg("Waiting for approval of {count} setup command(s)", { count: outcome.pending.length }));
 			}
-			return { to: "deps_ready", summary: "Waiting for setup approval", wait: true };
+			return { to: "deps_ready", summary: i18nMsg("Waiting for setup approval"), wait: true };
 		}
 		hub.store.patchMeta(row.id, { setupReport: outcome.report, waitingFor: undefined });
-		const detail = `${outcome.report.ran.length} command(s) ran, ${outcome.report.skipped.length} skipped`;
-		return { to: "deps_ready", summary: `Dependencies ready: ${detail}`, detail };
+		const detail = i18nMsg("{ran, plural, one {# command} other {# commands}} ran, {skipped} skipped", { ran: outcome.report.ran.length, skipped: outcome.report.skipped.length });
+		return { to: "deps_ready", summary: i18nMsg("Dependencies ready: {detail}", { detail: detail.text }), detail };
 	}
 
 	private async validate(row: HandoffRow, manifest: HandoffManifest): Promise<StepResult> {
@@ -536,12 +540,12 @@ export class TargetFlow implements TargetApi {
 			phase: "validate",
 		});
 		if (outcome.status === "waiting") {
-			hub.note(row.id, `Waiting for approval of ${outcome.pending.length} setup command(s)`);
-			return { to: "validated", summary: "Waiting for setup approval", wait: true };
+			hub.note(row.id, i18nMsg("Waiting for approval of {count} setup command(s)", { count: outcome.pending.length }));
+			return { to: "validated", summary: i18nMsg("Waiting for setup approval"), wait: true };
 		}
 		hub.store.patchMeta(row.id, { setupReport: outcome.report });
 		const detail = outcome.report.validation ?? "validated";
-		return { to: "validated", summary: `Workspace validated: ${detail}`, detail };
+		return { to: "validated", summary: i18nMsg("Workspace validated: {detail}", { detail }), detail };
 	}
 
 	/** Step 7: a NEW session for the new owner (never the source's), opened but not prompted. */
@@ -566,14 +570,14 @@ export class TargetFlow implements TargetApi {
 		const approvalMode = strictestApprovalMode(readNodeSettings(ctx.db).approvalMode, manifest.task.constraints.approvalMode);
 		ctx.sessions.setSpawnOverrides(sessionId, manifest.task.constraints.maxCostUsd === undefined ? { approvalMode } : { approvalMode, maxCostUsd: manifest.task.constraints.maxCostUsd });
 		await ctx.sessions.runtime(sessionId);
-		return { to: "session_created", summary: `New agent session ${sessionId} created on ${hub.nodeName()} (nothing was sent to it yet)`, detail: sessionId, patch: { targetSessionId: sessionId } };
+		return { to: "session_created", summary: i18nMsg("New agent session {session} created on {node} (nothing was sent to it yet)", { session: sessionId, node: hub.nodeName() }), detail: sessionId, patch: { targetSessionId: sessionId } };
 	}
 
 	/** Step 8: the fencing token, then ONE transaction: state `acked` + `ackAt` + token + the queued `handoff.ack` call. */
 	private async writeAck(row: HandoffRow, manifest: HandoffManifest): Promise<StepResult> {
 		const { hub } = this;
 		const { ctx } = hub;
-		if (!row.targetSessionId || row.manifestSha256 === null) throw new HandoffStepError("session_failed", "The new session or the manifest hash is missing", 8);
+		if (!row.targetSessionId || row.manifestSha256 === null) throw new HandoffStepError("session_failed", i18nMsg("The new session or the manifest hash is missing"), 8);
 		const fencingToken = makeFencingToken({ taskId: manifest.task.id, epoch: row.toEpoch, handoffId: row.id, manifestSha256: row.manifestSha256, sign: (message) => ctx.identity.sign(message) });
 		const ackedAt = new Date().toISOString();
 		const body: wire.HandoffAckRequest = {
@@ -586,8 +590,8 @@ export class TargetFlow implements TargetApi {
 		};
 		return {
 			to: "acked",
-			summary: "Acknowledgement written; sending it to the source",
-			detail: `ack at ${ackedAt}`,
+			summary: i18nMsg("Acknowledgement written; sending it to the source"),
+			detail: i18nMsg("ack at {at}", { at: ackedAt }),
 			patch: { ackAt: ackedAt, fencingToken },
 			enqueue: [{ kind: "handoff.ack", path: `/handoffs/${row.id}/ack`, body }],
 		};
@@ -644,8 +648,8 @@ export class TargetFlow implements TargetApi {
 				};
 				enqueue.push({ kind: "task.executor", path: `/tasks/${manifest.task.id}/executor`, body: notice, peerId: sender.nodeId, idempotencyKey: `task.executor:${row.id}` });
 			}
-			hub.setStep(id, 9, "done", `epoch ${row.toEpoch} acquired`);
-			hub.transition(id, "owner", { from: ["acked"], summary: `Ownership acquired at epoch ${row.toEpoch}${response ? " (the source confirmed the ack)" : ""}`, enqueue });
+			hub.setStep(id, 9, "done", i18nMsg("epoch {epoch} acquired", { epoch: row.toEpoch }));
+			hub.transition(id, "owner", { from: ["acked"], summary: response ? i18nMsg("Ownership acquired at epoch {epoch} (the source confirmed the ack)", { epoch: row.toEpoch }) : i18nMsg("Ownership acquired at epoch {epoch}", { epoch: row.toEpoch }), enqueue });
 			if (row.meta.pendingCancel === true) {
 				this.track(hub.ctx.tasks.executor.cancel(manifest.task.id, { reason: "The sender cancelled the task while it was being handed over", by: "sender" }));
 			}
@@ -662,7 +666,11 @@ export class TargetFlow implements TargetApi {
 		return base;
 	}
 
-	/** Step 10: the resume prompt in the new session (idempotent per client id, and not at all when the session already has turns). */
+	/**
+	 * Step 10: the resume prompt in the new session (idempotent per client id, and not at all when the session already has turns). It is sent in the
+	 * session's injection chain and only the messages its thread carries count as delivered with it, so a task message that reaches this node
+	 * meanwhile (the sender forwards what it held the moment the executor notice arrives) follows the brief once instead of racing it or being swallowed.
+	 */
 	private async resumeWork(row: HandoffRow, manifest: HandoffManifest): Promise<Next> {
 		const { hub } = this;
 		const { ctx } = hub;
@@ -673,13 +681,9 @@ export class TargetFlow implements TargetApi {
 		let sent = false;
 		for (let attempt = 1; attempt <= RESUME_ATTEMPTS && !sent; attempt += 1) {
 			try {
-				const page = await ctx.sessions.messages(sessionId, { limit: 1 });
-				if (page.total === 0) {
-					const transcriptPath = await this.unpackTranscript(row, manifest);
-					const message = await this.resumeMessage(row, manifest, transcriptPath);
-					await ctx.sessions.prompt(sessionId, { message, clientId: `handoff_${row.id}_resume` });
-					hub.fence.unblockResume(manifest.task.id); // the resume prompt IS the continuation: no restart-recovery prompt on top of it
-				} else if (hub.fence.blockedResume(manifest.task.id)) {
+				// Entered before anything else can happen on this node, so the brief is the first thing the new session gets.
+				const briefed = await ctx.tasks.injector.exclusive(sessionId, () => this.sendBrief(row, manifest, sessionId));
+				if (!briefed && hub.fence.blockedResume(manifest.task.id)) {
 					// The session already has turns (the prompt went out before a crash): ordinary task recovery takes over, which boot held back.
 					await ctx.tasks.executor.resumeInDoubt(manifest.task.id);
 				}
@@ -688,15 +692,14 @@ export class TargetFlow implements TargetApi {
 				if (error instanceof FaultInjected) throw error;
 				hub.log.warn({ handoffId: row.id, attempt, err: errorText(error) }, "sending the handoff resume prompt failed");
 				if (attempt === RESUME_ATTEMPTS) {
-					hub.note(row.id, `The resume prompt could not be sent (${errorText(error)}); it is retried when the handoff is resumed again`);
+					hub.note(row.id, i18nMsg("The resume prompt could not be sent ({error}); it is retried when the handoff is resumed again", { error: errorText(error) }));
 					return "stop";
 				}
 			}
 		}
-		for (const m of ctx.tasks.store.messages(manifest.task.id)) if (m.injectedSessionId === null) ctx.tasks.store.markInjected(m.id, sessionId);
-		hub.setStep(row.id, 10, "done", "Resume prompt sent");
+		hub.setStep(row.id, 10, "done", i18nMsg("Resume prompt sent"));
 		try {
-			const resumed = hub.transition(row.id, "resumed", { from: ["owner"], summary: `Resume prompt sent in session ${sessionId}; the task continues on ${hub.nodeName()}` });
+			const resumed = hub.transition(row.id, "resumed", { from: ["owner"], summary: i18nMsg("Resume prompt sent in session {session}; the task continues on {node}", { session: sessionId, node: hub.nodeName() }) });
 			this.completeAfterResume(resumed);
 		} catch (error) {
 			if (!stateMoved(error)) throw error;
@@ -704,14 +707,43 @@ export class TargetFlow implements TargetApi {
 		return "stop";
 	}
 
-	private async resumeMessage(row: HandoffRow, manifest: HandoffManifest, transcriptPath: string | undefined): Promise<string> {
+	/** The brief as the first prompt of the new session unless it already has turns; true when it was sent now. Runs in the session's injection chain. */
+	private async sendBrief(row: HandoffRow, manifest: HandoffManifest, sessionId: string): Promise<boolean> {
+		const { hub } = this;
+		const { ctx } = hub;
+		const page = await ctx.sessions.messages(sessionId, { limit: 1 });
+		if (page.total !== 0) {
+			this.markBriefed(row.id, manifest.task.id, sessionId); // a restart after the prompt went out: the ids were persisted with it
+			return false;
+		}
+		const transcriptPath = await this.unpackTranscript(row, manifest);
+		const { message, messageIds } = await this.resumeMessage(row, manifest, transcriptPath);
+		hub.store.patchMeta(row.id, { briefMessageIds: messageIds }); // before the prompt: a restart in between still knows what the brief carries
+		await ctx.sessions.prompt(sessionId, { message, clientId: `handoff_${row.id}_resume` });
+		hub.fence.unblockResume(manifest.task.id); // the resume prompt IS the continuation: no restart-recovery prompt on top of it
+		this.markBriefed(row.id, manifest.task.id, sessionId);
+		return true;
+	}
+
+	/** The messages the brief carried count as delivered to the new session. One that arrived after the thread was read is not among them: it is injected on its own, behind the brief. */
+	private markBriefed(handoffId: string, taskId: string, sessionId: string): void {
+		const { briefMessageIds } = this.hub.store.get(handoffId).meta;
+		if (!Array.isArray(briefMessageIds)) return;
+		const carried = new Set<unknown>(briefMessageIds);
+		const { store } = this.hub.ctx.tasks;
+		for (const m of store.messages(taskId)) if (carried.has(m.id) && m.injectedSessionId === null) store.markInjected(m.id, sessionId);
+	}
+
+	/** The brief and the ids of the thread messages it was built from (the oldest lines may have been cut to fit; they still count as carried). */
+	private async resumeMessage(row: HandoffRow, manifest: HandoffManifest, transcriptPath: string | undefined): Promise<{ message: string; messageIds: string[] }> {
 		const setupReport = (row.meta.setupReport ?? { ran: [], skipped: [] }) as SetupReport;
 		const base = buildResumePrompt(manifest, { localPaths: { workDir: this.project(row).path, ...(transcriptPath && { transcriptPath }) }, setupReport });
 		const thread = this.hub.ctx.tasks.store.messages(manifest.task.id);
-		if (thread.length === 0) return base;
+		const messageIds = thread.map((m) => m.id);
+		if (thread.length === 0) return { message: base, messageIds };
 		let lines = thread.map((m) => `- ${formatAuthor({ kind: m.authorKind as "human" | "agent" | "system", agentName: m.authorAgentName, nodeName: m.authorNodeName })} (${m.kind as MessageKind}, ${m.createdAt}): ${m.text.replace(/\n/g, "\n  ")}`);
 		while (lines.length > 1 && lines.join("\n").length > THREAD_PROMPT_CHARS) lines = lines.slice(1);
-		return `${base}\n\n## Discussion thread so far\nThe task's discussion continues here; these messages are already part of this brief.\n${lines.join("\n")}`;
+		return { message: `${base}\n\n## Discussion thread so far\nThe task's discussion continues here; these messages are already part of this brief.\n${lines.join("\n")}`, messageIds };
 	}
 
 	/** Best effort: the old transcript (opt-in) unpacked into a reference folder of its own, never into the project. */
@@ -740,7 +772,7 @@ export class TargetFlow implements TargetApi {
 	private completeAfterResume(row: HandoffRow): void {
 		const { hub } = this;
 		if (hub.store.get(row.id).meta.sourceReleased === true) {
-			hub.transition(row.id, "completed", { from: ["resumed"], summary: "The source had released the task; the handoff is complete" });
+			hub.transition(row.id, "completed", { from: ["resumed"], summary: i18nMsg("The source had released the task; the handoff is complete") });
 			return;
 		}
 		if (this.graceTimers.has(row.id)) return;
@@ -748,7 +780,7 @@ export class TargetFlow implements TargetApi {
 			this.graceTimers.delete(row.id);
 			this.track(
 				hub.lock.run(row.id, async () => {
-					if (hub.store.get(row.id).state === "resumed") hub.transition(row.id, "completed", { from: ["resumed"], summary: "Grace period passed; the handoff has been effective since the ack" });
+					if (hub.store.get(row.id).state === "resumed") hub.transition(row.id, "completed", { from: ["resumed"], summary: i18nMsg("Grace period passed; the handoff has been effective since the ack") });
 				}),
 			);
 		}, hub.timings.completeGraceMs);
@@ -793,7 +825,7 @@ export class TargetFlow implements TargetApi {
 				notes.push(`cleanup stopped early (${errorText(error)})`);
 			}
 			hub.store.patchMeta(id, { cleanedUp: true });
-			hub.note(id, `Cleaned up: ${notes.join("; ")}`);
+			hub.note(id, i18nMsg("Cleaned up: {notes}", { notes: notes.join("; ") }));
 		});
 	}
 
@@ -801,20 +833,20 @@ export class TargetFlow implements TargetApi {
 
 	private target(id: string): HandoffRow {
 		const row = this.hub.store.get(id);
-		if (row.role !== "target" || row.kind !== "task") throw ApiError.conflict("This is not a task handoff received by this node");
+		if (row.role !== "target" || row.kind !== "task") throw ApiError.conflict(i18nMsg("This is not a task handoff received by this node"));
 		return row;
 	}
 
 	private manifestOf(row: HandoffRow): HandoffManifest {
 		const parsed = HandoffManifest.safeParse(row.manifest);
-		if (!parsed.success) throw new HandoffStepError("manifest_invalid", "The stored manifest is not valid", 2);
+		if (!parsed.success) throw new HandoffStepError("manifest_invalid", i18nMsg("The stored manifest is not valid"), 2);
 		return parsed.data;
 	}
 
 	private project(row: HandoffRow): ProjectRow {
-		if (!row.projectId) throw new HandoffStepError("manifest_invalid", "No project was chosen for the handoff", 2);
+		if (!row.projectId) throw new HandoffStepError("manifest_invalid", i18nMsg("No project was chosen for the handoff"), 2);
 		const project = this.hub.ctx.db.select().from(projects).where(eq(projects.id, row.projectId)).get();
-		if (!project) throw new HandoffStepError("checkout_conflict", "The project chosen for the handoff no longer exists on this node", 3);
+		if (!project) throw new HandoffStepError("checkout_conflict", i18nMsg("The project chosen for the handoff no longer exists on this node"), 3);
 		return project;
 	}
 }

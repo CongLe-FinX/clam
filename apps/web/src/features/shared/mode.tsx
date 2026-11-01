@@ -1,5 +1,6 @@
 import type { Checkpoint, Project, SharedSession } from "@clam/contracts";
 import { Folder, FolderSync, GitBranch, GitCommitHorizontal, Info } from "lucide-react";
+import { type Msg, msg, t, tr } from "@/i18n";
 import { cn, formatBytes } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
 import { Tip } from "@/ui/tooltip";
@@ -7,14 +8,12 @@ import { commitUrl, repoLabel, shortCommit } from "./format.ts";
 
 export type ShareMode = SharedSession["vcs"];
 
-export const FILES_INFO = "The working folder travels machine to machine as a bundle together with the session snapshot; nothing needs a Git repository.";
+export const FILES_INFO = msg("The working folder travels machine to machine as a bundle together with the session snapshot; nothing needs a Git repository.");
 
 /** How a project's work would travel when shared: a linked repository means a shared branch, anything else is folder sync. */
 export const projectShareMode = (p: Pick<Project, "repository">): ShareMode => (p.repository ? "git" : "files");
 
 export const shortSha = (sha: string): string => sha.slice(0, 8);
-
-const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
 /** Info button with the explanation of folder sync; a popover so it also works by tap and keyboard. */
 export function FilesInfoButton({ className }: { className?: string }) {
@@ -23,15 +22,15 @@ export function FilesInfoButton({ className }: { className?: string }) {
 			<PopoverTrigger asChild>
 				<button
 					type="button"
-					aria-label="About folder sync"
+					aria-label={t("About folder sync")}
 					className={cn("inline-grid size-5 shrink-0 place-items-center rounded-full text-subtle outline-none hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:size-8", className)}
 				>
 					<Info className="size-3.5" aria-hidden />
 				</button>
 			</PopoverTrigger>
 			<PopoverContent align="start" className="w-64 text-xs text-muted-foreground">
-				<strong className="mb-1 block text-[13px] text-foreground">Folder sync</strong>
-				{FILES_INFO}
+				<strong className="mb-1 block text-[13px] text-foreground">{t("Folder sync")}</strong>
+				{tr(FILES_INFO)}
 			</PopoverContent>
 		</Popover>
 	);
@@ -46,7 +45,7 @@ export function ModeLabel({ vcs, repo, interactive = false, withRepo = true, cla
 		return (
 			<span className={cn("inline-flex min-w-0 items-center gap-1.5", className)}>
 				<GitBranch className="size-3.5 shrink-0 text-subtle" aria-hidden />
-				<span className="shrink-0">Git branch</span>
+				<span className="shrink-0">{t("Git branch")}</span>
 				{withRepo ? <code className="min-w-0 max-w-[14rem] truncate font-mono text-foreground">{repoLabel(repo.url)}</code> : null}
 				<code className="min-w-0 max-w-[14rem] truncate font-mono text-foreground">{withRepo ? `· ${repo.branch}` : repo.branch}</code>
 			</span>
@@ -55,8 +54,8 @@ export function ModeLabel({ vcs, repo, interactive = false, withRepo = true, cla
 	const label = (
 		<span className={cn("inline-flex items-center gap-1.5", className)}>
 			<FolderSync className="size-3.5 shrink-0 text-subtle" aria-hidden />
-			<span>Folder sync · no repository</span>
-			{interactive ? null : <span className="sr-only">{FILES_INFO}</span>}
+			<span>{t("Folder sync · no repository")}</span>
+			{interactive ? null : <span className="sr-only">{tr(FILES_INFO)}</span>}
 		</span>
 	);
 	if (interactive) {
@@ -67,17 +66,17 @@ export function ModeLabel({ vcs, repo, interactive = false, withRepo = true, cla
 			</span>
 		);
 	}
-	return <Tip label={FILES_INFO}>{label}</Tip>;
+	return <Tip label={tr(FILES_INFO)}>{label}</Tip>;
 }
 
 /** What a checkpoint holds, per mode: git commit (linked when the repo is on GitHub), the files bundle (count, size, short sha), or nothing. */
 export function CheckpointFacts({ shared, c, className }: { shared: Pick<SharedSession, "repo">; c: Checkpoint; className?: string }) {
 	if (c.files) {
 		return (
-			<span className={cn("inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5", className)} title={`Folder bundle sha256 ${c.files.sha256}`}>
+			<span className={cn("inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5", className)} title={t("Folder bundle sha256 {sha}", { sha: c.files.sha256 })}>
 				<Folder className="size-3.5 shrink-0 text-subtle" aria-hidden />
 				<span>
-					{plural(c.files.fileCount, "file", "files")} · {formatBytes(c.files.size)}
+					{t("{count, plural, one {# file} other {# files}}", { count: c.files.fileCount })} · {formatBytes(c.files.size)}
 				</span>
 				<span className="font-mono text-subtle">{shortSha(c.files.sha256)}</span>
 			</span>
@@ -98,35 +97,35 @@ export function CheckpointFacts({ shared, c, className }: { shared: Pick<SharedS
 			</span>
 		);
 	}
-	return <span className={cn("text-subtle", className)}>No file changes</span>;
+	return <span className={cn("text-subtle", className)}>{t("No file changes")}</span>;
 }
 
 // ───────────────────────────── copy ─────────────────────────────
 
-export const HANDOVER_INTRO: Record<ShareMode | "unknown", string> = {
-	git: "Stop here and let an agent on another machine continue the work. Everything this session changed is committed and pushed to a shared branch first — nothing is lost — and this session becomes a read-only copy that links to the new one.",
-	files: "Stop here and let an agent on another machine continue the work. The current working folder is bundled and sent with the session snapshot — nothing needs a Git repository — and this session becomes a read-only copy that links to the new one.",
-	unknown: "Stop here and let an agent on another machine continue the work. Everything this session changed is saved and sent to it first, and this session becomes a read-only copy that links to the new one.",
+export const HANDOVER_INTRO: Record<ShareMode | "unknown", Msg> = {
+	git: msg("Stop here and let an agent on another machine continue the work. Everything this session changed is committed and pushed to a shared branch first — nothing is lost — and this session becomes a read-only copy that links to the new one."),
+	files: msg("Stop here and let an agent on another machine continue the work. The current working folder is bundled and sent with the session snapshot — nothing needs a Git repository — and this session becomes a read-only copy that links to the new one."),
+	unknown: msg("Stop here and let an agent on another machine continue the work. Everything this session changed is saved and sent to it first, and this session becomes a read-only copy that links to the new one."),
 };
 
-export const HANDOVER_SEMANTICS: Record<ShareMode, string> = {
-	git: "The shared branch is pushed and the next driver continues from the pushed commit.",
-	files: "The current working folder is bundled and sent with the session snapshot. The receiver applies it into a local folder (a managed folder is created for you, or pick an existing local folder) — files that differ locally are reported, never silently overwritten.",
+export const HANDOVER_SEMANTICS: Record<ShareMode, Msg> = {
+	git: msg("The shared branch is pushed and the next driver continues from the pushed commit."),
+	files: msg("The current working folder is bundled and sent with the session snapshot. The receiver applies it into a local folder (a managed folder is created for you, or pick an existing local folder) — files that differ locally are reported, never silently overwritten."),
 };
 
-export const TAKEOVER_SEMANTICS: Record<ShareMode, string> = {
-	git: "The shared branch is checked out at the last checkpoint and the next driver continues from the pushed commit.",
-	files: "The current working folder is bundled and sent with the session snapshot; the receiver applies it into a local folder (a managed folder is created for you, or pick an existing local folder) — files that differ locally are reported, never silently overwritten. Takeover continues from the last checkpoint's folder state; work done after it is lost.",
+export const TAKEOVER_SEMANTICS: Record<ShareMode, Msg> = {
+	git: msg("The shared branch is checked out at the last checkpoint and the next driver continues from the pushed commit."),
+	files: msg("The current working folder is bundled and sent with the session snapshot; the receiver applies it into a local folder (a managed folder is created for you, or pick an existing local folder) — files that differ locally are reported, never silently overwritten. Takeover continues from the last checkpoint's folder state; work done after it is lost."),
 };
 
 /** The short explanation of what travels and how it lands, shown in hand-over / takeover / invite dialogs. */
-export function ModeNote({ mode, copy, className }: { mode: ShareMode; copy: Record<ShareMode, string>; className?: string }) {
+export function ModeNote({ mode, copy, className }: { mode: ShareMode; copy: Partial<Record<ShareMode, Msg>>; className?: string }) {
 	const Icon = mode === "git" ? GitBranch : FolderSync;
 	return (
 		<p className={cn("flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-xs text-muted-foreground", className)}>
 			<Icon className="mt-0.5 size-4 shrink-0 text-subtle" aria-hidden />
 			<span>
-				<strong className="font-medium text-foreground">{mode === "git" ? "Git branch" : "Folder sync"}.</strong> {copy[mode]}
+				<strong className="font-medium text-foreground">{mode === "git" ? t("Git branch") : t("Folder sync")}.</strong> {copy[mode] ? tr(copy[mode]) : null}
 			</span>
 		</p>
 	);

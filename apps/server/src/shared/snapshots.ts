@@ -7,6 +7,7 @@ import { Readable, Transform } from "node:stream";
 import { API_PREFIX, normalizePeerUrl, signRequest, signerFromIdentity } from "@clam/agent-network";
 import type { ReadableStream as WebReadableStream } from "node:stream/web";
 import type { ServerContext } from "../context.ts";
+import { i18nMsg } from "@clam/contracts";
 import { ApiError } from "../http/errors.ts";
 import { errorText } from "../network/util.ts";
 
@@ -137,7 +138,7 @@ export async function downloadSnapshot(
 	const { expected } = request;
 	if (expected.size > options.maxBytes) throw new SnapshotRejectedError(`The ${request.kind === "files" ? "folder bundle" : "snapshot"} (${expected.size} bytes) is larger than this node accepts (${options.maxBytes})`);
 	const origin = normalizePeerUrl(peer.url, { allowLoopbackHttp: ctx.config.allowLoopbackPeers });
-	if (origin === null) throw ApiError.upstream("The node that holds the snapshot has no usable address");
+	if (origin === null) throw ApiError.upstream(i18nMsg("The node that holds the snapshot has no usable address"));
 	const url = `${origin}${API_PREFIX}/shared/${encodeURIComponent(request.sharedId)}/${request.blobPath ?? `${request.kind === "files" ? "files" : "snapshots"}/${request.seq}`}`;
 	const headers = signRequest(signerFromIdentity(ctx.identity), { method: "GET", url, bodyBytes: new Uint8Array(0) });
 	const controller = new AbortController();
@@ -152,11 +153,11 @@ export async function downloadSnapshot(
 		try {
 			response = await fetch(url, { method: "GET", headers, redirect: "manual", signal: controller.signal });
 		} catch (error) {
-			throw ApiError.upstream(`The node that holds the snapshot could not be reached: ${errorText(error)}`);
+			throw ApiError.upstream(i18nMsg("The node that holds the snapshot could not be reached: {error}", { error: errorText(error) }));
 		}
 		if (response.status === 404) throw new SnapshotRejectedError("The node no longer holds this snapshot");
 		if (response.status === 403) throw new SnapshotRejectedError("The node refused the download (sessions.share not granted?)");
-		if (!response.ok || !response.body) throw ApiError.upstream(`The node that holds the snapshot answered ${response.status}`);
+		if (!response.ok || !response.body) throw ApiError.upstream(i18nMsg("The node that holds the snapshot answered {status}", { status: response.status }));
 		const declared = Number(response.headers.get("content-length") ?? expected.size);
 		if (declared > options.maxBytes || declared !== expected.size) throw new SnapshotRejectedError(`The snapshot announces ${declared} bytes, expected ${expected.size}`);
 		const hash = createHash("sha256");
@@ -174,7 +175,7 @@ export async function downloadSnapshot(
 			await pipeline(Readable.fromWeb(response.body as WebReadableStream<Uint8Array>), meter, createWriteStream(tmp, { mode: 0o600 }), { signal: controller.signal });
 		} catch (error) {
 			if (error instanceof SnapshotRejectedError) throw error;
-			throw ApiError.upstream(`The snapshot download was interrupted: ${errorText(error)}`);
+			throw ApiError.upstream(i18nMsg("The snapshot download was interrupted: {error}", { error: errorText(error) }));
 		}
 		if (received !== expected.size || hash.digest("hex") !== expected.sha256) throw new SnapshotRejectedError("The downloaded snapshot does not match the digest the driver announced");
 	} catch (error) {

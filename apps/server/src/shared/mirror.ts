@@ -1,6 +1,6 @@
 import type { wire } from "@clam/agent-network";
 import { NetworkError } from "@clam/agent-network";
-import { SessionLiveState as SessionLiveStateSchema, UiMessage as UiMessageSchema, type AgentSession, type MessagesPage, type PendingUiRequest, type SessionEvent, type SessionLiveState, type UiMessage } from "@clam/contracts";
+import { i18nMsg, SessionLiveState as SessionLiveStateSchema, UiMessage as UiMessageSchema, type AgentSession, type MessagesPage, type PendingUiRequest, type SessionEvent, type SessionLiveState, type UiMessage } from "@clam/contracts";
 import { agentSessions } from "@clam/database";
 import { eq } from "drizzle-orm";
 import { ApiError } from "../http/errors.ts";
@@ -383,13 +383,13 @@ export class MirrorService implements MirrorApi, SessionViews {
 	receive(peerId: string, sharedId: string, request: wire.SharedMirrorRequest): wire.SharedMirrorAccepted {
 		const shared = this.store.find(sharedId);
 		if (!shared || shared.state !== "active") throw ApiError.notFound("Shared session");
-		if (request.epoch < shared.epoch) throw new ApiError(409, "stale_epoch", `The mirror carries epoch ${request.epoch}; the shared session is at epoch ${shared.epoch}`, { currentEpoch: shared.epoch, driverNodeId: shared.driverNodeId });
+		if (request.epoch < shared.epoch) throw new ApiError(409, "stale_epoch", i18nMsg("The mirror carries epoch {epoch}; the shared session is at epoch {current}", { epoch: request.epoch, current: shared.epoch }), { currentEpoch: shared.epoch, driverNodeId: shared.driverNodeId });
 		if (request.epoch > shared.epoch) {
 			void this.hub.epochs.reconcilePeer(peerId);
-			throw new ApiError(409, "epoch_unknown", `The mirror carries epoch ${request.epoch}; this node is still at epoch ${shared.epoch} and is asking who drives now`, { currentEpoch: shared.epoch });
+			throw new ApiError(409, "epoch_unknown", i18nMsg("The mirror carries epoch {epoch}; this node is still at epoch {current} and is asking who drives now", { epoch: request.epoch, current: shared.epoch }), { currentEpoch: shared.epoch });
 		}
-		if (shared.localRole === "driver") throw ApiError.conflict("This node drives the shared session; it does not take a mirror from another driver");
-		if (peerId !== shared.driverNodeId) throw new ApiError(403, "forbidden", "Only the driver of the shared session may send its mirror");
+		if (shared.localRole === "driver") throw ApiError.conflict(i18nMsg("This node drives the shared session; it does not take a mirror from another driver"));
+		if (peerId !== shared.driverNodeId) throw new ApiError(403, "forbidden", i18nMsg("Only the driver of the shared session may send its mirror"));
 		const mirrorId = shared.mirrorSessionId ?? this.hub.sharing.ensureMirror(shared);
 		return this.applyReceived(shared, mirrorId, request);
 	}
@@ -405,7 +405,7 @@ export class MirrorService implements MirrorApi, SessionViews {
 
 	private applyReceived(shared: SharedRow, mirrorId: string, request: wire.SharedMirrorRequest): wire.SharedMirrorAccepted {
 		const stored = this.store.mirrorState(mirrorId);
-		const resync = (lastSeq: number): ApiError => new ApiError(409, "mirror_resync", "The mirror is not at the position of this batch; replay the whole conversation", { lastSeq });
+		const resync = (lastSeq: number): ApiError => new ApiError(409, "mirror_resync", i18nMsg("The mirror is not at the position of this batch; replay the whole conversation"), { lastSeq });
 		const reducer = this.reducerOf(mirrorId);
 
 		if (request.type === "sync") {

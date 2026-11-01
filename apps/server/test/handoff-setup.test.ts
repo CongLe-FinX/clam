@@ -31,8 +31,8 @@ function hubOf(timings: Partial<typeof DEFAULT_HANDOFF_TIMINGS> = {}): HandoffHu
 		changed: () => {
 			changes += 1;
 		},
-		note: (_id: string, summary: string) => {
-			notes.push(summary);
+		note: (_id: string, summary: { text: string }) => {
+			notes.push(summary.text);
 		},
 	} as unknown as HandoffHub;
 }

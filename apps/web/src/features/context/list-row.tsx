@@ -1,5 +1,6 @@
 import type { Context, ContextType } from "@clam/contracts";
 import { Lock, Share2 } from "lucide-react";
+import { tr } from "@/i18n";
 import { cn, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { contextTypeInfo, syncBadge } from "./format.ts";
@@ -8,7 +9,7 @@ export function TypeBadge({ type, className }: { type: ContextType; className?: 
 	const { icon: Icon, label } = contextTypeInfo(type);
 	return (
 		<Badge variant="outline" className={className}>
-			<Icon aria-hidden /> {label}
+			<Icon aria-hidden /> {tr(label)}
 		</Badge>
 	);
 }

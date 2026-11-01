@@ -10,6 +10,8 @@ import {
 	type HandoffRole,
 	type HandoffState,
 	type HandoffTopicEvent,
+	type I18nMessage,
+	i18nMsg,
 	type SetupDecisionBody,
 } from "@clam/contracts";
 import { transitionPath } from "@clam/handoff-engine";
@@ -137,7 +139,7 @@ export class HandoffService implements HandoffHub {
 				...(options.from && { from: options.from }),
 				patch: {
 					...options.patch,
-					...(options.failure && { failureCode: options.failure.code, failureDetail: options.failure.detail, failureStep: options.failure.step ?? null }),
+					...(options.failure && { failureCode: options.failure.code, failureDetail: options.failure.detail.text, failureI18n: options.failure.detail.i18n ?? null, failureStep: options.failure.step ?? null }),
 				},
 				...(options.nodeId && { nodeId: options.nodeId }),
 			});
@@ -161,13 +163,13 @@ export class HandoffService implements HandoffHub {
 		const current = this.store.get(id);
 		if (current.state === target) return current;
 		const hops = transitionPath(current.role as HandoffRole, current.state as HandoffState, target);
-		if (!hops) throw new ApiError(409, "illegal_transition", `Handoff cannot go from ${current.state} to ${target}`, { from: current.state, to: target });
+		if (!hops) throw new ApiError(409, "illegal_transition", i18nMsg("Handoff cannot go from {fromStatus} to {toStatus}", { fromStatus: current.state, toStatus: target }), { from: current.state, to: target });
 		let row = current;
 		for (const hop of hops) row = this.transition(id, hop, hop === target ? options : { summary: options.summary, notify: false });
 		return row;
 	}
 
-	note(id: string, summary: string): void {
+	note(id: string, summary: I18nMessage): void {
 		this.assertAlive();
 		const row = this.store.get(id);
 		this.store.appendEvent(id, { state: row.state as HandoffState, summary });
@@ -202,12 +204,13 @@ export class HandoffService implements HandoffHub {
 
 	/** The `POST /handoffs/:id/state` that announces a state to the other node. */
 	private stateNotice(row: HandoffRow, to: HandoffState, options: HandoffTransitionOptions): HandoffOutboxItem {
-		const failure = options.failure ?? (row.failureCode ? { code: row.failureCode, detail: row.failureDetail ?? "", step: row.failureStep } : undefined);
+		const failure = options.failure ?? (row.failureCode ? { code: row.failureCode, detail: { text: row.failureDetail ?? "", i18n: row.failureI18n ?? undefined }, step: row.failureStep } : undefined);
 		const body: wire.HandoffStateRequest = {
 			epoch: row.toEpoch,
 			state: to,
-			summary: options.summary,
-			...(failure && (to === "failed" || to === "rejected") && { failure: { code: failure.code, detail: failure.detail, step: failure.step ?? null } }),
+			summary: options.summary.text,
+			...(options.summary.i18n && { summaryI18n: options.summary.i18n }),
+			...(failure && (to === "failed" || to === "rejected") && { failure: { code: failure.code, detail: failure.detail.text, ...(failure.detail.i18n && { i18n: failure.detail.i18n }), step: failure.step ?? null } }),
 			...(options.deadlineAt && { deadlineAt: options.deadlineAt }),
 			...(row.targetSessionId && { targetSessionId: row.targetSessionId }),
 			at: new Date().toISOString(),
@@ -234,7 +237,7 @@ export class HandoffService implements HandoffHub {
 		this.publishedSeq.set(row.id, last);
 	}
 
-	setStep(id: string, n: number, state: StepState, detail?: string | null): void {
+	setStep(id: string, n: number, state: StepState, detail?: string | I18nMessage | null): void {
 		this.store.setStep(id, n, state, detail);
 		this.changed(id);
 	}
@@ -253,8 +256,8 @@ export class HandoffService implements HandoffHub {
 				409,
 				"capability_missing",
 				direction === "received"
-					? `${peer.name} has not granted this node the capability handoff.receive. Ask its user to enable handoffs for this node (Network → peers).`
-					: `This node has not granted ${peer.name} the capability handoff.receive, which it needs for handoffs. Grant it in Network → ${peer.name}.`,
+					? i18nMsg("{peer} has not granted this node the capability handoff.receive. Ask its user to enable handoffs for this node (Network → peers).", { peer: peer.name })
+					: i18nMsg("This node has not granted {peer} the capability handoff.receive, which it needs for handoffs. Grant it in Network → {peer}.", { peer: peer.name }),
 				{ missing: ["handoff.receive"], grantedBy: direction === "received" ? peer.id : this.ctx.identity.nodeId },
 			);
 		}
@@ -275,7 +278,7 @@ export class HandoffService implements HandoffHub {
 			ackAt: row.ackAt,
 			targetSessionId: row.targetSessionId,
 			fencingToken: row.fencingToken,
-			failure: row.failureCode ? { code: row.failureCode, detail: row.failureDetail ?? "", step: row.failureStep } : null,
+			failure: row.failureCode ? { code: row.failureCode, detail: row.failureDetail ?? "", ...(row.failureI18n && { i18n: row.failureI18n }), step: row.failureStep } : null,
 			lastEventSeq: task?.lastEventSeq ?? null,
 		};
 	}
@@ -339,7 +342,7 @@ export class HandoffService implements HandoffHub {
 
 	private requireRole(id: string, role: HandoffRole): HandoffRow {
 		const row = this.store.get(id);
-		if (row.role !== role) throw ApiError.conflict(`This handoff is on its ${row.role} side here; only the ${role} node can do that`);
+		if (row.role !== role) throw ApiError.conflict(i18nMsg("This handoff is on its {side} side here; only the {role} node can do that", { side: row.role, role }));
 		return row;
 	}
 }

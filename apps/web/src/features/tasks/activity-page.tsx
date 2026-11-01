@@ -1,11 +1,12 @@
-import type { ActivityItem } from "@clam/contracts";
+import { renderI18n, type ActivityItem } from "@clam/contracts";
 import { Link, useParams } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Activity, ChevronRight, ListChecks, Loader2, MessageSquare, Network, RefreshCw, Server, type LucideIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
-import { errorMessage } from "@/lib/api";
+import { renderServerText, t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { useWorkspaces } from "@/lib/queries";
-import { relativeTime } from "@/lib/utils";
+import { formatDateTime, relativeTime } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { PageHeader } from "@/ui/page";
@@ -36,12 +37,12 @@ export default function ActivityPage() {
 					eyebrow={
 						workspaceId ? (
 							<Link to="/workspaces/$workspaceId" params={{ workspaceId }} className="hover:text-foreground">
-								{workspace?.name ?? "Workspace"}
+								{workspace?.name ?? t("Workspace")}
 							</Link>
 						) : undefined
 					}
-					title="Activity"
-					description="Tasks, discussion and connection changes, newest first."
+					title={t("Activity")}
+					description={t("Tasks, discussion and connection changes, newest first.")}
 				/>
 			</div>
 			<div ref={ref} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]">
@@ -55,16 +56,16 @@ export default function ActivityPage() {
 					) : q.error ? (
 						<EmptyState
 							icon={Activity}
-							title="Could not load activity"
-							description={errorMessage(q.error)}
+							title={t("Could not load activity")}
+							description={errorText(q.error)}
 							action={
 								<Button size="sm" variant="outline" onClick={() => void q.refetch()}>
-									<RefreshCw /> Retry
+									<RefreshCw /> {t("Retry")}
 								</Button>
 							}
 						/>
 					) : items.length === 0 ? (
-						<EmptyState icon={Activity} title="Nothing yet" description="Delegated tasks, messages from other machines and connection changes show up here." />
+						<EmptyState icon={Activity} title={t("Nothing yet")} description={t("Delegated tasks, messages from other machines and connection changes show up here.")} />
 					) : (
 						<>
 							<ul className="relative w-full" style={{ height: v.getTotalSize() }}>
@@ -80,10 +81,10 @@ export default function ActivityPage() {
 							</ul>
 							{isFetchingNextPage ? (
 								<div className="flex justify-center py-4 text-xs text-subtle" role="status">
-									<Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden /> Loading older activity
+									<Loader2 className="mr-1.5 size-4 animate-spin" aria-hidden /> {t("Loading older activity")}
 								</div>
 							) : !hasNextPage ? (
-								<p className="py-4 text-center text-xs text-subtle">That's everything.</p>
+								<p className="py-4 text-center text-xs text-subtle">{t("That's everything.")}</p>
 							) : null}
 						</>
 					)}
@@ -91,6 +92,12 @@ export default function ActivityPage() {
 			</div>
 		</div>
 	);
+}
+
+/** Task entries carry the task title as `subject` and twin only the text after it; everything else twins the whole summary. */
+function activityText(item: ActivityItem): string {
+	if (item.subject !== undefined && item.i18n) return t("{subject}: {text}", { subject: item.subject, text: renderServerText(renderI18n(item.i18n.key, item.i18n.params), item.i18n) });
+	return renderServerText(item.summary, item.i18n);
 }
 
 function Row({ item }: { item: ActivityItem }) {
@@ -101,8 +108,8 @@ function Row({ item }: { item: ActivityItem }) {
 				<Icon className="size-4" aria-hidden />
 			</span>
 			<span className="min-w-0 flex-1">
-				<span className="block break-words text-[13px] leading-snug">{item.summary}</span>
-				<span className="block text-2xs text-subtle" title={new Date(item.at).toLocaleString()}>
+				<span className="block break-words text-[13px] leading-snug">{activityText(item)}</span>
+				<span className="block text-2xs text-subtle" title={formatDateTime(item.at)}>
 					{item.nodeName} · {relativeTime(item.at)}
 				</span>
 			</span>

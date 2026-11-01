@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { DirPicker } from "@/components/dir-picker";
 import { useDebounced } from "@/features/projects/session-list";
 import { useGithubAccounts, useGithubRepos } from "@/features/settings/hooks";
-import { api, errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { api, errorText } from "@/lib/api";
 import { qk } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { useTopic, ws } from "@/lib/ws";
@@ -24,13 +25,13 @@ function cloneDone(qc: QueryClient, openProject: (projectId: string) => void, pr
 	void qc.invalidateQueries({ queryKey: qk.projectsAll });
 	void qc.invalidateQueries({ queryKey: qk.workspaces });
 	openProject(projectId);
-	toast.success(`Cloned ${label}`);
+	toast.success(t("Cloned {label}", { label }));
 }
 
 /** Keeps following a clone after its dialog is closed: one loading toast that turns into an "Open project" action. */
 function trackInBackground(op: GitOperation, label: string, qc: QueryClient, openProject: (projectId: string) => void): void {
 	const id = `clone-${op.id}`;
-	toast.loading(`Cloning ${label}…`, { id, description: op.phase ?? undefined });
+	toast.loading(t("Cloning {label}…", { label }), { id, description: op.phase ?? undefined });
 	let off = () => {};
 	let finished = false;
 	const finish = (o: GitOperation) => {
@@ -41,13 +42,13 @@ function trackInBackground(op: GitOperation, label: string, qc: QueryClient, ope
 			const projectId = o.projectId;
 			void qc.invalidateQueries({ queryKey: qk.projectsAll });
 			void qc.invalidateQueries({ queryKey: qk.workspaces });
-			toast.success(`Cloned ${label}`, { id, description: undefined, action: { label: "Open project", onClick: () => openProject(projectId) } });
-		} else toast.error(`Cloning ${label} failed`, { id, description: o.error ?? "Unknown error", duration: 12_000 });
+			toast.success(t("Cloned {label}", { label }), { id, description: undefined, action: { label: t("Open project"), onClick: () => openProject(projectId) } });
+		} else toast.error(t("Cloning {label} failed", { label }), { id, description: o.error ?? t("Unknown error"), duration: 12_000 });
 		return true;
 	};
 	off = ws.subscribe(`git-op:${op.id}`, (ev) => {
 		if (finish(ev.operation)) return;
-		toast.loading(`Cloning ${label}…${ev.operation.percent !== null ? ` ${Math.round(ev.operation.percent)}%` : ""}`, { id, description: ev.operation.phase ?? undefined });
+		toast.loading(ev.operation.percent !== null ? t("Cloning {label}… {percent}%", { label, percent: Math.round(ev.operation.percent) }) : t("Cloning {label}…", { label }), { id, description: ev.operation.phase ?? undefined });
 	});
 	void api.get<GitOperation>(routes.gitOperation(op.id)).then(finish, () => undefined);
 }
@@ -76,13 +77,13 @@ function RepoPicker({ accountId, selected, onSelect }: { accountId: string; sele
 				<span className="min-w-0 flex-1">
 					<span className="flex items-center gap-1.5 font-mono text-[13px] font-medium">
 						{selected.fullName}
-						{selected.private ? <Lock aria-label="Private" className="size-3 text-subtle" /> : null}
+						{selected.private ? <Lock aria-label={t("Private")} className="size-3 text-subtle" /> : null}
 					</span>
 					{selected.description ? <span className="block truncate text-2xs text-muted-foreground">{selected.description}</span> : null}
 				</span>
 				<Badge variant="outline">{selected.defaultBranch}</Badge>
 				<Button variant="ghost" size="sm" onClick={() => onSelect(null)}>
-					Change
+					{t("Change")}
 				</Button>
 			</div>
 		);
@@ -91,7 +92,7 @@ function RepoPicker({ accountId, selected, onSelect }: { accountId: string; sele
 		<div className="flex flex-col gap-2">
 			<div className="relative">
 				<Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle" />
-				<Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search repositories (name or description)" aria-label="Search repositories" className="pl-8" autoComplete="off" spellCheck={false} />
+				<Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("Search repositories (name or description)")} aria-label={t("Search repositories")} className="pl-8" autoComplete="off" spellCheck={false} />
 			</div>
 			<div className="scrollbar-thin max-h-48 overflow-y-auto rounded-lg shadow-[inset_0_0_0_1px_var(--border)]">
 				{repos.isPending ? (
@@ -102,10 +103,10 @@ function RepoPicker({ accountId, selected, onSelect }: { accountId: string; sele
 					</div>
 				) : repos.error ? (
 					<p role="alert" className="flex items-center gap-2 px-3 py-4 text-xs text-danger">
-						<TriangleAlert className="size-4 shrink-0" /> {errorMessage(repos.error)}
+						<TriangleAlert className="size-4 shrink-0" /> {errorText(repos.error)}
 					</p>
 				) : items.length === 0 ? (
-					<p className="px-3 py-6 text-center text-xs text-subtle">{q ? `No repositories match “${q}”.` : "This account has no repositories."}</p>
+					<p className="px-3 py-6 text-center text-xs text-subtle">{q ? t("No repositories match “{query}”.", { query: q }) : t("This account has no repositories.")}</p>
 				) : (
 					<ul>
 						{items.map((r) => (
@@ -114,18 +115,18 @@ function RepoPicker({ accountId, selected, onSelect }: { accountId: string; sele
 									<span className="min-w-0 flex-1">
 										<span className="flex items-center gap-1.5 font-mono text-xs font-medium">
 											<span className="truncate">{r.fullName}</span>
-											{r.private ? <Lock aria-label="Private" className="size-3 shrink-0 text-subtle" /> : null}
+											{r.private ? <Lock aria-label={t("Private")} className="size-3 shrink-0 text-subtle" /> : null}
 										</span>
 										{r.description ? <span className="block truncate text-2xs text-subtle">{r.description}</span> : null}
 									</span>
-									{!r.permissions.push ? <Badge variant="neutral">read-only</Badge> : null}
+									{!r.permissions.push ? <Badge variant="neutral">{t("read-only")}</Badge> : null}
 								</button>
 							</li>
 						))}
 						{repos.hasNextPage ? (
 							<li className="p-1.5">
 								<Button variant="ghost" size="sm" className="w-full" loading={repos.isFetchingNextPage} onClick={() => void repos.fetchNextPage()}>
-									Load more
+									{t("Load more")}
 								</Button>
 							</li>
 						) : null}
@@ -180,7 +181,7 @@ export default function CloneForm({ workspaceId, workspaceField, onClose }: { wo
 		setOp(o);
 		if (o.state === "succeeded" && o.projectId && !finished.current) {
 			finished.current = true;
-			cloneDone(qc, openProject, o.projectId, repo?.fullName ?? "repository");
+			cloneDone(qc, openProject, o.projectId, repo?.fullName ?? t("repository"));
 			onClose();
 		}
 	};
@@ -189,8 +190,8 @@ export default function CloneForm({ workspaceId, workspaceField, onClose }: { wo
 	// Safety net for a missed event: poll the operation while it runs.
 	useEffect(() => {
 		if (!running || !op) return;
-		const t = setInterval(() => void api.get<GitOperation>(routes.gitOperation(op.id)).then(settle, () => undefined), 1500);
-		return () => clearInterval(t);
+		const timer = setInterval(() => void api.get<GitOperation>(routes.gitOperation(op.id)).then(settle, () => undefined), 1500);
+		return () => clearInterval(timer);
 		// biome-ignore lint/correctness/useExhaustiveDependencies: settle only closes over stable props
 	}, [running, op?.id]);
 
@@ -212,24 +213,24 @@ export default function CloneForm({ workspaceId, workspaceField, onClose }: { wo
 				</div>
 				{failed ? (
 					<div role="alert" className="flex flex-col gap-2 rounded-lg bg-danger/10 px-3 py-2.5 text-xs text-danger">
-						<p className="font-medium">Clone failed</p>
-						<pre className="scrollbar-thin max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-2xs">{op.error ?? "git did not report an error."}</pre>
+						<p className="font-medium">{t("Clone failed")}</p>
+						<pre className="scrollbar-thin max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-2xs">{op.error ?? t("git did not report an error.")}</pre>
 					</div>
 				) : (
 					<div className="flex flex-col gap-1.5">
 						<div className="flex items-center justify-between text-xs text-muted-foreground">
-							<span>{op.phase ?? "Starting…"}</span>
+							<span>{op.phase ?? t("Starting…")}</span>
 							<span className="tabular font-mono">{op.percent !== null ? `${Math.round(op.percent)}%` : ""}</span>
 						</div>
 						<Progress value={op.percent ?? 100} className={cn(op.percent === null && "animate-pulse")} />
-						<p className="text-2xs text-subtle">The clone keeps running on the machine if you close this dialog.</p>
+						<p className="text-2xs text-subtle">{t("The clone keeps running on the machine if you close this dialog.")}</p>
 					</div>
 				)}
 				<DialogFooter>
 					{failed ? (
 						<>
 							<Button variant="ghost" onClick={onClose}>
-								Close
+								{t("Close")}
 							</Button>
 							<Button
 								variant="primary"
@@ -238,7 +239,7 @@ export default function CloneForm({ workspaceId, workspaceField, onClose }: { wo
 									start.reset();
 								}}
 							>
-								Try again
+								{t("Try again")}
 							</Button>
 						</>
 					) : (
@@ -246,11 +247,11 @@ export default function CloneForm({ workspaceId, workspaceField, onClose }: { wo
 							variant="outline"
 							onClick={() => {
 								finished.current = true;
-								trackInBackground(op, repo?.fullName ?? "repository", qc, openProject);
+								trackInBackground(op, repo?.fullName ?? t("repository"), qc, openProject);
 								onClose();
 							}}
 						>
-							Run in background
+							{t("Run in background")}
 						</Button>
 					)}
 				</DialogFooter>
@@ -269,14 +270,14 @@ export default function CloneForm({ workspaceId, workspaceField, onClose }: { wo
 			{workspaceField}
 			{noAccounts ? (
 				<p role="status" className="rounded-lg bg-warning/10 px-3 py-2.5 text-[13px] text-warning">
-					No usable GitHub account is connected.{" "}
+					{t("No usable GitHub account is connected.")}{" "}
 					<Link to="/settings/github" onClick={onClose} className="font-medium underline underline-offset-2">
-						Connect one in Settings → GitHub Accounts
+						{t("Connect one in Settings → GitHub Accounts")}
 					</Link>
 					.
 				</p>
 			) : (
-				<Field label="GitHub account">
+				<Field label={t("GitHub account")}>
 					{() => (
 						<Select
 							value={accountId}
@@ -286,14 +287,12 @@ export default function CloneForm({ workspaceId, workspaceField, onClose }: { wo
 							}}
 						>
 							<SelectTrigger>
-								<SelectValue placeholder={accounts.isPending ? "Loading accounts…" : "Select account"} />
+								<SelectValue placeholder={accounts.isPending ? t("Loading accounts…") : t("Select account")} />
 							</SelectTrigger>
 							<SelectContent>
 								{accounts.data?.map((a) => (
 									<SelectItem key={a.id} value={a.id} disabled={a.status === "invalid"}>
-										@{a.login}
-										{a.isDefault ? " · default" : ""}
-										{a.status === "invalid" ? " · needs reconnect" : ""}
+										{t("@{login}{isDefault, select, true { · default} other {}}{invalid, select, true { · needs reconnect} other {}}", { login: a.login, isDefault: String(a.isDefault), invalid: String(a.status === "invalid") })}
 									</SelectItem>
 								))}
 							</SelectContent>
@@ -302,16 +301,16 @@ export default function CloneForm({ workspaceId, workspaceField, onClose }: { wo
 				</Field>
 			)}
 			{accountId ? (
-				<Field label="Repository">
+				<Field label={t("Repository")}>
 					{() => <RepoPicker accountId={accountId} selected={repo} onSelect={setRepo} />}
 				</Field>
 			) : null}
 			{repo ? (
 				<>
-					<Field label="Branch" hint={`Optional — defaults to ${repo.defaultBranch}`}>
+					<Field label={t("Branch")} hint={t("Optional — defaults to {branch}", { branch: repo.defaultBranch })}>
 						{(id) => <Input id={id} value={branch} onChange={(e) => setBranch(e.target.value)} placeholder={repo.defaultBranch} className="font-mono text-xs" spellCheck={false} autoCapitalize="off" />}
 					</Field>
-					<Field label="Clone into" hint="Must not exist or be empty. Start typing for directory suggestions." error={start.error ? errorMessage(start.error) : null}>
+					<Field label={t("Clone into")} hint={t("Must not exist or be empty. Start typing for directory suggestions.")} error={start.error ? errorText(start.error) : null}>
 						{() => (
 							<DirPicker
 								value={path}
@@ -328,10 +327,10 @@ export default function CloneForm({ workspaceId, workspaceField, onClose }: { wo
 			) : null}
 			<DialogFooter>
 				<Button variant="ghost" onClick={onClose}>
-					Cancel
+					{t("Cancel")}
 				</Button>
 				<Button type="submit" variant="primary" loading={start.isPending} disabled={!ready}>
-					Clone repository
+					{t("Clone repository")}
 				</Button>
 			</DialogFooter>
 		</form>

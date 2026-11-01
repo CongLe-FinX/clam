@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
 import { ulid } from "@clam/agent-network";
-import { Task, TaskDetail, TaskMessage, type ActivityItem, type Project, type TaskResult } from "@clam/contracts";
+import { plainMsg, Task, TaskDetail, TaskMessage, type ActivityItem, type Project, type TaskResult } from "@clam/contracts";
 import { nodeEvents, peers, projects } from "@clam/database";
 import { eq } from "drizzle-orm";
 import { afterEach, describe, expect, it } from "vitest";
 import { recordPeerActivity } from "../src/tasks/activity.ts";
 import type { TaskInsert, TaskRow } from "../src/tasks/store.ts";
 import { api, connectWs, createFullHarness, type FullHarness } from "./full-harness.ts";
+import { expectActivityLocalised } from "./i18n-helpers.ts";
 import { FAST, eventually, pair, startNode } from "./net-helpers.ts";
 
 const nodes: FullHarness[] = [];
@@ -180,10 +181,10 @@ describe("activity feed", () => {
 			const id = `tsk_${ulid()}`;
 			seedTask(b, { id, peerId: aId, direction: "outgoing", workspaceId: workspace.id, title: "Ship it", executorNodeName: "exec-a" });
 			const store = b.ctx.tasks.store;
-			store.appendEvent(id, { type: "status", summary: "offered → running", payload: { from: "offered", to: "running" } });
-			store.appendEvent(id, { type: "progress", summary: "thinking hard" });
+			store.appendEvent(id, { type: "status", summary: plainMsg("offered → running"), payload: { from: "offered", to: "running" } });
+			store.appendEvent(id, { type: "progress", summary: plainMsg("thinking hard") });
 			store.insertMessage({ id: `msg_${ulid()}`, taskId: id, authorKind: "agent", authorNodeId: aId, authorNodeName: "exec-a", authorAgentName: "Coder", kind: "question", text: "Which   client\nshould I use?", createdAt: "2099-01-01T00:00:00.000Z", delivery: "local" });
-			store.appendEvent(id, { type: "result", summary: "succeeded", payload: null });
+			store.appendEvent(id, { type: "result", summary: plainMsg("succeeded"), payload: null });
 			// A revoked peer is recorded through the hook.
 			const c = await node("third-c");
 			await pair(b, c, { workspaceName: "Other" });
@@ -206,6 +207,11 @@ describe("activity feed", () => {
 			const peerItems = feed.filter((i) => i.kind === "peer");
 			expect(peerItems.map((i) => i.summary)).toEqual(expect.arrayContaining(["Peer third-c revoked", "Peer exec-a online"]));
 			expect(peerItems.every((i) => i.taskId === null && i.workspaceId === null && /^node:\d+$/.test(i.id))).toBe(true);
+			// Drift guard: a twin renders to its English summary; our own peer lines carry one, rows written with plain text and the old `peer.online` line do not.
+			expect(expectActivityLocalised(feed)).toBeGreaterThan(0);
+			expect(peerItems.find((i) => i.summary === "Peer third-c revoked")?.i18n).toEqual({ key: "Peer {name} revoked", params: { name: "third-c" } });
+			expect(peerItems.find((i) => i.summary === "Peer exec-a online")?.i18n).toBeUndefined();
+			expect(message?.i18n).toBeUndefined();
 
 			expect((await api(b).get<ActivityItem[]>("/activity?limit=2")).body.map((i) => i.id)).toEqual(feed.slice(0, 2).map((i) => i.id));
 			const older = (await api(b).get<ActivityItem[]>(`/activity?before=${encodeURIComponent(message?.at as string)}`)).body;

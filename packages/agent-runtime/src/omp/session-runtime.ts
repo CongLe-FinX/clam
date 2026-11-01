@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import type { AskAnswer, AskQuestion, MessagesPage, RuntimeState, RuntimeStatus, SessionEvent, SessionLiveState, SessionStats, Subagent, SubagentMessagesPage } from "@clam/contracts";
+import { i18nMsg, type AskAnswer, type AskQuestion, type MessagesPage, type RuntimeState, type RuntimeStatus, type SessionEvent, type SessionLiveState, type SessionStats, type Subagent, type SubagentMessagesPage } from "@clam/contracts";
 import {
 	AgentRuntimeError,
 	type HostToolProvider,
@@ -395,7 +395,8 @@ export class OmpSessionRuntime implements RuntimeSession {
 		const detail = error instanceof Error ? error.message : String(error);
 		this.log.warn({ sessionId: this.sessionId, err: detail }, "host tools were not registered");
 		if (transport !== this.transport) return; // the process is gone; the next start registers them again
-		this.emit({ type: "notice", level: "error", message: `Mesh host tools were not registered: ${detail}` });
+		const say = i18nMsg("Mesh host tools were not registered: {detail}", { detail });
+		this.emit({ type: "notice", level: "error", message: say.text, i18n: say.i18n });
 	}
 
 	/** Graceful stop; the conversation stays on disk. Idempotent. */

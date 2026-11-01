@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, ListChecks } from "lucide-react";
 import { useMemo } from "react";
+import { t } from "@/i18n";
 import { useTasks } from "@/lib/queries";
 import { cn, relativeTime } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
@@ -37,9 +38,9 @@ export function TasksCard() {
 	return (
 		<Card>
 			<CardHeader>
-				<CardTitle>Tasks</CardTitle>
+				<CardTitle>{t("Tasks")}</CardTitle>
 				<Link to="/tasks" preload="intent" className="inline-flex items-center gap-0.5 text-xs text-muted-foreground transition-colors hover:text-foreground">
-					Task board
+					{t("Task board")}
 					<ArrowUpRight className="size-3" />
 				</Link>
 			</CardHeader>
@@ -49,25 +50,25 @@ export function TasksCard() {
 				) : (
 					<>
 						<div className="flex gap-2">
-							<Count label="Waiting for you" value={s.offered.length} tone="warning" />
-							<Count label="In progress" value={s.running.length} tone="accent" />
-							<Count label="Finished today" value={s.finished.length} />
+							<Count label={t("Waiting for you")} value={s.offered.length} tone="warning" />
+							<Count label={t("In progress")} value={s.running.length} tone="accent" />
+							<Count label={t("Finished today")} value={s.finished.length} />
 						</div>
 						{s.list.length === 0 ? (
 							<p className="flex items-center gap-2 text-[13px] text-subtle">
-								<ListChecks className="size-4" aria-hidden /> No tasks yet — delegate one from the Agent Directory.
+								<ListChecks className="size-4" aria-hidden /> {t("No tasks yet — delegate one from the Agent Directory.")}
 							</p>
 						) : (
 							<ul className="flex flex-col">
-								{s.list.map((t) => (
-									<li key={t.id}>
-										<Link to="/tasks/$taskId" params={{ taskId: t.id }} className="flex min-h-11 items-center gap-2 rounded-lg px-1.5 text-[13px] outline-none hover:bg-surface-2 focus-visible:bg-surface-2">
-											<TaskStatusPill status={t.status} />
-											<span className="min-w-0 flex-1 truncate">{t.title}</span>
+								{s.list.map((task) => (
+									<li key={task.id}>
+										<Link to="/tasks/$taskId" params={{ taskId: task.id }} className="flex min-h-11 items-center gap-2 rounded-lg px-1.5 text-[13px] outline-none hover:bg-surface-2 focus-visible:bg-surface-2">
+											<TaskStatusPill status={task.status} />
+											<span className="min-w-0 flex-1 truncate">{task.title}</span>
 											<span className="hidden shrink-0 truncate text-2xs text-subtle sm:inline">
-												{t.direction === "incoming" ? "from" : "to"} {partyLabel(otherParty(t))}
+												{task.direction === "incoming" ? t("from") : t("to")} {partyLabel(otherParty(task))}
 											</span>
-											<span className="shrink-0 text-2xs text-subtle">{relativeTime(t.updatedAt)}</span>
+											<span className="shrink-0 text-2xs text-subtle">{relativeTime(task.updatedAt)}</span>
 										</Link>
 									</li>
 								))}

@@ -1,17 +1,19 @@
 import type { Checkpoint, Participant, SharedSession } from "@clam/contracts";
+import { type Msg, msg, t } from "@/i18n";
 import { PEER_DOT } from "@/features/network/format";
+import { formatDate, formatTime } from "@/lib/utils";
 import type { DotStatus } from "@/ui/status-dot";
 
 export type NodeStatus = Participant["nodeStatus"];
 
-export const NODE_STATUS_LABEL: Record<NodeStatus, string> = { self: "This machine", online: "Online", degraded: "Degraded", offline: "Offline", revoked: "Revoked" };
+export const NODE_STATUS_LABEL: Record<NodeStatus, Msg> = { self: msg("This machine"), online: msg("Online"), degraded: msg("Degraded"), offline: msg("Offline"), revoked: msg("Revoked") };
 
 export function nodeDot(status: NodeStatus): DotStatus {
 	return status === "self" ? "online" : PEER_DOT[status];
 }
 
-export const ROLE_LABEL: Record<SharedSession["localRole"], string> = { driver: "Driver", participant: "Participant", former_driver: "Moved away" };
-export const PARTICIPANT_STATE_LABEL: Record<Participant["state"], string> = { invited: "Invited", active: "Active", declined: "Declined", left: "Left", removed: "Removed" };
+export const ROLE_LABEL: Record<SharedSession["localRole"], Msg> = { driver: msg("Driver"), participant: msg("Participant"), former_driver: msg("Moved away") };
+export const PARTICIPANT_STATE_LABEL: Record<Participant["state"], Msg> = { invited: msg("Invited"), active: msg("Active"), declined: msg("Declined"), left: msg("Left"), removed: msg("Removed") };
 
 /** `agent@node`, or just the machine when the participant has no agent yet. */
 export const participantLabel = (p: Pick<Participant, "agentName" | "nodeName">): string => (p.agentName ? `${p.agentName}@${p.nodeName}` : p.nodeName);
@@ -49,13 +51,8 @@ export function remoteSessionUrl(uiUrl: string, sessionId: string | null): strin
 
 export const shortCommit = (c: string): string => c.slice(0, 7);
 
-const clock = new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit" });
-const weekday = new Intl.DateTimeFormat("en", { weekday: "long", month: "short", day: "numeric" });
-const fullDate = new Intl.DateTimeFormat("en", { year: "numeric", month: "short", day: "numeric" });
-const shortDate = new Intl.DateTimeFormat("en", { month: "short", day: "numeric" });
-
 /** Wall-clock time of a message, `14:05`. */
-export const clockTime = (ms: number): string => clock.format(ms);
+export const clockTime = (ms: number): string => formatTime(ms, { hour: "2-digit", minute: "2-digit" });
 
 /** One local calendar day as a comparable key. */
 export const dayKey = (ms: number): string => new Date(ms).toDateString();
@@ -65,8 +62,8 @@ export function dayLabel(ms: number, now = Date.now()): string {
 	const a = new Date(ms);
 	const b = new Date(now);
 	const days = Math.round((new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime() - new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime()) / 86_400_000);
-	if (days === 0) return "Today";
-	if (days === 1) return "Yesterday";
-	if (days > 1 && days < 7) return weekday.format(a);
-	return a.getFullYear() === b.getFullYear() ? shortDate.format(a) : fullDate.format(a);
+	if (days === 0) return t("Today");
+	if (days === 1) return t("Yesterday");
+	if (days > 1 && days < 7) return formatDate(a, { weekday: "long", month: "short", day: "numeric" });
+	return a.getFullYear() === b.getFullYear() ? formatDate(a, { month: "short", day: "numeric" }) : formatDate(a, { year: "numeric", month: "short", day: "numeric" });
 }

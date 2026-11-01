@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Brain, Check, Image as ImageIcon, Search } from "lucide-react";
 import type { ModelInfo } from "@clam/contracts";
-import { cn } from "@/lib/utils";
+import { T, t } from "@/i18n";
+import { cn, formatCost, formatList } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
@@ -27,8 +28,8 @@ export function useMediaQuery(query: string): boolean {
 /** Cost is USD per million tokens in OMP's catalog. */
 function price(v: number | undefined): string {
 	if (v == null) return "—";
-	if (v === 0) return "free";
-	return `$${v < 1 ? v.toFixed(2) : v.toFixed(v % 1 === 0 ? 0 : 2)}`;
+	if (v === 0) return t("free");
+	return formatCost(v);
 }
 
 export function filterModels(models: ModelInfo[], q: string, provider: string): ModelInfo[] {
@@ -60,14 +61,14 @@ export function ModelFilters({
 		<div className="flex flex-col gap-2 sm:flex-row sm:items-center">
 			<div className="relative flex-1">
 				<Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-subtle" />
-				<Input value={q} onChange={(e) => onQ(e.target.value)} placeholder="Search models" aria-label="Search models" className="pl-8" />
+				<Input value={q} onChange={(e) => onQ(e.target.value)} placeholder={t("Search models")} aria-label={t("Search models")} className="pl-8" />
 			</div>
 			<Select value={provider} onValueChange={onProvider}>
-				<SelectTrigger className="w-full sm:w-48" aria-label="Filter by provider">
+				<SelectTrigger className="w-full sm:w-48" aria-label={t("Filter by provider")}>
 					<SelectValue />
 				</SelectTrigger>
 				<SelectContent>
-					<SelectItem value={ALL}>All providers</SelectItem>
+					<SelectItem value={ALL}>{t("All providers")}</SelectItem>
 					{providers.map((p) => (
 						<SelectItem key={p} value={p}>
 							{p}
@@ -75,7 +76,7 @@ export function ModelFilters({
 					))}
 				</SelectContent>
 			</Select>
-			<span className="shrink-0 text-xs text-muted-foreground sm:w-20 sm:text-right">{count} models</span>
+			<span className="shrink-0 text-xs text-muted-foreground sm:w-20 sm:text-right">{t("{count, plural, one {# model} other {# models}}", { count })}</span>
 		</div>
 	);
 }
@@ -84,15 +85,15 @@ export function ModelCaps({ m }: { m: ModelInfo }) {
 	return (
 		<span className="flex flex-wrap items-center gap-1">
 			{m.reasoning && (
-				<Badge variant="accent" title={m.thinking.length > 0 ? `Thinking levels: ${m.thinking.join(", ")}` : "Reasoning model"}>
+				<Badge variant="accent" title={m.thinking.length > 0 ? t("Thinking levels: {levels}", { levels: formatList(m.thinking) }) : t("Reasoning model")}>
 					<Brain />
-					{m.thinking.length > 0 ? `thinking · ${m.thinking.length}` : "reasoning"}
+					{m.thinking.length > 0 ? t("thinking · {count}", { count: m.thinking.length }) : t("reasoning")}
 				</Badge>
 			)}
 			{m.input.includes("image") && (
 				<Badge variant="neutral">
 					<ImageIcon />
-					vision
+					{t("vision")}
 				</Badge>
 			)}
 		</span>
@@ -121,14 +122,14 @@ function ModelList({
 		<div ref={ref} className={cn("scrollbar-thin overflow-y-auto overscroll-contain rounded-lg border border-border", heightClass)}>
 			{wide && (
 				<div className="sticky top-0 z-10 grid grid-cols-[minmax(0,2.2fr)_5.5rem_5.5rem_10rem_minmax(0,1.4fr)] gap-3 border-b border-border bg-surface-1 px-3 py-2 text-2xs font-medium uppercase tracking-wider text-subtle">
-					<span>Model</span>
-					<span className="text-right">Context</span>
-					<span className="text-right">Max out</span>
-					<span className="text-right">$ / M tok (in · out)</span>
-					<span>Capabilities</span>
+					<span>{t("Model")}</span>
+					<span className="text-right">{t("Context")}</span>
+					<span className="text-right">{t("Max out")}</span>
+					<span className="text-right">{t("$ / M tok (in · out)")}</span>
+					<span>{t("Capabilities")}</span>
 				</div>
 			)}
-			{models.length === 0 && <div className="py-10 text-center text-sm text-muted-foreground">No models match.</div>}
+			{models.length === 0 && <div className="py-10 text-center text-sm text-muted-foreground">{t("No models match.")}</div>}
 			<div style={{ height: virt.getTotalSize(), position: "relative" }}>
 				{virt.getVirtualItems().map((v) => {
 					const m = models[v.index]!;
@@ -166,8 +167,8 @@ function ModelList({
 								</>
 							) : (
 								<span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-									<span>ctx {m.contextWindow ? fmtTokens(m.contextWindow) : "—"}</span>
-									<span>{m.cost ? `${price(m.cost.input)} · ${price(m.cost.output)} /M` : "price —"}</span>
+									<span>{t("ctx {size}", { size: m.contextWindow ? fmtTokens(m.contextWindow) : "—" })}</span>
+									<span>{m.cost ? t("{input} · {output} /M", { input: price(m.cost.input), output: price(m.cost.output) }) : t("price —")}</span>
 									<ModelCaps m={m} />
 								</span>
 							)}
@@ -232,10 +233,16 @@ export function ModelPickerDialog({
 			<DialogContent className="max-w-3xl">
 				<DialogHeader>
 					<DialogTitle>
-						Choose model for <span className="font-mono">{role}</span>
+						<T text="Choose model for <code>{role}</code>" params={{ role }} tags={{ code: <span className="font-mono" /> }} />
 					</DialogTitle>
 					<DialogDescription>
-						Writes <span className="font-mono">modelRoles.{role}</span> in your OMP config.{current ? <> Currently <span className="font-mono">{current}</span>.</> : null}
+						<T text="Writes <code>modelRoles.{role}</code> in your OMP config." params={{ role }} tags={{ code: <span className="font-mono" /> }} />
+						{current ? (
+							<>
+								{" "}
+								<T text="Currently <code>{current}</code>." params={{ current }} tags={{ code: <span className="font-mono" /> }} />
+							</>
+						) : null}
 					</DialogDescription>
 				</DialogHeader>
 				<ModelFilters models={models} q={q} onQ={setQ} provider={provider} onProvider={setProvider} count={filtered.length} />
@@ -250,7 +257,7 @@ export function ModelPickerDialog({
 				/>
 				{levels.length > 0 && (
 					<div className="flex flex-wrap items-center gap-2 text-sm">
-						<span className="text-muted-foreground">Thinking level</span>
+						<span className="text-muted-foreground">{t("Thinking level")}</span>
 						{["", ...levels].map((l) => (
 							<button
 								key={l || "default"}
@@ -261,17 +268,17 @@ export function ModelPickerDialog({
 									level === l ? "border-accent bg-accent-soft text-accent" : "border-border text-muted-foreground hover:text-foreground",
 								)}
 							>
-								{l || "model default"}
+								{l || t("model default")}
 							</button>
 						))}
 					</div>
 				)}
 				<DialogFooter>
 					<Button variant="ghost" onClick={() => onOpenChange(false)}>
-						Cancel
+						{t("Cancel")}
 					</Button>
 					<Button disabled={!selector} loading={busy} onClick={() => selector && onPick(selector)}>
-						{selector ? `Use ${selector}` : "Select a model"}
+						{selector ? t("Use {selector}", { selector }) : t("Select a model")}
 					</Button>
 				</DialogFooter>
 			</DialogContent>

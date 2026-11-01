@@ -1,4 +1,5 @@
 import { rm } from "node:fs/promises";
+import { type I18nMessage, i18nMsg } from "@clam/contracts";
 import { projects, tasks } from "@clam/database";
 import type { HandoffManifest } from "@clam/handoff-engine";
 import { eq } from "drizzle-orm";
@@ -27,17 +28,17 @@ export function taskBackupOf(row: Pick<HandoffRow, "meta">): TaskBackup | null {
 }
 
 /** What the local task row for this task id says about the handoff: how it would be persisted, and the epoch this node knows (null for a task it never saw). */
-export function classifyTask(hub: HandoffHub, manifest: HandoffManifest): { mode: PersistMode; knownEpoch: number | null; task: TaskRow | null } | { conflict: string } {
+export function classifyTask(hub: HandoffHub, manifest: HandoffManifest): { mode: PersistMode; knownEpoch: number | null; task: TaskRow | null } | { conflict: I18nMessage } {
 	const task = hub.ctx.tasks.store.find(manifest.task.id) ?? null;
 	if (!task) return { mode: "new", knownEpoch: null, task: null };
 	const self = hub.ctx.identity.nodeId;
 	if (task.direction === "outgoing") {
-		if (manifest.task.sender?.nodeId !== self) return { conflict: "This node knows that task as one it delegated to another node, but it is not the task's sender in the manifest" };
-		if (["succeeded", "failed", "cancelled", "rejected", "handed_off"].includes(task.status)) return { conflict: `The task is ${task.status} on this node; a finished task cannot be handed back` };
+		if (manifest.task.sender?.nodeId !== self) return { conflict: i18nMsg("This node knows that task as one it delegated to another node, but it is not the task's sender in the manifest") };
+		if (["succeeded", "failed", "cancelled", "rejected", "handed_off"].includes(task.status)) return { conflict: i18nMsg("The task is {status} on this node; a finished task cannot be handed back", { status: task.status }) };
 		return { mode: "home", knownEpoch: task.epoch, task };
 	}
 	if (task.status === "handed_off" && task.fenced) return { mode: "revive", knownEpoch: Math.max(task.epoch, task.highestSeenEpoch), task };
-	return { conflict: `This node already executes that task (${task.status}, epoch ${task.epoch})` };
+	return { conflict: i18nMsg("This node already executes that task ({status}, epoch {epoch})", { status: task.status, epoch: task.epoch }) };
 }
 
 /**
@@ -56,7 +57,7 @@ export function persistTaskRow(hub: HandoffHub, row: HandoffRow, manifest: Hando
 	if ("conflict" in classified) throw new HandoffStepError("manifest_invalid", classified.conflict, 2);
 	const { mode } = classified;
 	const sender = manifest.task.sender;
-	if (!sender) throw new HandoffStepError("manifest_invalid", "The manifest names no sender for the task", 2);
+	if (!sender) throw new HandoffStepError("manifest_invalid", i18nMsg("The manifest names no sender for the task"), 2);
 
 	hub.store.transaction(() => {
 		const executor = { executorNodeId: self, executorNodeName: selfName, executorAgentId: agent.id, executorAgentName: agent.name };
@@ -163,7 +164,7 @@ export function acquireTaskRow(hub: HandoffHub, row: HandoffRow, manifest: Hando
 			events.push(
 				tasksStore.appendEvent(task.id, {
 					type: "note",
-					summary: `Handed over from ${manifest.source.name} (epoch ${row.fromEpoch} → ${row.toEpoch}); continuing on ${hub.nodeName()}`,
+					summary: i18nMsg("Handed over from {source} (epoch {from} → {to}); continuing on {node}", { source: manifest.source.name, from: row.fromEpoch, to: row.toEpoch, node: hub.nodeName() }),
 					payload: { handoffId: row.id, fromNodeId: manifest.source.nodeId, fromEpoch: row.fromEpoch, toEpoch: row.toEpoch },
 				}),
 			);

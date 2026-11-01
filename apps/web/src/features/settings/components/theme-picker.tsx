@@ -1,19 +1,20 @@
 import { Monitor, Moon, Sun, type LucideIcon } from "lucide-react";
-import { setThemePref, THEME_LABEL, type ThemePref, useThemePref } from "@/lib/theme";
+import { msg, t, tr, type Msg } from "@/i18n";
+import { setThemePref, type ThemePref, useThemePref } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
-const OPTIONS: readonly { value: ThemePref; icon: LucideIcon; hint: string }[] = [
-	{ value: "system", icon: Monitor, hint: "Follows this device" },
-	{ value: "light", icon: Sun, hint: "Always light" },
-	{ value: "dark", icon: Moon, hint: "Always dark" },
+const OPTIONS: readonly { value: ThemePref; icon: LucideIcon; label: Msg; hint: Msg }[] = [
+	{ value: "system", icon: Monitor, label: msg("System"), hint: msg("Follows this device") },
+	{ value: "light", icon: Sun, label: msg("Light"), hint: msg("Always light") },
+	{ value: "dark", icon: Moon, label: msg("Dark"), hint: msg("Always dark") },
 ];
 
 /** System / Light / Dark. Stored per browser (each device can differ), applied instantly with a cross-fade. */
 export function ThemePicker() {
 	const pref = useThemePref();
 	return (
-		<div role="radiogroup" aria-label="Theme" className="grid grid-cols-3 gap-2">
-			{OPTIONS.map(({ value, icon: Icon, hint }) => {
+		<div role="radiogroup" aria-label={t("Theme")} className="grid grid-cols-3 gap-2">
+			{OPTIONS.map(({ value, icon: Icon, label, hint }) => {
 				const active = pref === value;
 				return (
 					<button
@@ -31,9 +32,9 @@ export function ThemePicker() {
 						<ThemeSwatch value={value} />
 						<span className="flex items-center gap-1.5 text-[13px] font-medium">
 							<Icon className={cn("size-3.5", active ? "text-accent" : "text-muted-foreground")} />
-							{THEME_LABEL[value]}
+							{tr(label)}
 						</span>
-						<span className="text-2xs text-subtle">{hint}</span>
+						<span className="text-2xs text-subtle">{tr(hint)}</span>
 					</button>
 				);
 			})}

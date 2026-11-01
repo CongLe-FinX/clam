@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDate } from "./common.ts";
+import { I18nText, IsoDate } from "./common.ts";
 
 export const NodeInfo = z.object({
 	id: z.string(),
@@ -27,6 +27,8 @@ export const HealthCheck = z.object({
 	name: z.string(),
 	status: HealthStatus,
 	message: z.string().optional(),
+	/** Structured twin of `message` for localisation when the message is our own text; absent otherwise. */
+	i18n: I18nText.optional(),
 	latencyMs: z.number().optional(),
 });
 export type HealthCheck = z.infer<typeof HealthCheck>;
@@ -57,9 +59,11 @@ export const NodeSettings = z.object({
 	autoAcceptHandoffs: z.boolean(),
 	/** Read-only explanation of the OS login entry: where it lives, when it takes effect, why it is off. Ignored in PATCH. */
 	autoStartDetail: z.string().optional(),
+	/** Structured twin of `autoStartDetail` for localisation. Ignored in PATCH. */
+	autoStartI18n: I18nText.optional(),
 });
 export type NodeSettings = z.infer<typeof NodeSettings>;
-export const NodeSettingsPatch = NodeSettings.omit({ autoStartDetail: true }).partial();
+export const NodeSettingsPatch = NodeSettings.omit({ autoStartDetail: true, autoStartI18n: true }).partial();
 export type NodeSettingsPatch = z.infer<typeof NodeSettingsPatch>;
 
 export const SecurityInfo = z.object({

@@ -4,6 +4,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { CloudDownload, FolderPlus, FolderOpen, Info } from "lucide-react";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { DirPicker } from "@/components/dir-picker";
 import { api, errorMessage } from "@/lib/api";
 import { lazyPreload } from "@/lib/lazy-preload";
@@ -114,7 +115,7 @@ function WorkspaceDialog({ workspaceId, onClose }: { workspaceId?: string; onClo
 		onSuccess: (ws) => {
 			void qc.invalidateQueries({ queryKey: qk.workspaces });
 			void qc.invalidateQueries({ queryKey: qk.workspace(ws.id) });
-			toast.success(workspaceId ? "Workspace updated" : `Workspace “${ws.name}” created`);
+			toast.success(workspaceId ? t("Workspace updated") : t("Workspace “{name}” created", { name: ws.name }));
 			onClose();
 			if (!workspaceId) void navigate({ to: "/workspaces/$workspaceId", params: { workspaceId: ws.id } });
 		},
@@ -125,8 +126,8 @@ function WorkspaceDialog({ workspaceId, onClose }: { workspaceId?: string; onClo
 		<Dialog open onOpenChange={(o) => !o && onClose()}>
 			<DialogContent>
 				<DialogHeader>
-					<DialogTitle>{workspaceId ? "Edit workspace" : "New workspace"}</DialogTitle>
-					<DialogDescription>A workspace groups related projects and the agents working on them.</DialogDescription>
+					<DialogTitle>{workspaceId ? t("Edit workspace") : t("New workspace")}</DialogTitle>
+					<DialogDescription>{t("A workspace groups related projects and the agents working on them.")}</DialogDescription>
 				</DialogHeader>
 				<form
 					className="flex flex-col gap-4"
@@ -135,16 +136,16 @@ function WorkspaceDialog({ workspaceId, onClose }: { workspaceId?: string; onClo
 						if (name.trim()) save.mutate();
 					}}
 				>
-					<Field label="Name">{(id) => <Input id={id} autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder="e.g. Payments platform" />}</Field>
-					<Field label="Description" hint="Optional">
+					<Field label={t("Name")}>{(id) => <Input id={id} autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={80} placeholder={t("e.g. Payments platform")} />}</Field>
+					<Field label={t("Description")} hint={t("Optional")}>
 						{(id) => <Textarea id={id} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} rows={3} />}
 					</Field>
 					<DialogFooter>
 						<Button variant="ghost" onClick={onClose}>
-							Cancel
+							{t("Cancel")}
 						</Button>
 						<Button type="submit" variant="primary" loading={save.isPending} disabled={!name.trim()}>
-							{workspaceId ? "Save changes" : "Create workspace"}
+							{workspaceId ? t("Save changes") : t("Create workspace")}
 						</Button>
 					</DialogFooter>
 				</form>
@@ -177,7 +178,7 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 		onSuccess: (p) => {
 			void qc.invalidateQueries({ queryKey: qk.projectsAll });
 			void qc.invalidateQueries({ queryKey: qk.workspaces });
-			toast.success(`Project “${p.name}” added`);
+			toast.success(t("Project “{name}” added", { name: p.name }));
 			onClose();
 			void navigate({ to: "/projects/$projectId", params: { projectId: p.id } });
 		},
@@ -185,11 +186,11 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 
 	const ready = workspaceId && name.trim() && (mode === "empty" || path.trim());
 	const workspaceField = initialWs ? null : (
-		<Field label="Workspace">
+		<Field label={t("Workspace")}>
 			{() => (
 				<Select value={workspaceId} onValueChange={setWorkspaceId}>
 					<SelectTrigger>
-						<SelectValue placeholder={workspaces.data?.length === 0 ? "Create a workspace first" : "Select workspace"} />
+						<SelectValue placeholder={workspaces.data?.length === 0 ? t("Create a workspace first") : t("Select workspace")} />
 					</SelectTrigger>
 					<SelectContent>
 						{workspaces.data?.map((w) => (
@@ -206,27 +207,28 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 		<Dialog open onOpenChange={(o) => !o && onClose()}>
 			<DialogContent className={cn(mode === "clone" && "max-w-xl")}>
 				<DialogHeader>
-					<DialogTitle>{mode === "clone" ? "Clone from GitHub" : mode === "empty" ? "New empty folder" : "Add project"}</DialogTitle>
+					<DialogTitle>{mode === "clone" ? t("Clone from GitHub") : mode === "empty" ? t("New empty folder") : t("Add project")}</DialogTitle>
 					<DialogDescription>
 						{mode === "clone"
-							? "Clone a repository with one of your connected GitHub accounts into a new project."
+							? t("Clone a repository with one of your connected GitHub accounts into a new project.")
 							: mode === "empty"
-								? "Start from nothing: CL Agent Mesh creates an empty folder for the project. No Git repository is needed."
-								: "Point to an existing directory on this machine, with or without Git. Agents run with it as their working directory."}
+								? t("Start from nothing: CL Agent Mesh creates an empty folder for the project. No Git repository is needed.")
+								: t("Point to an existing directory on this machine, with or without Git. Agents run with it as their working directory.")}
 					</DialogDescription>
 				</DialogHeader>
-				<div role="group" aria-label="How to add the project" className="flex rounded-lg bg-surface-2 p-0.5 text-xs font-medium">
+				<div role="group" aria-label={t("How to add the project")} className="flex rounded-lg bg-surface-2 p-0.5 text-xs font-medium">
 					{(
 						[
-							["existing", "Existing directory"],
-							["empty", "New empty folder"],
-							["clone", "Clone from GitHub"],
+							["existing", t("Existing directory")],
+							["empty", t("New empty folder")],
+							["clone", t("Clone from GitHub")],
 						] as const
 					).map(([id, label]) => (
 						<button
 							key={id}
 							type="button"
 							aria-pressed={mode === id}
+							title={label}
 							onClick={() => setMode(id)}
 							className={cn(
 								"inline-flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-10",
@@ -263,11 +265,11 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 							<p className="flex gap-2 rounded-lg bg-surface-2 p-3 text-xs text-muted-foreground">
 								<Info aria-hidden className="mt-0.5 size-3.5 shrink-0 text-accent" />
 								<span>
-									The folder lives in this machine&apos;s CL Agent Mesh data directory. Agents can create and edit files there, and you can delegate tasks or share sessions from it to other machines without any repository — files travel as bundles you preview before applying.
+									{t("The folder lives in this machine's CL Agent Mesh data directory. Agents can create and edit files there, and you can delegate tasks or share sessions from it to other machines without any repository — files travel as bundles you preview before applying.")}
 								</span>
 							</p>
 						) : (
-							<Field label="Directory" hint="Absolute path. Start typing to see local directories." error={create.error ? errorMessage(create.error) : null}>
+							<Field label={t("Directory")} hint={t("Absolute path. Start typing to see local directories.")} error={create.error ? errorMessage(create.error) : null}>
 								{() => (
 									<DirPicker
 										value={path}
@@ -280,12 +282,12 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 								)}
 							</Field>
 						)}
-						<Field label="Name" error={mode === "empty" && create.error ? errorMessage(create.error) : null}>
+						<Field label={t("Name")} error={mode === "empty" && create.error ? errorMessage(create.error) : null}>
 							{(id) => (
 								<Input
 									id={id}
 									autoFocus={mode === "empty"}
-									placeholder={mode === "empty" ? "e.g. Research notes" : undefined}
+									placeholder={mode === "empty" ? t("e.g. Research notes") : undefined}
 									value={name}
 									onChange={(e) => {
 										setNameTouched(true);
@@ -297,10 +299,10 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 						</Field>
 						<DialogFooter>
 							<Button variant="ghost" onClick={onClose}>
-								Cancel
+								{t("Cancel")}
 							</Button>
 							<Button type="submit" variant="primary" loading={create.isPending} disabled={!ready}>
-								{mode === "empty" ? "Create project" : "Add project"}
+								{mode === "empty" ? t("Create project") : t("Add project")}
 							</Button>
 						</DialogFooter>
 					</form>
@@ -350,8 +352,8 @@ function SessionDialog({ projectId: initialProject, onClose }: { projectId?: str
 		<Dialog open onOpenChange={(o) => !o && onClose()}>
 			<DialogContent>
 				<DialogHeader>
-					<DialogTitle>New agent session</DialogTitle>
-					<DialogDescription>Starts an OMP runtime in the project directory.</DialogDescription>
+					<DialogTitle>{t("New agent session")}</DialogTitle>
+					<DialogDescription>{t("Starts an OMP runtime in the project directory.")}</DialogDescription>
 				</DialogHeader>
 				<form
 					className="flex flex-col gap-4 overflow-y-auto"
@@ -360,11 +362,11 @@ function SessionDialog({ projectId: initialProject, onClose }: { projectId?: str
 						if (projectId) create.mutate();
 					}}
 				>
-					<Field label="Project">
+					<Field label={t("Project")}>
 						{() => (
 							<Select value={projectId} onValueChange={setProjectId}>
 								<SelectTrigger>
-									<SelectValue placeholder={projects.data?.length === 0 ? "Add a project first" : "Select project"} />
+									<SelectValue placeholder={projects.data?.length === 0 ? t("Add a project first") : t("Select project")} />
 								</SelectTrigger>
 								<SelectContent>
 									{projects.data?.map((p) => (
@@ -376,17 +378,17 @@ function SessionDialog({ projectId: initialProject, onClose }: { projectId?: str
 							</Select>
 						)}
 					</Field>
-					<Field label="Title" hint="Optional — defaults to the first prompt">
+					<Field label={t("Title")} hint={t("Optional — defaults to the first prompt")}>
 						{(id) => <Input id={id} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} />}
 					</Field>
-					<Field label="Model">
+					<Field label={t("Model")}>
 						{() => (
 							<Select value={model} onValueChange={setModel}>
 								<SelectTrigger>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value={DEFAULT_MODEL}>OMP default</SelectItem>
+									<SelectItem value={DEFAULT_MODEL}>{t("OMP default")}</SelectItem>
 									{models.data?.map((m) => (
 										<SelectItem key={m.selector} value={m.selector}>
 											<span className={cn("font-mono text-xs")}>{m.selector}</span>
@@ -396,15 +398,15 @@ function SessionDialog({ projectId: initialProject, onClose }: { projectId?: str
 							</Select>
 						)}
 					</Field>
-					<Field label="First prompt" hint="Optional — sent as soon as the runtime is ready">
+					<Field label={t("First prompt")} hint={t("Optional — sent as soon as the runtime is ready")}>
 						{(id) => <Textarea id={id} value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} />}
 					</Field>
 					<DialogFooter>
 						<Button variant="ghost" onClick={onClose}>
-							Cancel
+							{t("Cancel")}
 						</Button>
 						<Button type="submit" variant="primary" loading={create.isPending} disabled={!projectId}>
-							Start session
+							{t("Start session")}
 						</Button>
 					</DialogFooter>
 				</form>

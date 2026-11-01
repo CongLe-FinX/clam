@@ -1,6 +1,7 @@
 import type { SharedTopicEvent } from "@clam/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { qk } from "@/lib/queries";
 import { ws } from "@/lib/ws";
 import { applySharedEvent } from "./hooks.ts";
@@ -23,11 +24,11 @@ export function startSharedBridge(qc: QueryClient, openInvites: () => void): () 
 				// One notice per invite (the invite frame can repeat); none while the inbox itself is on screen.
 				if (inviteToasted[i.id] || location.pathname === "/shared") return;
 				inviteToasted[i.id] = true;
-				toast(`${i.from.agentName ? `${i.from.agentName}@` : ""}${i.from.nodeName} invites you to a shared session`, {
+				toast(t("{from} invites you to a shared session", { from: `${i.from.agentName ? `${i.from.agentName}@` : ""}${i.from.nodeName}` }), {
 					id: `shared-invite-${i.id}`,
 					description: i.title,
 					duration: 20_000,
-					action: { label: "Review", onClick: openInvites },
+					action: { label: t("Review"), onClick: openInvites },
 				});
 			} else {
 				toast.dismiss(`shared-invite-${i.id}`);

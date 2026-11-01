@@ -5,7 +5,8 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LazyMarkdown } from "@/components/lazy-markdown";
-import { errorMessage } from "@/lib/api";
+import { msg, T, t, tr } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { lineDiff } from "@/lib/line-diff";
 import { qk, useProjects } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -19,9 +20,10 @@ import { CONTEXT_TYPES, contextTypeInfo } from "./format.ts";
 import { isStaleVersion, type UpdateContextInput, useContextMutations } from "./hooks.ts";
 import { authorLabel, DiffStat, DiffView } from "./versions.tsx";
 
-export const SHAREABLE_OFF_COPY = "Private — stays on this machine only. It is never sent to other machines and never written to Git.";
-export const SHAREABLE_ON_COPY =
-	"Shareable — synced to every member machine of this workspace and may be exported to .clmesh/ in the project's Git repository (after the secret scanner). Don't put secrets here.";
+export const SHAREABLE_OFF_COPY = msg("Private — stays on this machine only. It is never sent to other machines and never written to Git.");
+export const SHAREABLE_ON_COPY = msg(
+	"Shareable — synced to every member machine of this workspace and may be exported to .clmesh/ in the project's Git repository (after the secret scanner). Don't put secrets here.",
+);
 
 /** Sentinel for "no project" in the scope select (Radix Select values cannot be empty). */
 export const WORKSPACE_SCOPE = "workspace";
@@ -36,10 +38,10 @@ export function ShareableToggle({ checked, onCheckedChange, disabled, className 
 			<Switch id={id} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} aria-describedby={`${id}-copy`} className="mt-0.5" />
 			<div className="flex min-w-0 flex-col gap-1">
 				<Label htmlFor={id} className={cn("flex items-center gap-1.5 text-[13px] font-medium", checked ? "text-warning" : "text-foreground")}>
-					<Icon className="size-3.5" aria-hidden /> {checked ? "Shareable" : "Private"}
+					<Icon className="size-3.5" aria-hidden /> {checked ? t("Shareable") : t("Private")}
 				</Label>
 				<p id={`${id}-copy`} className="text-xs text-muted-foreground">
-					{checked ? SHAREABLE_ON_COPY : SHAREABLE_OFF_COPY}
+					{tr(checked ? SHAREABLE_ON_COPY : SHAREABLE_OFF_COPY)}
 				</p>
 			</div>
 		</div>
@@ -55,8 +57,8 @@ export function MarkdownEditor({
 	onSubmit,
 	disabled,
 	id,
-	placeholder = "Write in Markdown…",
-	"aria-label": ariaLabel = "Content (Markdown)",
+	placeholder,
+	"aria-label": ariaLabel,
 	autoFocus,
 	className,
 }: {
@@ -83,28 +85,31 @@ export function MarkdownEditor({
 
 	return (
 		<div className={cn("flex min-w-0 flex-col gap-2", className)}>
-			<div role="group" aria-label="Editor mode" className="flex w-full rounded-lg bg-surface-2 p-0.5 sm:w-fit">
-				{(["Write", "Preview"] as const).map((m) => {
-					const active = (m === "Preview") === preview;
+			<div role="group" aria-label={t("Editor mode")} className="flex w-full rounded-lg bg-surface-2 p-0.5 sm:w-fit">
+				{([
+					{ id: "write", label: msg("Write") },
+					{ id: "preview", label: msg("Preview") },
+				] as const).map((m) => {
+					const active = (m.id === "preview") === preview;
 					return (
 						<button
-							key={m}
+							key={m.id}
 							type="button"
 							aria-pressed={active}
-							onClick={() => setPreview(m === "Preview")}
+							onClick={() => setPreview(m.id === "preview")}
 							className={cn(
 								"inline-flex h-7 flex-1 items-center justify-center rounded-md px-4 text-xs font-medium outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-11 sm:flex-none",
 								active ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:text-foreground",
 							)}
 						>
-							{m}
+							{tr(m.label)}
 						</button>
 					);
 				})}
 			</div>
 			{preview ? (
-				<div className="scrollbar-thin min-h-[12rem] min-w-0 overflow-y-auto rounded-lg bg-surface-1 p-4 shadow-[inset_0_0_0_1px_var(--border-strong)]" aria-label="Preview">
-					{value.trim() ? <LazyMarkdown text={value} /> : <p className="text-[13px] text-subtle">Nothing to preview yet.</p>}
+				<div className="scrollbar-thin min-h-[12rem] min-w-0 overflow-y-auto rounded-lg bg-surface-1 p-4 shadow-[inset_0_0_0_1px_var(--border-strong)]" aria-label={t("Preview")}>
+					{value.trim() ? <LazyMarkdown text={value} /> : <p className="text-[13px] text-subtle">{t("Nothing to preview yet.")}</p>}
 				</div>
 			) : (
 				<textarea
@@ -116,8 +121,8 @@ export function MarkdownEditor({
 					autoFocus={autoFocus}
 					maxLength={200_000}
 					spellCheck
-					aria-label={ariaLabel}
-					placeholder={placeholder}
+					aria-label={ariaLabel ?? t("Content (Markdown)")}
+					placeholder={placeholder ?? t("Write in Markdown…")}
 					onChange={(e) => onChange(e.target.value)}
 					onKeyDown={(e) => {
 						if (onSubmit && e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
@@ -140,11 +145,11 @@ export function ScopeSelect({ workspaceId, value, onChange, disabled, id }: { wo
 	const list = (projects.data ?? []).filter((p) => p.workspaceId === workspaceId);
 	return (
 		<Select value={value} onValueChange={onChange} disabled={disabled}>
-			<SelectTrigger id={id} aria-label="Scope">
+			<SelectTrigger id={id} aria-label={t("Scope")}>
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>
-				<SelectItem value={WORKSPACE_SCOPE}>Workspace-wide</SelectItem>
+				<SelectItem value={WORKSPACE_SCOPE}>{t("Workspace-wide")}</SelectItem>
 				{list.map((p) => (
 					<SelectItem key={p.id} value={p.id}>
 						{p.name}
@@ -158,13 +163,13 @@ export function ScopeSelect({ workspaceId, value, onChange, disabled, id }: { wo
 export function TypeSelect({ value, onChange, disabled, id }: { value: ContextType; onChange: (v: ContextType) => void; disabled?: boolean; id?: string }) {
 	return (
 		<Select value={value} onValueChange={(v) => onChange(v as ContextType)} disabled={disabled}>
-			<SelectTrigger id={id} aria-label="Type">
+			<SelectTrigger id={id} aria-label={t("Type")}>
 				<SelectValue />
 			</SelectTrigger>
 			<SelectContent>
-				{CONTEXT_TYPES.map((t) => (
-					<SelectItem key={t.id} value={t.id}>
-						{t.label}
+				{CONTEXT_TYPES.map((ty) => (
+					<SelectItem key={ty.id} value={ty.id}>
+						{tr(ty.label)}
 					</SelectItem>
 				))}
 			</SelectContent>
@@ -199,11 +204,11 @@ function StaleBanner({
 			<div className="flex items-start gap-2">
 				<TriangleAlert className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
 				<div className="flex min-w-0 flex-col gap-0.5">
-					<p className="text-[13px] font-medium text-warning">{loading ? "This was edited elsewhere — loading the latest version…" : `Edited by ${authorLabel(latest.author)} while you were editing`}</p>
+					<p className="text-[13px] font-medium text-warning">{loading ? t("This was edited elsewhere — loading the latest version…") : t("Edited by {name} while you were editing", { name: authorLabel(latest.author) })}</p>
 					<p className="text-xs text-muted-foreground">
 						{loading
-							? "Your draft is kept."
-							: `Your edits are based on v${base.version}; the latest is v${latest.version}. Nothing was overwritten and your draft is kept. Both versions stay in History whichever you choose.`}
+							? t("Your draft is kept.")
+							: t("Your edits are based on v{base}; the latest is v{latest}. Nothing was overwritten and your draft is kept. Both versions stay in History whichever you choose.", { base: base.version, latest: latest.version })}
 					</p>
 				</div>
 			</div>
@@ -211,22 +216,22 @@ function StaleBanner({
 				<div className="flex min-w-0 flex-col gap-1.5">
 					<div className="flex items-center gap-2 text-xs text-muted-foreground">
 						<span>
-							Their changes (v{base.version} → v{latest.version})
+							{t("Their changes (v{base} → v{latest})", { base: base.version, latest: latest.version })}
 						</span>
 						<DiffStat ops={ops} />
 					</div>
-					<DiffView ops={ops} label="Remote changes since your base version" className="max-h-60" />
+					<DiffView ops={ops} label={t("Remote changes since your base version")} className="max-h-60" />
 				</div>
 			)}
 			<div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-				<Button size="sm" variant="primary" onClick={onReapply} loading={saving} disabled={!canReapply} title="Save your draft as a new version on top of the latest one">
-					<RotateCcw /> Reapply my edits on top
+				<Button size="sm" variant="primary" onClick={onReapply} loading={saving} disabled={!canReapply} title={t("Save your draft as a new version on top of the latest one")}>
+					<RotateCcw /> {t("Reapply my edits on top")}
 				</Button>
 				<Button size="sm" variant="outline" onClick={onCopy}>
-					<Copy /> Copy my text
+					<Copy /> {t("Copy my text")}
 				</Button>
 				<Button size="sm" variant="ghost" onClick={onDiscard} disabled={saving}>
-					Discard mine
+					{t("Discard mine")}
 				</Button>
 			</div>
 		</div>
@@ -286,15 +291,15 @@ export function ContextEditor({
 			{ id: context.id, body: patch },
 			{
 				onSuccess: (c) => {
-					toast.success(`Saved as v${c.version}`);
+					toast.success(t("Saved as v{version}", { version: c.version }));
 					onDone(c);
 				},
 				onError: (e) => {
 					if (isStaleVersion(e)) {
 						setStaleHit(true);
 						void qc.invalidateQueries({ queryKey: qk.context(context.id) });
-						toast.warning("Edited elsewhere", { description: "Your draft is kept. Review the changes below." });
-					} else toast.error("Could not save", { description: errorMessage(e) });
+						toast.warning(t("Edited elsewhere"), { description: t("Your draft is kept. Review the changes below.") });
+					} else toast.error(t("Could not save"), { description: errorText(e) });
 				},
 			},
 		);
@@ -303,8 +308,8 @@ export function ContextEditor({
 	const copyMine = () => {
 		void navigator.clipboard
 			?.writeText(body)
-			.then(() => toast.success("Copied your text"))
-			.catch(() => toast.error("Could not copy", { description: "Select the text and copy it manually." }));
+			.then(() => toast.success(t("Copied your text")))
+			.catch(() => toast.error(t("Could not copy"), { description: t("Select the text and copy it manually.") }));
 	};
 
 	const showStale = dirty && (remoteChanged || staleHit);
@@ -333,7 +338,7 @@ export function ContextEditor({
 					onDiscard={() => onCancel()}
 				/>
 			) : null}
-			<Field label="Title" hint={`${contextTypeInfo(context.type).label} · type and scope cannot be changed after creation.`}>
+			<Field label={t("Title")} hint={t("{type} · type and scope cannot be changed after creation.", { type: tr(contextTypeInfo(context.type).label) })}>
 				{() => (
 					<Input
 						id={titleId}
@@ -348,27 +353,27 @@ export function ContextEditor({
 							}
 						}}
 						aria-invalid={title.trim().length === 0}
-						placeholder="Short, descriptive title"
+						placeholder={t("Short, descriptive title")}
 					/>
 				)}
 			</Field>
 			<MarkdownEditor value={body} onChange={setBody} disabled={update.isPending} onSubmit={submit} />
 			<ShareableToggle checked={shareable} onCheckedChange={setShareable} disabled={update.isPending} />
 			<div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
-				<span className="hidden text-2xs text-subtle sm:mr-auto sm:inline coarse:hidden">⌘/Ctrl + Enter to save</span>
+				<span className="hidden text-2xs text-subtle sm:mr-auto sm:inline coarse:hidden">{t("⌘/Ctrl + Enter to save")}</span>
 				<Button variant="ghost" disabled={update.isPending} onClick={() => (dirty ? setConfirmCancel(true) : onCancel())}>
-					Cancel
+					{t("Cancel")}
 				</Button>
-				<Button type="submit" variant="primary" loading={update.isPending} disabled={!canSave || showStale} title={showStale ? "Resolve the edit conflict above first" : undefined}>
-					Save
+				<Button type="submit" variant="primary" loading={update.isPending} disabled={!canSave || showStale} title={showStale ? t("Resolve the edit conflict above first") : undefined}>
+					{t("Save")}
 				</Button>
 			</div>
 			<ConfirmDialog
 				open={confirmCancel}
 				onOpenChange={setConfirmCancel}
-				title="Discard your changes?"
-				description="You have unsaved edits to this context. They will be lost."
-				confirmLabel="Discard"
+				title={t("Discard your changes?")}
+				description={t("You have unsaved edits to this context. They will be lost.")}
+				confirmLabel={t("Discard")}
 				danger
 				onConfirm={() => {
 					setConfirmCancel(false);

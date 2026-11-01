@@ -2,6 +2,7 @@ import path from "node:path";
 import type { wire } from "@clam/agent-network";
 import {
 	ApplyFilesBody,
+	i18nMsg,
 	TaskStatus,
 	type FilesApplyResult,
 	type FilesPreview,
@@ -188,7 +189,7 @@ export class TaskService implements TaskHub {
 
 	async decide(id: string, body: DecideInput): Promise<Task> {
 		const row = this.store.get(id);
-		if (row.direction !== "incoming") throw ApiError.conflict("Only the node that executes a task can accept or reject it");
+		if (row.direction !== "incoming") throw ApiError.conflict(i18nMsg("Only the node that executes a task can accept or reject it"));
 		return this.store.toTask(await this.executor.decide(id, body));
 	}
 
@@ -200,7 +201,7 @@ export class TaskService implements TaskHub {
 
 	async retry(id: string): Promise<Task> {
 		const row = this.store.get(id);
-		if (row.direction !== "outgoing") throw ApiError.conflict("Only the node that delegated a task can retry it");
+		if (row.direction !== "outgoing") throw ApiError.conflict(i18nMsg("Only the node that delegated a task can retry it"));
 		return this.store.toTask(await this.sender.retry(id));
 	}
 
@@ -215,7 +216,7 @@ export class TaskService implements TaskHub {
 	async postMessage(taskId: string, input: PostMessageInput): Promise<TaskMessage> {
 		const task = this.store.get(taskId);
 		const role = this.roleOf(task);
-		if (isTerminalStatus(task.status as TaskStatus)) throw new ApiError(409, "task_finished", `The task is ${task.status}; the discussion is closed`);
+		if (isTerminalStatus(task.status as TaskStatus)) throw new ApiError(409, "task_finished", i18nMsg("The task is {status}; the discussion is closed", { status: task.status }));
 		// A task that came home (peer = this node) has the same person on both ends: it may instruct its own executor.
 		const asSender = this.store.isSelfPeer(task) ? canSendKind("sender", input.author.kind, input.kind) : null;
 		const allowed = asSender?.ok ? asSender : canSendKind(role, input.author.kind, input.kind);
@@ -226,7 +227,7 @@ export class TaskService implements TaskHub {
 				throw new ApiError(
 					429,
 					"agent_message_limit",
-					`Agent message limit reached for this task (${budget.limit} messages from this node's agents without a human message in between). A human must continue the discussion in the task thread.`,
+					i18nMsg("Agent message limit reached for this task ({limit} messages from this node's agents without a human message in between). A human must continue the discussion in the task thread.", { limit: budget.limit }),
 					budget,
 				);
 			}
@@ -235,10 +236,10 @@ export class TaskService implements TaskHub {
 		const selfPeer = this.store.isSelfPeer(task);
 		if (!selfPeer) {
 			const peer = this.ctx.network.peers.row(task.peerId);
-			if (!peer || peer.status === "revoked") throw new ApiError(409, "peer_unavailable", "The other node of this task is no longer a paired peer");
+			if (!peer || peer.status === "revoked") throw new ApiError(409, "peer_unavailable", i18nMsg("The other node of this task is no longer a paired peer"));
 			const needed = role === "sender" ? "tasks.send" : "tasks.receive";
 			if (!(peer.receivedCapabilities as string[]).includes(needed)) {
-				throw new ApiError(409, "capability_missing", `${peer.name} has not granted this node ${needed}, so messages cannot be delivered`, { missing: [needed] });
+				throw new ApiError(409, "capability_missing", i18nMsg("{name} has not granted this node {capability}, so messages cannot be delivered", { name: peer.name, capability: needed }), { missing: [needed] });
 			}
 		}
 		const createdAt = new Date().toISOString();
@@ -284,7 +285,7 @@ export class TaskService implements TaskHub {
 		if (moving) throw moving;
 		const epoch = checkEpoch(task.epoch, request.epoch);
 		if (!epoch.ok) {
-			throw new ApiError(409, epoch.reason === "stale" ? "stale_epoch" : "conflict", `The message carries epoch ${request.epoch}; the task is at epoch ${task.epoch}`, { currentEpoch: epoch.currentEpoch });
+			throw new ApiError(409, epoch.reason === "stale" ? "stale_epoch" : "conflict", i18nMsg("The message carries epoch {received}; the task is at epoch {current}", { received: request.epoch, current: task.epoch }), { currentEpoch: epoch.currentEpoch });
 		}
 		const authorRole: TaskRole = this.roleOf(task) === "executor" ? "sender" : "executor";
 		const allowed = canSendKind(authorRole, request.author.kind, request.kind);
@@ -304,7 +305,7 @@ export class TaskService implements TaskHub {
 			createdAt: request.createdAt,
 			delivery: "local",
 		});
-		if (message.taskId !== taskId || message.authorNodeId !== peerId) throw new ApiError(409, "idempotency_conflict", "That message id belongs to another task or author");
+		if (message.taskId !== taskId || message.authorNodeId !== peerId) throw new ApiError(409, "idempotency_conflict", i18nMsg("That message id belongs to another task or author"));
 		if (!inserted) return { messageId: message.id, accepted: true, eventSeq: this.store.get(taskId).lastEventSeq };
 		const events = this.roleOf(task) === "executor" ? [this.recordMessageEvent(task, message)] : [];
 		this.changed(taskId, { events, messages: [message] });
@@ -320,10 +321,10 @@ export class TaskService implements TaskHub {
 	movingError(task: TaskRow): ApiError | null {
 		if (task.direction !== "incoming") return null;
 		if (task.fenced || task.status === "handed_off") {
-			return new ApiError(503, "handed_off", `Task ${task.id} moved to another node`, { executorNodeId: task.executorNodeId, currentEpoch: Math.max(task.highestSeenEpoch, task.epoch), retryAfterSeconds: 2 });
+			return new ApiError(503, "handed_off", i18nMsg("Task {id} moved to another node", { id: task.id }), { executorNodeId: task.executorNodeId, currentEpoch: Math.max(task.highestSeenEpoch, task.epoch), retryAfterSeconds: 2 });
 		}
 		const handoffId = execState(task).handoffId;
-		if (handoffId !== undefined) return new ApiError(503, "handoff_in_progress", `Task ${task.id} is being handed over`, { handoffId, retryAfterSeconds: 2 });
+		if (handoffId !== undefined) return new ApiError(503, "handoff_in_progress", i18nMsg("Task {id} is being handed over", { id: task.id }), { handoffId, retryAfterSeconds: 2 });
 		return null;
 	}
 
@@ -332,7 +333,7 @@ export class TaskService implements TaskHub {
 		const text = message.text.replace(/\s+/g, " ").trim();
 		return this.store.appendEvent(task.id, {
 			type: "message",
-			summary: `${author} (${message.kind}): ${text.length > EVENT_SUMMARY_TEXT ? `${text.slice(0, EVENT_SUMMARY_TEXT - 1)}…` : text}`,
+			summary: i18nMsg("{author} ({kind}): {text}", { author, kind: message.kind, text: text.length > EVENT_SUMMARY_TEXT ? `${text.slice(0, EVENT_SUMMARY_TEXT - 1)}…` : text }),
 			payload: { messageId: message.id, kind: message.kind, author },
 		});
 	}

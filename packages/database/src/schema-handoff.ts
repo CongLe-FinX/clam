@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { I18nText } from "@clam/contracts";
 import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
@@ -57,6 +58,7 @@ export const handoffs = sqliteTable(
 		setupFingerprint: text("setup_fingerprint"),
 		failureCode: text("failure_code"),
 		failureDetail: text("failure_detail"),
+		failureI18n: text("failure_i18n", { mode: "json" }).$type<I18nText>(),
 		failureStep: integer("failure_step"),
 		/** Offer lifetime; restore deadline (accept → ack, extendable); when the durable ack was written. */
 		expiresAt: text("expires_at"),
@@ -92,6 +94,8 @@ export const handoffSteps = sqliteTable(
 		name: text("name").notNull(),
 		state: text("state").notNull().default("pending"),
 		detail: text("detail"),
+		/** Structured twin of `detail` when the text is ours; null = none. */
+		detailI18n: text("detail_i18n", { mode: "json" }).$type<I18nText>(),
 		at: text("at"),
 	},
 	(t) => [primaryKey({ columns: [t.handoffId, t.n] })],
@@ -109,6 +113,8 @@ export const handoffEvents = sqliteTable(
 		nodeId: text("node_id").notNull(),
 		state: text("state").notNull(),
 		summary: text("summary").notNull(),
+		/** Structured twin of `summary`; null = none. */
+		i18n: text("i18n", { mode: "json" }).$type<I18nText>(),
 	},
 	(t) => [primaryKey({ columns: [t.handoffId, t.seq] })],
 );

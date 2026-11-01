@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { CheckCircle2, Download, RefreshCw, XCircle } from "lucide-react";
 import type { LoginProvider } from "@clam/contracts";
+import { T, t } from "@/i18n";
 import { qk } from "@/lib/queries";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
@@ -26,8 +27,8 @@ export default function OmpPage() {
 	return (
 		<>
 			<PageIntro
-				title="OMP Providers & Login"
-				description="CL Agent Mesh runs agents on Oh My Pi (OMP). Sign-in, models and roles are managed through OMP's own CLI and RPC; credentials never pass through this app."
+				title={t("OMP Providers & Login")}
+				description={t("CL Agent Mesh runs agents on Oh My Pi (OMP). Sign-in, models and roles are managed through OMP's own CLI and RPC; credentials never pass through this app.")}
 				actions={
 					<Button
 						variant="outline"
@@ -38,18 +39,18 @@ export default function OmpPage() {
 						}}
 					>
 						<RefreshCw className="size-4" />
-						Refresh
+						{t("Refresh")}
 					</Button>
 				}
 			/>
 			<PageBody>
 				<SettingsSection
-					title="OMP installation"
+					title={t("OMP installation")}
 					actions={
 						overview.data && (
 							<Badge variant={install?.installed ? "success" : "danger"} className="gap-1">
 								{install?.installed ? <CheckCircle2 /> : <XCircle />}
-								{install?.installed ? "Installed" : "Not installed"}
+								{install?.installed ? t("Installed") : t("Not installed")}
 							</Badge>
 						)
 					}
@@ -58,17 +59,17 @@ export default function OmpPage() {
 					{overview.isError && <InlineError error={overview.error} onRetry={() => overview.refetch()} />}
 					{install && install.installed && (
 						<dl className="divide-y divide-border">
-							<KeyValue label="Version" mono>
-								{install.version ?? "unknown"}
+							<KeyValue label={t("Version")} mono>
+								{install.version ?? t("unknown")}
 							</KeyValue>
-							<KeyValue label="Binary" mono>
+							<KeyValue label={t("Binary")} mono>
 								{install.binaryPath ?? "—"}
 							</KeyValue>
-							<KeyValue label="Config directory" mono>
+							<KeyValue label={t("Config directory")} mono>
 								{install.configPath ?? "—"}
 							</KeyValue>
-							<KeyValue label="Default model" mono>
-								{overview.data?.defaultModel ?? "Not set"}
+							<KeyValue label={t("Default model")} mono>
+								{overview.data?.defaultModel ?? t("Not set")}
 							</KeyValue>
 						</dl>
 					)}
@@ -77,9 +78,9 @@ export default function OmpPage() {
 							<div className="flex items-start gap-2 text-sm">
 								<Download className="mt-0.5 size-4 shrink-0 text-warning" />
 								<div>
-									<div className="font-medium">OMP was not found on this machine.</div>
+									<div className="font-medium">{t("OMP was not found on this machine.")}</div>
 									{install.error && <div className="mt-1 break-words text-xs text-danger">{install.error}</div>}
-									<p className="mt-1 text-xs text-muted-foreground">Install it, then press Refresh. Agents cannot start without it.</p>
+									<p className="mt-1 text-xs text-muted-foreground">{t("Install it, then press Refresh. Agents cannot start without it.")}</p>
 								</div>
 							</div>
 							<div className="flex items-center justify-between gap-2 rounded-md border border-border bg-surface-2 p-2.5">
@@ -87,7 +88,10 @@ export default function OmpPage() {
 								<CopyButton value="bun install -g @oh-my-pi/pi-coding-agent" />
 							</div>
 							<p className="text-xs text-muted-foreground">
-								If OMP is installed in a non-standard location, make sure its <span className="font-mono">omp</span> binary is on the PATH of the process that runs CL Agent Mesh.
+								<T
+									text="If OMP is installed in a non-standard location, make sure its <code>omp</code> binary is on the PATH of the process that runs CL Agent Mesh."
+									tags={{ code: <span className="font-mono" /> }}
+								/>
 							</p>
 						</div>
 					)}
@@ -95,7 +99,7 @@ export default function OmpPage() {
 
 				{!notInstalled && (
 					<>
-						<SettingsSection title="Providers" description="Providers OMP can sign in to. Add an account to make its models available to agents.">
+						<SettingsSection title={t("Providers")} description={t("Providers OMP can sign in to. Add an account to make its models available to agents.")}>
 							{overview.isPending && (
 								<div className="space-y-2">
 									<Skeleton className="h-14" />
@@ -106,7 +110,7 @@ export default function OmpPage() {
 							{overview.data && <ProvidersList providers={overview.data.providers} onLogin={setLoginFor} />}
 						</SettingsSection>
 
-						<SettingsSection title="Model roles" description="Which model OMP uses for each job. Changes are written to your OMP config.">
+						<SettingsSection title={t("Model roles")} description={t("Which model OMP uses for each job. Changes are written to your OMP config.")}>
 							{(roles.isPending || models.isPending) && (
 								<div className="space-y-2">
 									<Skeleton className="h-20" />
@@ -118,7 +122,7 @@ export default function OmpPage() {
 							{roles.data && models.data && <RolesEditor roles={roles.data} models={models.data} />}
 						</SettingsSection>
 
-						<SettingsSection title="Model catalog" description="Models available to the providers you are signed in to. Prices are USD per million tokens.">
+						<SettingsSection title={t("Model catalog")} description={t("Models available to the providers you are signed in to. Prices are USD per million tokens.")}>
 							{models.isPending && <Skeleton className="h-72" />}
 							{models.data && <ModelCatalog models={models.data} />}
 						</SettingsSection>

@@ -2,6 +2,7 @@ import type { AgentSession, SharedSession, SharedTransfer, TransferPhase } from 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { api } from "./full-harness.ts";
 import { eventually } from "./net-helpers.ts";
+import { expectSystemLinesLocalised } from "./i18n-helpers.ts";
 import {
 	git,
 	isolateGitConfig,
@@ -248,8 +249,9 @@ describe("a hand-over that cannot complete loses nothing", () => {
 		expect(failed).toMatchObject({ localRole: "driver", epoch: 1 });
 		expect(readIn(pair.workA, "PRECIOUS.md")).toBe("precious\n");
 		// the failure is also in the thread, and a new attempt is possible once the remote works again
-		const thread = (await api(pair.a).get<{ messages: Array<{ text: string }> }>(`/shared/${shared.id}`)).body.messages;
+		const thread = (await api(pair.a).get<{ messages: Array<{ kind: string; text: string; i18n?: { key: string; params?: Record<string, string | number> } }> }>(`/shared/${shared.id}`)).body.messages;
 		expect(thread.some((m) => m.text.includes("hand-over to node-b failed"))).toBe(true);
+		expectSystemLinesLocalised(thread);
 		git(pair.workA, "remote", "set-url", "origin", pair.origin);
 		const retry = await api(pair.a).post<SharedSession>(`/shared/${shared.id}/transfer`, { toNodeId: pair.bId });
 		expect(retry.status).toBe(202);

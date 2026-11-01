@@ -4,6 +4,7 @@ import { chmod, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { artifacts } from "@clam/database";
 import { scanForSecrets } from "@clam/git-engine";
+import { i18nMsg } from "@clam/contracts";
 import { ApiError } from "../http/errors.ts";
 import { newArtifactId, type ArtifactRow, type TaskStore } from "./store.ts";
 
@@ -31,7 +32,7 @@ export class ArtifactStore {
 	 */
 	async placeFile(taskId: string, input: { name: string; mediaType: string; file: string; id?: string }): Promise<typeof artifacts.$inferInsert> {
 		const { size } = await stat(input.file);
-		if (size > MAX_ARTIFACT_BYTES) throw new ApiError(413, "artifact_too_large", `Artifact ${input.name} is ${size} bytes; the limit is ${MAX_ARTIFACT_BYTES}`);
+		if (size > MAX_ARTIFACT_BYTES) throw new ApiError(413, "artifact_too_large", i18nMsg("Artifact {name} is {size} bytes; the limit is {limit}", { name: input.name, size, limit: MAX_ARTIFACT_BYTES }));
 		const hash = createHash("sha256");
 		for await (const chunk of createReadStream(input.file) as AsyncIterable<Buffer>) hash.update(chunk);
 		const id = input.id ?? newArtifactId();
@@ -75,14 +76,14 @@ export class ArtifactStore {
 
 	async add(taskId: string, input: { name: string; mediaType: string; bytes: Buffer }): Promise<ArtifactRow> {
 		if (input.bytes.length > MAX_ARTIFACT_BYTES) {
-			throw new ApiError(413, "artifact_too_large", `Artifact ${input.name} is ${input.bytes.length} bytes; the limit is ${MAX_ARTIFACT_BYTES}`);
+			throw new ApiError(413, "artifact_too_large", i18nMsg("Artifact {name} is {size} bytes; the limit is {limit}", { name: input.name, size: input.bytes.length, limit: MAX_ARTIFACT_BYTES }));
 		}
 		const looksTextual = input.mediaType.startsWith("text/") || input.mediaType.endsWith("json") || TEXT_NAME.test(input.name);
 		if (looksTextual) {
 			const findings = scanForSecrets(input.bytes.toString("utf8"), input.name);
 			if (findings.length > 0) {
 				const rules = [...new Set(findings.map((f) => f.rule))].join(", ");
-				throw new ApiError(422, "artifact_contains_secrets", `Artifact ${input.name} looks like it contains credentials (${rules}, first at line ${findings[0]?.line}); it was not stored`, {
+				throw new ApiError(422, "artifact_contains_secrets", i18nMsg("Artifact {name} looks like it contains credentials ({rules}, first at line {line}); it was not stored", { name: input.name, rules, line: findings[0]?.line ?? 0 }), {
 					rules: [...new Set(findings.map((f) => f.rule))],
 				});
 			}
@@ -106,7 +107,7 @@ export class ArtifactStore {
 	/** Absolute path of a stored artifact (always inside the artifacts root). */
 	absolutePath(row: ArtifactRow): string {
 		const absolute = path.resolve(this.root, row.storagePath);
-		if (!absolute.startsWith(`${path.resolve(this.root)}${path.sep}`)) throw new ApiError(500, "internal_error", "Artifact path escapes the artifact directory");
+		if (!absolute.startsWith(`${path.resolve(this.root)}${path.sep}`)) throw new ApiError(500, "internal_error", i18nMsg("Artifact path escapes the artifact directory"));
 		return absolute;
 	}
 }

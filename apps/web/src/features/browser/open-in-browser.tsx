@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Globe } from "lucide-react";
+import { t } from "@/i18n";
 import { buttonVariants } from "@/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -24,7 +25,7 @@ export function browserHrefFor(url: string): { to: "/browser"; search: { url: st
 /** Ghost icon link: "Open in this machine's browser". Deliberately dependency-light (router Link + one icon). */
 export function OpenInMachineBrowser({ href, className }: { href: string; className?: string }) {
 	return (
-		<Link {...browserHrefFor(href)} aria-label="Open in this machine's browser" title="Open in this machine's browser" className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), className)}>
+		<Link {...browserHrefFor(href)} aria-label={t("Open in this machine's browser")} title={t("Open in this machine's browser")} className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), className)}>
 			<Globe />
 		</Link>
 	);

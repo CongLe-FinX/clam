@@ -4,7 +4,8 @@ import { ChevronRight, ExternalLink, Info, Lightbulb, Plus, Search, TriangleAler
 import { type FormEvent, useEffect, useId, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { LazyMarkdown } from "@/components/lazy-markdown";
-import { errorMessage } from "@/lib/api";
+import { t, tr } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { useProject } from "@/lib/queries";
 import { cn, relativeTime } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -55,7 +56,7 @@ function MemoryItem({ item, nodeNames, snippet, projectName }: { item: Item; nod
 					) : null}
 					<span className="flex min-w-0 flex-wrap items-center gap-1.5">
 						<SyncChip context={item} nodeNames={nodeNames} />
-						<span className="truncate text-2xs text-subtle">{projectName ?? (item.projectId === null ? "Workspace-wide" : "This project")}</span>
+						<span className="truncate text-2xs text-subtle">{projectName ?? (item.projectId === null ? t("Workspace-wide") : t("This project"))}</span>
 					</span>
 				</span>
 			</button>
@@ -64,7 +65,7 @@ function MemoryItem({ item, nodeNames, snippet, projectName }: { item: Item; nod
 					{body === undefined ? (
 						full.isError ? (
 							<p role="alert" className="text-xs text-danger">
-								{errorMessage(full.error)}
+								{errorText(full.error)}
 							</p>
 						) : (
 							<div className="flex flex-col gap-1.5" aria-busy="true">
@@ -77,7 +78,7 @@ function MemoryItem({ item, nodeNames, snippet, projectName }: { item: Item; nod
 							<LazyMarkdown text={body} />
 						</div>
 					) : (
-						<p className="text-xs text-subtle">No content.</p>
+						<p className="text-xs text-subtle">{t("No content.")}</p>
 					)}
 					<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-subtle">
 						<span>
@@ -86,7 +87,7 @@ function MemoryItem({ item, nodeNames, snippet, projectName }: { item: Item; nod
 						</span>
 						<Button asChild size="sm" variant="ghost" className="ml-auto">
 							<Link to="/workspaces/$workspaceId/context" params={{ workspaceId: item.workspaceId }} search={{ id: item.id, ...(item.projectId ? { project: item.projectId } : {}) }}>
-								<ExternalLink /> Open
+								<ExternalLink /> {t("Open")}
 							</Link>
 						</Button>
 					</div>
@@ -112,66 +113,66 @@ function AddForm({ workspaceId, projectId, onDone }: { workspaceId: string; proj
 			{ workspaceId, projectId, type, title: title.trim(), body, shareable },
 			{
 				onSuccess: (c) => {
-					toast.success(`Saved “${c.title}” to project memory`);
+					toast.success(t("Saved “{title}” to project memory", { title: c.title }));
 					onDone();
 				},
-				onError: (err) => toast.error("Could not save", { description: errorMessage(err) }),
+				onError: (err) => toast.error(t("Could not save"), { description: errorText(err) }),
 			},
 		);
 	};
 
 	return (
-		<form onSubmit={submit} className="flex flex-col gap-2.5 rounded-xl bg-surface-2/60 p-3 shadow-[inset_0_0_0_1px_var(--border)]" aria-label="Add project memory">
+		<form onSubmit={submit} className="flex flex-col gap-2.5 rounded-xl bg-surface-2/60 p-3 shadow-[inset_0_0_0_1px_var(--border)]" aria-label={t("Add project memory")}>
 			<div className="flex items-center gap-2">
-				<h3 className="min-w-0 flex-1 text-[13px] font-semibold">Add to this project's memory</h3>
-				<Button type="button" size="icon-sm" variant="ghost" onClick={onDone} aria-label="Close form">
+				<h3 className="min-w-0 flex-1 text-[13px] font-semibold">{t("Add to this project's memory")}</h3>
+				<Button type="button" size="icon-sm" variant="ghost" onClick={onDone} aria-label={t("Close form")}>
 					<X />
 				</Button>
 			</div>
 			<div className="flex flex-col gap-1">
 				<label htmlFor={ids.type} className="text-2xs font-medium text-muted-foreground">
-					Type
+					{t("Type")}
 				</label>
-				<select id={ids.type} value={type} onChange={(e) => setType(e.target.value as ContextType)} className={cn(fieldClass, "h-8 coarse:h-11")} title={contextTypeInfo(type).hint}>
-					{CONTEXT_TYPES.map((t) => (
-						<option key={t.id} value={t.id}>
-							{t.label}
+				<select id={ids.type} value={type} onChange={(e) => setType(e.target.value as ContextType)} className={cn(fieldClass, "h-8 coarse:h-11")} title={tr(contextTypeInfo(type).hint)}>
+					{CONTEXT_TYPES.map((ct) => (
+						<option key={ct.id} value={ct.id}>
+							{tr(ct.label)}
 						</option>
 					))}
 				</select>
 			</div>
 			<div className="flex flex-col gap-1">
 				<label htmlFor={ids.title} className="text-2xs font-medium text-muted-foreground">
-					Title
+					{t("Title")}
 				</label>
-				<Input id={ids.title} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder="e.g. Tests run with pnpm test:unit" autoFocus />
+				<Input id={ids.title} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={200} placeholder={t("e.g. Tests run with pnpm test:unit")} autoFocus />
 			</div>
 			<div className="flex flex-col gap-1">
 				<label htmlFor={ids.body} className="text-2xs font-medium text-muted-foreground">
-					Details (Markdown)
+					{t("Details (Markdown)")}
 				</label>
-				<Textarea id={ids.body} value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder="What should agents and teammates remember?" />
+				<Textarea id={ids.body} value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder={t("What should agents and teammates remember?")} />
 			</div>
 			<div className="flex items-start gap-2.5">
 				<Switch id={ids.share} checked={shareable} onCheckedChange={setShareable} aria-describedby={`${ids.share}-copy`} />
 				<label htmlFor={ids.share} className="flex min-w-0 flex-col gap-0.5">
-					<span className="text-xs font-medium">Shareable</span>
+					<span className="text-xs font-medium">{t("Shareable")}</span>
 					<span id={`${ids.share}-copy`} className="text-2xs text-subtle">
-						{shareable ? "Synced to this workspace's member machines (and can be exported to Git)." : "Private: stays on this machine and is never sent anywhere."}
+						{shareable ? t("Synced to this workspace's member machines (and can be exported to Git).") : t("Private: stays on this machine and is never sent anywhere.")}
 					</span>
 				</label>
 			</div>
 			{create.isError ? (
 				<p role="alert" className="text-xs text-danger">
-					{errorMessage(create.error)}
+					{errorText(create.error)}
 				</p>
 			) : null}
 			<div className="flex justify-end gap-2">
 				<Button type="button" variant="ghost" onClick={onDone}>
-					Cancel
+					{t("Cancel")}
 				</Button>
 				<Button type="submit" variant="primary" loading={create.isPending} disabled={!canSave && !create.isPending}>
-					Save
+					{t("Save")}
 				</Button>
 			</div>
 		</form>
@@ -179,13 +180,13 @@ function AddForm({ workspaceId, projectId, onDone }: { workspaceId: string; proj
 }
 
 function Groups({ items, nodeNames, projectNames }: { items: Item[]; nodeNames: Map<string, string>; projectNames?: Map<string, string> }) {
-	const groups = CONTEXT_TYPES.map((t) => ({ t, rows: items.filter((c) => c.type === t.id) })).filter((g) => g.rows.length > 0);
+	const groups = CONTEXT_TYPES.map((ct) => ({ ct, rows: items.filter((c) => c.type === ct.id) })).filter((g) => g.rows.length > 0);
 	return (
 		<div className="flex flex-col gap-3">
-			{groups.map(({ t, rows }) => (
-				<section key={t.id} aria-label={t.plural} className="flex flex-col gap-1.5">
+			{groups.map(({ ct, rows }) => (
+				<section key={ct.id} aria-label={tr(ct.plural)} className="flex flex-col gap-1.5">
 					<h3 className="flex items-center gap-1.5 text-2xs font-semibold uppercase tracking-wider text-subtle [&_svg]:size-3">
-						<t.icon aria-hidden /> {t.plural} <span className="tabular font-mono normal-case tracking-normal">{rows.length}</span>
+						<ct.icon aria-hidden /> {tr(ct.plural)} <span className="tabular font-mono normal-case tracking-normal">{rows.length}</span>
 					</h3>
 					<ul className="flex flex-col gap-1.5">
 						{rows.map((c) => (
@@ -200,7 +201,7 @@ function Groups({ items, nodeNames, projectNames }: { items: Item[]; nodeNames: 
 
 function SearchResults({ hits, nodeNames }: { hits: ContextSearchHit[]; nodeNames: Map<string, string> }) {
 	return (
-		<ul className="flex flex-col gap-1.5" aria-label="Search results">
+		<ul className="flex flex-col gap-1.5" aria-label={t("Search results")}>
 			{hits.map((h) => (
 				<MemoryItem key={h.context.id} item={h.context} nodeNames={nodeNames} snippet={h.snippet} />
 			))}
@@ -219,8 +220,8 @@ export default function MemoryPanel({ session }: { session: AgentSession }) {
 	const [text, setText] = useState("");
 	const [q, setQ] = useState("");
 	useEffect(() => {
-		const t = setTimeout(() => setQ(text.trim()), 250);
-		return () => clearTimeout(t);
+		const timer = setTimeout(() => setQ(text.trim()), 250);
+		return () => clearTimeout(timer);
 	}, [text]);
 	const search = useContextSearch(q, { workspaceId });
 
@@ -247,23 +248,23 @@ export default function MemoryPanel({ session }: { session: AgentSession }) {
 		) : search.isError ? (
 			<EmptyState
 				icon={TriangleAlert}
-				title="Search failed"
-				description={errorMessage(search.error)}
+				title={t("Search failed")}
+				description={errorText(search.error)}
 				className="py-8"
 				action={
 					<Button variant="outline" onClick={() => void search.refetch()}>
-						Retry
+						{t("Retry")}
 					</Button>
 				}
 			/>
 		) : hits.length === 0 ? (
-			<p className="px-1 py-8 text-center text-[13px] text-muted-foreground">No memory matches “{q}”.</p>
+			<p className="px-1 py-8 text-center text-[13px] text-muted-foreground">{t("No memory matches “{q}”.", { q })}</p>
 		) : (
 			<SearchResults hits={hits} nodeNames={nodeNames} />
 		);
 	} else if (pending && !error) {
 		content = (
-			<div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading memory">
+			<div className="flex flex-col gap-2" aria-busy="true" aria-label={t("Loading memory")}>
 				<Skeleton className="h-4 w-24" />
 				<Skeleton className="h-12" />
 				<Skeleton className="h-12" />
@@ -274,12 +275,12 @@ export default function MemoryPanel({ session }: { session: AgentSession }) {
 		content = (
 			<EmptyState
 				icon={TriangleAlert}
-				title="Could not load memory"
-				description={errorMessage(error)}
+				title={t("Could not load memory")}
+				description={errorText(error)}
 				className="py-8"
 				action={
 					<Button variant="outline" onClick={retry}>
-						Retry
+						{t("Retry")}
 					</Button>
 				}
 			/>
@@ -288,12 +289,12 @@ export default function MemoryPanel({ session }: { session: AgentSession }) {
 		content = (
 			<EmptyState
 				icon={Lightbulb}
-				title="No project memory yet"
-				description="Add conventions, decisions or plans worth remembering. New sessions in this project start with a short preface of it."
+				title={t("No project memory yet")}
+				description={t("Add conventions, decisions or plans worth remembering. New sessions in this project start with a short preface of it.")}
 				className="py-8"
 				action={
 					<Button variant="primary" onClick={() => setAdding(true)} disabled={!workspaceId}>
-						<Plus /> Add memory
+						<Plus /> {t("Add memory")}
 					</Button>
 				}
 			/>
@@ -307,15 +308,15 @@ export default function MemoryPanel({ session }: { session: AgentSession }) {
 			<div className="flex shrink-0 flex-col gap-2 border-b px-3 py-2.5">
 				<p className="flex items-start gap-1.5 text-2xs text-subtle">
 					<Info className="mt-px size-3 shrink-0" aria-hidden />
-					New sessions in this project start with a short project-memory preface; agents can also read and add memory with host tools.
+					{t("New sessions in this project start with a short project-memory preface; agents can also read and add memory with host tools.")}
 				</p>
 				<div className="flex items-center gap-1.5">
 					<div className="relative min-w-0 flex-1">
 						<Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-subtle" aria-hidden />
-						<Input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="Search memory" aria-label="Search memory" className="pl-8" disabled={!workspaceId} />
+						<Input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder={t("Search memory")} aria-label={t("Search memory")} className="pl-8" disabled={!workspaceId} />
 					</div>
 					<Button variant="outline" size="md" onClick={() => setAdding((a) => !a)} disabled={!workspaceId} aria-expanded={adding} className="shrink-0">
-						<Plus /> Add
+						<Plus /> {t("Add")}
 					</Button>
 				</div>
 			</div>

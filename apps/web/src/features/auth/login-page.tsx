@@ -4,8 +4,9 @@ import { useRouter } from "@tanstack/react-router";
 import { AlertTriangle, Eye, EyeOff, Fingerprint, Lock, ShieldAlert, Timer } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { Logo } from "@/app/shell/sidebar.tsx";
-import { api, ApiError } from "@/lib/api";
-import { shortFingerprint } from "@/lib/utils";
+import { T, t } from "@/i18n";
+import { api, ApiError, errorText } from "@/lib/api";
+import { formatDuration, shortFingerprint } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Input } from "@/ui/input";
 import { Skeleton } from "@/ui/skeleton";
@@ -23,20 +24,13 @@ function toLoginError(e: unknown): LoginError {
 		if (e.code === "rate_limited") {
 			const sec = (e.details as { retryAfterSeconds?: number } | undefined)?.retryAfterSeconds;
 			const retryAfter = typeof sec === "number" && sec > 0 ? Math.ceil(sec) : 30;
-			return { message: "Too many attempts. Sign-in is locked for a moment.", retryAfter };
+			return { message: t("Too many attempts. Sign-in is locked for a moment."), retryAfter };
 		}
-		if (e.code === "invalid_credentials") return { message: "Wrong password. Check it and try again." };
-		if (e.code === "forbidden_origin") return { message: "This address is not allowed to sign in. Open the machine's own public URL." };
-		if (e.code === "network") return { message: e.message };
-		return { message: e.message };
+		if (e.code === "invalid_credentials") return { message: t("Wrong password. Check it and try again.") };
+		if (e.code === "forbidden_origin") return { message: t("This address is not allowed to sign in. Open the machine's own public URL.") };
+		return { message: errorText(e) };
 	}
-	return { message: "Could not sign in. Try again." };
-}
-
-function formatWait(sec: number): string {
-	if (sec < 60) return `${sec}s`;
-	const m = Math.floor(sec / 60);
-	return `${m}m ${String(sec % 60).padStart(2, "0")}s`;
+	return { message: t("Could not sign in. Try again.") };
 }
 
 export default function LoginPage({ redirect }: { redirect?: string }) {
@@ -67,11 +61,11 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 
 	useEffect(() => {
 		if (lockedUntil <= Date.now()) return;
-		const t = setInterval(() => {
+		const timer = setInterval(() => {
 			setNow(Date.now());
-			if (Date.now() >= lockedUntil) clearInterval(t);
+			if (Date.now() >= lockedUntil) clearInterval(timer);
 		}, 500);
-		return () => clearInterval(t);
+		return () => clearInterval(timer);
 	}, [lockedUntil]);
 
 	const remaining = Math.max(0, Math.ceil((lockedUntil - now) / 1000));
@@ -113,10 +107,10 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 						<h1 className="text-lg font-semibold tracking-tight">CL Agent Mesh</h1>
 						{a ? (
 							<p className="mt-1 text-sm text-muted-foreground">
-								Sign in to <span className="font-medium text-foreground">{a.nodeName}</span>
+								<T text="Sign in to <b>{name}</b>" params={{ name: a.nodeName }} tags={{ b: <span className="font-medium text-foreground" /> }} />
 							</p>
 						) : access.isError ? (
-							<p className="mt-1 text-sm text-muted-foreground">Sign in to this machine</p>
+							<p className="mt-1 text-sm text-muted-foreground">{t("Sign in to this machine")}</p>
 						) : (
 							<Skeleton className="mx-auto mt-1 h-5 w-40" />
 						)}
@@ -128,9 +122,9 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 						<div role="alert" className="flex items-start gap-2.5 text-sm text-danger">
 							<AlertTriangle className="mt-0.5 size-4 shrink-0" />
 							<div className="space-y-2">
-								<p>{access.error instanceof Error ? access.error.message : "Cannot reach this machine."}</p>
+								<p>{access.error instanceof Error ? errorText(access.error) : t("Cannot reach this machine.")}</p>
 								<Button size="sm" variant="outline" onClick={() => access.refetch()}>
-									Retry
+									{t("Retry")}
 								</Button>
 							</div>
 						</div>
@@ -139,8 +133,8 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 							<ShieldAlert className="mt-0.5 size-4 shrink-0 text-warning" />
 							<p className="text-muted-foreground">
 								{disabledReason === "no-password"
-									? "No owner password is set on this machine yet. Set one in Settings → Security on the computer where this machine runs, then sign in here."
-									: "Remote access to this machine's web UI is turned off. Turn it on in Settings → Security on the computer where this machine runs."}
+									? t("No owner password is set on this machine yet. Set one in Settings → Security on the computer where this machine runs, then sign in here.")
+									: t("Remote access to this machine's web UI is turned off. Turn it on in Settings → Security on the computer where this machine runs.")}
 							</p>
 						</div>
 					) : (
@@ -149,7 +143,7 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 							<input type="text" name="username" autoComplete="username" value={a?.nodeName ?? "owner"} readOnly hidden />
 							<div className="flex flex-col gap-1.5">
 								<label htmlFor="owner-password" className="text-xs font-medium text-muted-foreground">
-									Owner password
+									{t("Owner password")}
 								</label>
 								<div className="relative">
 									<Input
@@ -169,7 +163,7 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 									<button
 										type="button"
 										onClick={() => setShow((v) => !v)}
-										aria-label={show ? "Hide password" : "Show password"}
+										aria-label={show ? t("Hide password") : t("Show password")}
 										className="absolute inset-y-0 right-0 grid w-10 place-items-center rounded-r-lg text-subtle outline-none hover:text-foreground focus-visible:text-foreground"
 									>
 										{show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
@@ -182,7 +176,7 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 									{locked ? <Timer className="mt-0.5 size-4 shrink-0" /> : <AlertTriangle className="mt-0.5 size-4 shrink-0" />}
 									<div>
 										<p>{error.message}</p>
-										{error.retryAfter ? <p className="mt-0.5 text-xs text-danger/80">{locked ? `Try again in ${formatWait(remaining)}.` : "You can try again now."}</p> : null}
+										{error.retryAfter ? <p className="mt-0.5 text-xs text-danger/80">{locked ? t("Try again in {wait}.", { wait: formatDuration(remaining * 1000) }) : t("You can try again now.")}</p> : null}
 									</div>
 								</div>
 							) : null}
@@ -190,11 +184,11 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 							<Button type="submit" size="lg" variant="primary" className="w-full" loading={busy} disabled={!a || !password || locked}>
 								{locked ? (
 									<>
-										<Timer /> Locked · {formatWait(remaining)}
+										<Timer /> {t("Locked · {wait}", { wait: formatDuration(remaining * 1000) })}
 									</>
 								) : (
 									<>
-										<Lock /> Sign in
+										<Lock /> {t("Sign in")}
 									</>
 								)}
 							</Button>
@@ -209,7 +203,7 @@ export default function LoginPage({ redirect }: { redirect?: string }) {
 							{shortFingerprint(a.fingerprint)}
 						</span>
 					) : null}
-					<p>Owner access only. This machine's agent-to-agent API is separate and never uses this password.</p>
+					<p>{t("Owner access only. This machine's agent-to-agent API is separate and never uses this password.")}</p>
 				</div>
 			</main>
 		</div>

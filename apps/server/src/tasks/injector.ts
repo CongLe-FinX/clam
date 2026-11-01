@@ -32,6 +32,10 @@ export class TaskInjector implements InjectorApi {
 		this.retries.clear();
 	}
 
+	exclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+		return this.chains.run(sessionId, work);
+	}
+
 	async injectMessage(task: TaskRow, message: TaskMessageRow): Promise<boolean> {
 		const sessionId = this.sessionOf(task);
 		if (!sessionId) return false;

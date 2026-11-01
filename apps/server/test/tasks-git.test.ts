@@ -264,7 +264,7 @@ describe("deliver", () => {
 		const task = makeTask();
 		const prepared = await taskGit.prepare(task, project);
 		const result = await taskGit.deliver(task, project, prepared, { sessionId: null });
-		expect(result).toEqual({ branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [], changed: false, note: "The agent made no changes." });
+		expect(result).toEqual({ branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [], changed: false, note: { text: "The agent made no changes.", i18n: { key: "The agent made no changes." } } });
 		expect(git(fx.work, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
 		expect(originRefs()).not.toContain("clam/");
 	});
@@ -291,7 +291,7 @@ describe("deliver", () => {
 		const result = await taskGit.deliver(task, project, prepared, { sessionId: null });
 		expect(result).toMatchObject({ pushed: false, branch: prepared.workBranch, compareUrl: null, changed: true });
 		expect(result.commit).toBe(git(fx.work, "rev-parse", prepared.workBranch));
-		expect(result.note).toContain("protected by test");
+		expect(result.note.text).toContain("protected by test");
 		expect(originRefs()).not.toContain(prepared.workBranch);
 		expect(result.artifacts).toHaveLength(1);
 		const [artifact] = result.artifacts;

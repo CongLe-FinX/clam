@@ -1,5 +1,6 @@
 import { Globe, Lock } from "lucide-react";
 import { type RefObject, useState } from "react";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { fieldClass } from "@/ui/input";
 
@@ -62,8 +63,8 @@ export function AddressBar({
 				autoCorrect="off"
 				autoComplete="off"
 				spellCheck={false}
-				placeholder="Type localhost:1234 or a web address"
-				aria-label="Address"
+				placeholder={t("Type localhost:1234 or a web address")}
+				aria-label={t("Address")}
 				className={cn(fieldClass, "h-8 truncate pl-8 pr-3 coarse:h-11 coarse:text-base")}
 			/>
 			<div aria-hidden className={cn("pointer-events-none absolute inset-x-1 bottom-0 h-0.5 overflow-hidden rounded-full transition-opacity duration-200", loading ? "opacity-100" : "opacity-0")}>

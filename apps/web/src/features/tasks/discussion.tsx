@@ -5,25 +5,26 @@ import { ArrowDown, Bot, CornerDownRight, MessagesSquare, Send, User } from "luc
 import { type KeyboardEvent, memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { useNode } from "@/lib/queries";
-import { cn } from "@/lib/utils";
+import { msg, t, tr, type Msg } from "@/i18n";
+import { cn, formatDate, formatDateTime, formatNumber } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Progress } from "@/ui/progress";
 import { Textarea } from "@/ui/textarea";
 import { Kbd } from "@/ui/kbd";
 import { DeliveryMark } from "./components.tsx";
-import { AGENT_MESSAGE_LIMIT, KIND_META, authorLabel, isTerminal, ownParty } from "./format.ts";
+import { AGENT_MESSAGE_LIMIT, KIND_META, STATUS_META, authorLabel, isTerminal, ownParty } from "./format.ts";
 import { useMarkTaskRead, usePostTaskMessage } from "./hooks.ts";
 
-const time = new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit" });
-const dateTime = new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+const TIME: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" };
+const DATE_TIME: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
 const STICK = 80;
 
 type PostKind = "instruction" | "answer" | "note";
-const POST_KINDS: Array<{ id: PostKind; label: string; hint: string }> = [
-	{ id: "instruction", label: "Instruction", hint: "Steers the agent right now, even mid-turn." },
-	{ id: "answer", label: "Answer", hint: "Replies to the agent's question and wakes it." },
-	{ id: "note", label: "Note", hint: "Extra context; the agent reads it after its current step." },
+const POST_KINDS: Array<{ id: PostKind; label: Msg; hint: Msg }> = [
+	{ id: "instruction", label: msg("Instruction"), hint: msg("Steers the agent right now, even mid-turn.") },
+	{ id: "answer", label: msg("Answer"), hint: msg("Replies to the agent's question and wakes it.") },
+	{ id: "note", label: msg("Note"), hint: msg("Extra context; the agent reads it after its current step.") },
 ];
 
 function sameDay(a: string, b: string): boolean {
@@ -67,9 +68,9 @@ const MessageBubble = memo(function MessageBubble({ message, mine, sessionId, sh
 						<Icon className="size-3 shrink-0" aria-hidden />
 						<span className="truncate">{authorLabel(message)}</span>
 					</span>
-					<Badge variant={kind.variant}>{kind.label}</Badge>
-					<span className="tabular text-subtle" title={new Date(message.createdAt).toLocaleString()}>
-						{time.format(Date.parse(message.createdAt))}
+					<Badge variant={kind.variant}>{tr(kind.label)}</Badge>
+					<span className="tabular text-subtle" title={formatDateTime(message.createdAt)}>
+						{formatDate(message.createdAt, TIME)}
 					</span>
 				</div>
 				<div
@@ -86,11 +87,11 @@ const MessageBubble = memo(function MessageBubble({ message, mine, sessionId, sh
 					{message.injectedIntoSession ? (
 						sessionId ? (
 							<Link to="/sessions/$sessionId" params={{ sessionId }} className="inline-flex items-center gap-1 text-2xs text-subtle hover:text-foreground">
-								<CornerDownRight className="size-3" aria-hidden /> Injected into the agent's session
+								<CornerDownRight className="size-3" aria-hidden /> {t("Injected into the agent's session")}
 							</Link>
 						) : (
 							<span className="inline-flex items-center gap-1 text-2xs text-subtle">
-								<CornerDownRight className="size-3" aria-hidden /> Injected into the agent's session
+								<CornerDownRight className="size-3" aria-hidden /> {t("Injected into the agent's session")}
 							</span>
 						)
 					) : null}
@@ -101,17 +102,18 @@ const MessageBubble = memo(function MessageBubble({ message, mine, sessionId, sh
 });
 
 function DateRule({ at }: { at: string }) {
-	return <div className="py-1 text-center text-2xs font-medium text-subtle">{dateTime.format(Date.parse(at))}</div>;
+	return <div className="py-1 text-center text-2xs font-medium text-subtle">{formatDate(at, DATE_TIME)}</div>;
 }
 
 /** Agent-message budget (loop guard) as the machine enforces it. */
-export function BudgetMeter({ left: budget, noun = "task" }: { left: number; noun?: string }) {
+export function BudgetMeter({ left: budget, noun }: { left: number; /** Already translated, e.g. `t("task")`. */ noun?: string }) {
+	const unit = noun ?? t("task");
 	const left = Math.max(0, budget);
 	const used = Math.max(0, AGENT_MESSAGE_LIMIT - left);
 	return (
-		<div className="flex flex-col gap-1" title={`Each machine lets its agents post this many messages per ${noun}, so two agents cannot talk forever. A human can always continue the discussion.`}>
+		<div className="flex flex-col gap-1" title={t("Each machine lets its agents post this many messages per {noun}, so two agents cannot talk forever. A human can always continue the discussion.", { noun: unit })}>
 			<div className="flex items-center justify-between gap-2 text-2xs">
-				<span className={cn(left === 0 ? "font-medium text-warning" : "text-subtle")}>{left === 0 ? "Agent messages used up — a human must continue" : `Agent messages left on this machine: ${left} of ${AGENT_MESSAGE_LIMIT}`}</span>
+				<span className={cn(left === 0 ? "font-medium text-warning" : "text-subtle")}>{left === 0 ? t("Agent messages used up — a human must continue") : t("Agent messages left on this machine: {left} of {limit}", { left, limit: AGENT_MESSAGE_LIMIT })}</span>
 			</div>
 			<Progress value={(used / AGENT_MESSAGE_LIMIT) * 100} tone={left === 0 ? "warning" : left <= 3 ? "warning" : "accent"} className="h-1" />
 		</div>
@@ -127,19 +129,19 @@ export function Discussion({ task, messages, visible, hideTitle, className }: { 
 		<DiscussionPane
 			messages={messages}
 			budgetLeft={task.agentMessageBudget}
-			budgetNoun="task"
+			budgetNoun={t("task")}
 			unread={task.unreadMessages}
 			onMarkRead={markRead}
 			onPost={(body, done) => post.mutate(body, { onSuccess: done })}
 			posting={post.isPending}
-			closedNote={closed ? `This task is ${task.status === "succeeded" ? "finished" : task.status.replace("_", " ")}; the discussion is read-only.` : null}
+			closedNote={closed ? (task.status === "succeeded" ? t("This task is finished; the discussion is read-only.") : t("This task is {status}; the discussion is read-only.", { status: tr(STATUS_META[task.status].label).toLowerCase() })) : null}
 			ownSessionId={ownParty(task).sessionId}
 			visible={visible}
 			hideTitle={hideTitle}
 			className={className}
-			logLabel="Task discussion"
-			emptyText="No messages yet. Agents on both machines can ask questions and answer here; you can step in at any time."
-			inputLabel="Message to the other machine"
+			logLabel={t("Task discussion")}
+			emptyText={t("No messages yet. Agents on both machines can ask questions and answer here; you can step in at any time.")}
+			inputLabel={t("Message to the other machine")}
 		/>
 	);
 }
@@ -226,7 +228,7 @@ export function DiscussionPane({ messages, budgetLeft, budgetNoun, unread, onMar
 				{hideTitle ? null : (
 					<div className="flex items-center gap-2">
 						<MessagesSquare className="size-4 text-muted-foreground" aria-hidden />
-						<h2 className="text-[13px] font-semibold">Discussion</h2>
+						<h2 className="text-[13px] font-semibold">{t("Discussion")}</h2>
 						<span className="tabular font-mono text-2xs text-subtle">{messages.length}</span>
 					</div>
 				)}
@@ -262,7 +264,7 @@ export function DiscussionPane({ messages, budgetLeft, budgetNoun, unread, onMar
 							className="animate-pop-in pointer-events-auto flex h-8 items-center gap-1.5 rounded-full bg-overlay pl-2.5 pr-3 text-xs font-medium shadow-pop shadow-[inset_0_0_0_1px_var(--border-strong)] outline-none active:scale-95 coarse:h-11"
 						>
 							<ArrowDown className="size-3.5" aria-hidden />
-							{unseen > 0 ? `${unseen} new` : "Jump to latest"}
+							{unseen > 0 ? t("{count} new", { count: formatNumber(unseen) }) : t("Jump to latest")}
 						</button>
 					</div>
 				) : null}
@@ -316,21 +318,21 @@ export function DiscussionComposer({
 	}
 	return (
 		<div className={cn("shrink-0 border-t bg-surface-1 px-3 pt-2.5", compact ? "pb-2" : "pb-[max(0.75rem,env(safe-area-inset-bottom))]", className)}>
-			<div role="radiogroup" aria-label="Message kind" className="mb-2 flex gap-1">
+			<div role="radiogroup" aria-label={t("Message kind")} className="mb-2 flex gap-1">
 				{POST_KINDS.map((k) => (
 					<button
 						key={k.id}
 						type="button"
 						role="radio"
 						aria-checked={active === k.id}
-						title={k.hint}
+						title={tr(k.hint)}
 						onClick={() => setKind(k.id)}
 						className={cn(
 							"inline-flex h-7 items-center rounded-md px-2.5 text-xs font-medium outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-11",
 							active === k.id ? "bg-accent-soft text-accent" : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
 						)}
 					>
-						{k.label}
+						{tr(k.label)}
 					</button>
 				))}
 			</div>
@@ -342,17 +344,17 @@ export function DiscussionComposer({
 					rows={compact ? 1 : 2}
 					maxLength={20_000}
 					aria-label={inputLabel}
-					placeholder={active === "answer" ? "Answer the agent's question…" : active === "instruction" ? "Tell the agent what to do…" : "Add a note for the discussion…"}
+					placeholder={active === "answer" ? t("Answer the agent's question…") : active === "instruction" ? t("Tell the agent what to do…") : t("Add a note for the discussion…")}
 					className="max-h-40 min-h-[2.75rem] flex-1 resize-none"
 				/>
-				<Button variant="primary" size="lg" onClick={send} loading={posting} disabled={!ready} aria-label="Send message" className="shrink-0 px-3.5 coarse:min-h-12 coarse:min-w-12">
+				<Button variant="primary" size="lg" onClick={send} loading={posting} disabled={!ready} aria-label={t("Send message")} className="shrink-0 px-3.5 coarse:min-h-12 coarse:min-w-12">
 					<Send />
 				</Button>
 			</div>
 			{compact ? null : (
 				<p className="mt-1.5 hidden items-center gap-1 text-2xs text-subtle fine:flex">
 					<Kbd>⌘</Kbd>
-					<Kbd>Enter</Kbd> to send · {POST_KINDS.find((k) => k.id === active)?.hint}
+					<Kbd>Enter</Kbd> {t("to send · {hint}", { hint: tr(POST_KINDS.find((k) => k.id === active)?.hint ?? "") })}
 				</p>
 			)}
 		</div>

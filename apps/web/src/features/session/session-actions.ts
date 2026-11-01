@@ -1,7 +1,7 @@
 import { type AgentSession, routes } from "@clam/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { api, errorMessage } from "@/lib/api";
+import { api, errorText } from "@/lib/api";
 import { qk } from "@/lib/queries";
 
 export interface SessionPatch {
@@ -31,7 +31,7 @@ export function useUpdateSession() {
 				for (const [key, data] of ctx.lists) qc.setQueryData(key, data);
 				if (ctx.one) qc.setQueryData(qk.session(id), ctx.one);
 			}
-			toast.error(errorMessage(e));
+			toast.error(errorText(e));
 		},
 		onSettled: (_d, _e, { id }) => {
 			void qc.invalidateQueries({ queryKey: qk.sessionsAll });

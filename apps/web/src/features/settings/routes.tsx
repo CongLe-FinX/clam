@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { MotionConfig, motion } from "motion/react";
+import { tr, t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { SETTINGS_BASE, SETTINGS_NAV } from "./nav";
 
@@ -35,9 +36,9 @@ export function SettingsLayout() {
 			<div className="scrollbar-thin h-full overflow-y-auto overscroll-contain">
 				<div className="mx-auto flex w-full max-w-[1280px] md:gap-8 md:px-6 md:py-7">
 					{/* Navigation: persistent rail on desktop, full-screen list at /settings on mobile */}
-					<nav aria-label="Settings sections" className={cn("shrink-0 md:block md:w-56 lg:w-64", isIndex ? "block w-full" : "hidden")}>
+					<nav aria-label={t("Settings sections")} className={cn("shrink-0 md:block md:w-56 lg:w-64", isIndex ? "block w-full" : "hidden")}>
 						<div className="md:sticky md:top-0">
-							<h1 className="px-4 pb-2 pt-4 text-lg font-semibold tracking-tight md:px-2.5 md:pt-0">Settings</h1>
+							<h1 className="px-4 pb-2 pt-4 text-lg font-semibold tracking-tight md:px-2.5 md:pt-0">{t("Settings")}</h1>
 							<ul className="md:space-y-0.5">
 								{SETTINGS_NAV.map((item) => {
 									const Icon = item.icon;
@@ -56,8 +57,8 @@ export function SettingsLayout() {
 											>
 												<Icon className={cn("size-4 shrink-0", active && "text-accent")} />
 												<span className="min-w-0 flex-1">
-													<span className="block truncate">{item.label}</span>
-													<span className="block truncate text-xs font-normal text-subtle md:hidden">{item.description}</span>
+													<span className="block truncate">{tr(item.label)}</span>
+													<span className="block truncate text-xs font-normal text-subtle md:hidden">{tr(item.description)}</span>
 												</span>
 												<ChevronRight className="size-4 shrink-0 text-subtle md:hidden" />
 											</Link>
@@ -75,9 +76,9 @@ export function SettingsLayout() {
 								className="sticky top-0 z-10 flex min-h-11 items-center gap-1 border-b border-border bg-background/90 px-3 text-sm text-muted-foreground outline-none backdrop-blur hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:hidden"
 							>
 								<ChevronLeft className="size-4" />
-								Settings
+								{t("Settings")}
 								<span aria-hidden className="mx-1 text-subtle">/</span>
-								<span className="font-medium text-foreground">{current.label}</span>
+								<span className="font-medium text-foreground">{tr(current.label)}</span>
 							</Link>
 						)}
 						<motion.div

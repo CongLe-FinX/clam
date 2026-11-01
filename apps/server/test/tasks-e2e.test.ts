@@ -5,6 +5,7 @@ import path from "node:path";
 import type { AgentSession, MessagesPage, Task, TaskDetail } from "@clam/contracts";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { api } from "./full-harness.ts";
+import { expectEventsLocalised, expectReasonLocalised } from "./i18n-helpers.ts";
 import { eventually, peerOf, signedRequest, startNode } from "./net-helpers.ts";
 import {
 	branchesOf,
@@ -87,6 +88,8 @@ describe("delegation from the UI route", () => {
 		// the timeline is the executor's: gap-free seqs from offered to succeeded
 		expect(statusSequence(done.events)).toEqual(["offered", "accepted", "running", "succeeded"]);
 		expect(done.events.map((e) => e.seq)).toEqual(done.events.map((_, i) => i + 1));
+		// every line the executor generated (offered, session started, delivery, result, status changes) has a translatable twin that renders to it
+		expectEventsLocalised(done.events);
 
 		// B: the same task id, its executing session, and the working tree back on main and clean
 		const onB = await api(pair.b).get<TaskDetail>(`/tasks/${created.id}`);
@@ -124,6 +127,8 @@ describe("delegation from the UI route", () => {
 		expect(rejected.body).toMatchObject({ status: "rejected", reason: "Not this week" });
 		const mirrored = await waitForTask(pair.a, created.id, (t) => t.status === "rejected", "A sees the rejection");
 		expect(mirrored.task.reason).toBe("Not this week");
+		// a person's own words are never twinned
+		expect(mirrored.task.reasonI18n).toBeUndefined();
 		expect(mirrored.task.finishedAt).not.toBeNull();
 	});
 
@@ -148,7 +153,14 @@ describe("delegation from the UI route", () => {
 		// the agent asks a question and then waits: the task is blocked, branch checked out, nothing completes by itself
 		const question = '@@fake-tool mesh_message {"taskId":"{{taskId}}","kind":"question","text":"Which file name should I use?"}';
 		const created = await delegate("Cancel me", ["Create a file.", "@@fake-sh echo partial > PARTIAL.md", question].join("\n"));
-		await waitForTask(pair.a, created.id, (t) => t.status === "blocked", "task blocked waiting for an answer");
+		const blockedA = await waitForTask(pair.a, created.id, (t) => t.status === "blocked", "task blocked waiting for an answer");
+		const blockedB = await waitForTask(pair.b, created.id, (t) => t.status === "blocked", "task blocked on B");
+		// the executor's own sentence replicates with its twin (wire `reasonI18n`) and the twin renders to the English reason on both nodes
+		for (const { task } of [blockedA, blockedB]) {
+			expect(task.reason).toMatch(/^Waiting for an answer from /);
+			expect(task.reasonI18n, `no twin on ${task.direction}`).toEqual({ key: "Waiting for an answer from {node}", params: { node: "node-a" } });
+			expectReasonLocalised(task);
+		}
 
 		const cancelled = await api(pair.a).post<Task>(`/tasks/${created.id}/cancel`, { reason: "changed my mind" });
 		expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
@@ -316,6 +328,7 @@ describe("a sender that goes away (T3) and comes back", () => {
 		expect(back.task.result).toMatchObject({ pushed: true, summary: "created TASK_SMOKE.md" });
 		expect(statusSequence(back.events)).toEqual(["offered", "accepted", "running", "succeeded"]);
 		expect(back.events.map((e) => e.seq)).toEqual(back.events.map((_, i) => i + 1));
+		expectEventsLocalised(back.events);
 		await eventually(() => pair.b.ctx.tasks.store.outboxOfTask(created.id).every((o) => o.state === "sent"), "B's queued message delivered");
 		const after = (await api(pair.a).get<TaskDetail>(`/tasks/${created.id}`)).body;
 		expect(after.messages.map((m) => [m.kind, m.text, m.author.nodeName])).toEqual([["note", "progress: wrote T3.md", "node-b"]]);
@@ -363,6 +376,8 @@ describe("a sender that goes away (T3) and comes back", () => {
 		expect(cancelled.status, JSON.stringify(cancelled.body)).toBe(200);
 		expect(cancelled.body).toMatchObject({ status: "cancelled", reason: "changed my mind" });
 		expect(pair.a.ctx.tasks.store.outboxOfTask(created.id).map((o) => o.state)).toEqual(["cancelled"]);
+		// our own delivery error text carries its twin through the task view
+		expect(pair.a.ctx.tasks.store.outboxOfTask(created.id).map((o) => o.lastErrorI18n)).toEqual([{ key: "Cancelled before delivery" }]);
 	});
 });
 

@@ -1,4 +1,6 @@
-import type { PeerStatus } from "@clam/contracts";
+import type { PeerStatus, TunnelMode, TunnelState } from "@clam/contracts";
+import { type Msg, msg, t } from "@/i18n";
+import { formatTime } from "@/lib/utils";
 import type { DotStatus } from "@/ui/status-dot";
 
 /** Groups a fingerprint in blocks of 4 so two people can read it aloud and compare it. The raw value is what is copied. */
@@ -14,8 +16,18 @@ export function formatInvitationCode(raw: string): string {
 }
 
 export const PEER_DOT: Record<PeerStatus, DotStatus> = { online: "online", degraded: "degraded", offline: "offline", revoked: "crashed" };
-export const PEER_STATUS_LABEL: Record<PeerStatus, string> = { online: "Online", degraded: "Degraded", offline: "Offline", revoked: "Revoked" };
+export const PEER_STATUS_LABEL: Record<PeerStatus, Msg> = { online: msg("Online"), degraded: msg("Degraded"), offline: msg("Offline"), revoked: msg("Revoked") };
 export const PEER_STATUS_VARIANT = { online: "success", degraded: "warning", offline: "neutral", revoked: "danger" } as const satisfies Record<PeerStatus, string>;
+
+/** Display label + badge tone of each tunnel state (one map for every screen that shows it; render the label with `tr()`). */
+export const TUNNEL_STATE: Record<TunnelState["state"], { label: Msg; variant: "success" | "warning" | "danger" | "neutral" }> = {
+	stopped: { label: msg("Stopped"), variant: "neutral" },
+	starting: { label: msg("Starting…"), variant: "warning" },
+	running: { label: msg("Running"), variant: "success" },
+	reconnecting: { label: msg("Reconnecting…"), variant: "warning" },
+	error: { label: msg("Error"), variant: "danger" },
+};
+export const TUNNEL_MODE_LABEL: Record<TunnelMode, Msg> = { off: msg("Off"), quick: msg("Quick tunnel"), named: msg("Named tunnel") };
 
 export function hostOf(url: string): string {
 	try {
@@ -32,11 +44,11 @@ export const isStale = (fetchedAt: string, now = Date.now()): boolean => now - D
 /** The text a user pastes into chat to hand an invitation to someone. */
 export function invitationMessage(i: { url: string | null; fingerprint: string; code: string; expiresAt: string }): string {
 	return [
-		"Join my CL Agent Mesh machine:",
-		i.url ? `URL: ${i.url}` : "URL: (this machine has no public URL yet)",
-		`Fingerprint: ${formatFingerprint(i.fingerprint)}`,
-		`Code: ${formatInvitationCode(i.code)}`,
-		`Expires: ${new Date(i.expiresAt).toLocaleTimeString()}`,
-		"Compare the fingerprint with the one CL Agent Mesh shows you before you enter the code.",
+		t("Join my CL Agent Mesh machine:"),
+		i.url ? t("URL: {url}", { url: i.url }) : t("URL: (this machine has no public URL yet)"),
+		t("Fingerprint: {fingerprint}", { fingerprint: formatFingerprint(i.fingerprint) }),
+		t("Code: {code}", { code: formatInvitationCode(i.code) }),
+		t("Expires: {time}", { time: formatTime(i.expiresAt) }),
+		t("Compare the fingerprint with the one CL Agent Mesh shows you before you enter the code."),
 	].join("\n");
 }

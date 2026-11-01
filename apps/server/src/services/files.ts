@@ -2,7 +2,7 @@ import type { Dirent } from "node:fs";
 import { lstat, open, readdir, realpath, stat, access, constants } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
-import type { DirSuggestion, FileContent, FileEntry } from "@clam/contracts";
+import { i18nMsg, type DirSuggestion, type I18nMessage, type FileContent, type FileEntry } from "@clam/contracts";
 import { ApiError } from "../http/errors.ts";
 
 /** Largest file whose content is returned inline. */
@@ -11,8 +11,8 @@ const BINARY_SNIFF_BYTES = 8000;
 const SKIPPED_DIRS = new Set([".git", "node_modules"]);
 const MAX_SUGGESTIONS = 20;
 
-const invalidPath = (message: string) => new ApiError(400, "invalid_path", message);
-const outsideProject = () => new ApiError(403, "path_outside_project", "Path resolves outside the project root");
+const invalidPath = (message: I18nMessage) => new ApiError(400, "invalid_path", message);
+const outsideProject = () => new ApiError(403, "path_outside_project", i18nMsg("Path resolves outside the project root"));
 
 function isInside(root: string, target: string): boolean {
 	const rel = path.relative(root, target);
@@ -21,12 +21,12 @@ function isInside(root: string, target: string): boolean {
 
 /** Validate a client-supplied relative path and return its normalized POSIX form ("" = root). */
 export function normalizeRelativePath(input: string): string {
-	if (input.includes("\0")) throw invalidPath("Path contains a NUL byte");
+	if (input.includes("\0")) throw invalidPath(i18nMsg("Path contains a NUL byte"));
 	if (input.startsWith("/") || input.startsWith("\\") || path.isAbsolute(input) || /^[A-Za-z]:/.test(input)) {
-		throw invalidPath("Path must be relative to the project root");
+		throw invalidPath(i18nMsg("Path must be relative to the project root"));
 	}
 	const segments = input.split(/[\\/]/).filter((s) => s !== "" && s !== ".");
-	if (segments.includes("..")) throw invalidPath("Path must not contain '..' segments");
+	if (segments.includes("..")) throw invalidPath(i18nMsg("Path must not contain '..' segments"));
 	return segments.join("/");
 }
 
@@ -47,7 +47,7 @@ export async function resolveInsideRoot(root: string, relInput: string): Promise
 	try {
 		realRoot = await realpath(root);
 	} catch {
-		throw new ApiError(404, "project_path_missing", "Project directory no longer exists on this node");
+		throw new ApiError(404, "project_path_missing", i18nMsg("Project directory no longer exists on this node"));
 	}
 	let abs: string;
 	try {
@@ -66,13 +66,13 @@ export async function resolveInsideRoot(root: string, relInput: string): Promise
 export async function listDirectory(root: string, relInput: string): Promise<FileEntry[]> {
 	const { rel, abs } = await resolveInsideRoot(root, relInput);
 	const info = await stat(abs);
-	if (!info.isDirectory()) throw ApiError.badRequest(`"${rel}" is not a directory`);
+	if (!info.isDirectory()) throw ApiError.badRequest(i18nMsg('"{rel}" is not a directory', { rel }));
 	let dirents: Dirent[];
 	try {
 		dirents = await readdir(abs, { withFileTypes: true });
 	} catch (err) {
 		if ((err as NodeJS.ErrnoException).code === "EACCES" || (err as NodeJS.ErrnoException).code === "EPERM") {
-			throw new ApiError(403, "forbidden", `Cannot read directory "${rel}"`);
+			throw new ApiError(403, "forbidden", i18nMsg('Cannot read directory "{rel}"', { rel }));
 		}
 		throw err;
 	}
@@ -170,10 +170,10 @@ export function decodeText(bytes: Uint8Array): string | null {
 
 export async function readProjectFile(root: string, relInput: string): Promise<FileContent> {
 	const { rel, abs } = await resolveInsideRoot(root, relInput);
-	if (rel === "") throw ApiError.badRequest("Path must name a file");
+	if (rel === "") throw ApiError.badRequest(i18nMsg("Path must name a file"));
 	const info = await stat(abs);
-	if (info.isDirectory()) throw ApiError.badRequest(`"${rel}" is a directory`);
-	if (!info.isFile()) throw ApiError.badRequest(`"${rel}" is not a regular file`);
+	if (info.isDirectory()) throw ApiError.badRequest(i18nMsg('"{rel}" is a directory', { rel }));
+	if (!info.isFile()) throw ApiError.badRequest(i18nMsg('"{rel}" is not a regular file', { rel }));
 	const language = languageFor(rel);
 	if (info.size > MAX_FILE_BYTES) {
 		return { path: rel, size: info.size, content: null, truncated: true, binary: false, language };
@@ -278,14 +278,14 @@ export async function suggestDirectories(prefix: string, home: string = homedir(
 
 /** Validate and canonicalize a project working directory; throws 400 `invalid_request` when unusable. */
 export async function canonicalProjectDir(input: string): Promise<string> {
-	if (input.includes("\0")) throw ApiError.badRequest("Project path contains a NUL byte");
-	if (!path.isAbsolute(input)) throw ApiError.badRequest("Project path must be absolute");
+	if (input.includes("\0")) throw ApiError.badRequest(i18nMsg("Project path contains a NUL byte"));
+	if (!path.isAbsolute(input)) throw ApiError.badRequest(i18nMsg("Project path must be absolute"));
 	let real: string;
 	try {
 		real = await realpath(input);
 	} catch {
-		throw ApiError.badRequest(`Project path does not exist: ${input}`);
+		throw ApiError.badRequest(i18nMsg("Project path does not exist: {path}", { path: input }));
 	}
-	if (!(await stat(real)).isDirectory()) throw ApiError.badRequest(`Project path is not a directory: ${input}`);
+	if (!(await stat(real)).isDirectory()) throw ApiError.badRequest(i18nMsg("Project path is not a directory: {path}", { path: input }));
 	return real;
 }

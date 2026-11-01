@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IsoDate } from "./common.ts";
+import { I18nText, IsoDate } from "./common.ts";
 import { TokenTotals } from "./usage.ts";
 
 export const RuntimeKind = z.enum(["omp"]);
@@ -406,7 +406,8 @@ export type SessionEvent =
 	| { type: "tool_end"; toolCallId: string; isError: boolean; result: string; toolDetails?: unknown }
 	| { type: "prompt_result"; promptId: string; clientId: string; status: "completed" | "aborted" | "error"; error?: string }
 	| { type: "settled" }
-	| { type: "notice"; level: "info" | "warning" | "error"; message: string }
+	/** `i18n` is the structured twin of `message` when the text is ours (not passed through from OMP). */
+	| { type: "notice"; level: "info" | "warning" | "error"; message: string; i18n?: I18nText | undefined }
 	/** Files the turn that just ended produced (only emitted when there are some). */
 	| { type: "turn_outputs"; outputs: TurnOutputs }
 	/** Tool/extension approval or question that needs a human. Answer via POST /sessions/:id/ui-response. */

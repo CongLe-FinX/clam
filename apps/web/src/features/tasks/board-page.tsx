@@ -5,7 +5,8 @@ import { ListChecks, Plus, RefreshCw } from "lucide-react";
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
-import { errorMessage } from "@/lib/api";
+import { msg, t, tr, type Msg } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { useProjects, useTasks, useWorkspaces } from "@/lib/queries";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -20,6 +21,7 @@ import { TaskCard } from "./task-card.tsx";
 /** Above this many cards a column is virtualized (and loses the move animation). */
 const VIRTUALIZE_AFTER = 40;
 type Direction = "all" | "incoming" | "outgoing";
+const DIRECTION_LABEL: Record<Direction, Msg> = { all: msg("All"), incoming: msg("Incoming"), outgoing: msg("Outgoing") };
 
 function useNow(intervalMs = 30_000): number {
 	const [now, setNow] = useState(() => Date.now());
@@ -72,17 +74,17 @@ export default function TaskBoardPage() {
 		<div className="flex h-full min-h-0 flex-col">
 			<div className="mx-auto flex w-full max-w-[1500px] shrink-0 flex-col gap-3 px-4 pb-3 pt-5 sm:px-6 lg:px-8 lg:pt-7">
 				<PageHeader
-					eyebrow={workspaceId ? <Link to="/workspaces/$workspaceId" params={{ workspaceId }} className="hover:text-foreground">{workspace?.name ?? "Workspace"}</Link> : "Agent Network"}
-					title="Tasks"
-					description={bp === "mobile" ? undefined : "Work you delegated to agents on other machines, and work other machines asked this one to do."}
+					eyebrow={workspaceId ? <Link to="/workspaces/$workspaceId" params={{ workspaceId }} className="hover:text-foreground">{workspace?.name ?? t("Workspace")}</Link> : t("Agent Network")}
+					title={t("Tasks")}
+					description={bp === "mobile" ? undefined : t("Work you delegated to agents on other machines, and work other machines asked this one to do.")}
 					actions={
 						<Button variant="primary" onClick={() => openDialog({ kind: "delegate-task", workspaceId })}>
-							<Plus /> Delegate a task
+							<Plus /> {t("Delegate a task")}
 						</Button>
 					}
 				/>
 				<div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
-					<div role="group" aria-label="Direction" className="col-span-2 flex rounded-lg bg-surface-2 p-0.5 sm:col-span-1">
+					<div role="group" aria-label={t("Direction")} className="col-span-2 flex rounded-lg bg-surface-2 p-0.5 sm:col-span-1">
 						{(["all", "incoming", "outgoing"] as const).map((d) => (
 							<button
 								key={d}
@@ -90,20 +92,20 @@ export default function TaskBoardPage() {
 								aria-pressed={dir === d}
 								onClick={() => setDir(d)}
 								className={cn(
-									"inline-flex h-7 flex-1 items-center justify-center rounded-md px-3 text-xs font-medium capitalize outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-10 sm:flex-none",
+									"inline-flex h-7 flex-1 items-center justify-center rounded-md px-3 text-xs font-medium outline-none transition-colors focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-10 sm:flex-none",
 									dir === d ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:text-foreground",
 								)}
 							>
-								{d}
+								{tr(DIRECTION_LABEL[d])}
 							</button>
 						))}
 					</div>
 					<Select value={peer} onValueChange={setPeer}>
-						<SelectTrigger aria-label="Filter by machine" className="sm:w-48">
+						<SelectTrigger aria-label={t("Filter by machine")} className="sm:w-48">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="all">All machines</SelectItem>
+							<SelectItem value="all">{t("All machines")}</SelectItem>
 							{peerOptions.map(([id, name]) => (
 								<SelectItem key={id} value={id}>
 									{name}
@@ -112,11 +114,11 @@ export default function TaskBoardPage() {
 						</SelectContent>
 					</Select>
 					<Select value={project} onValueChange={setProject}>
-						<SelectTrigger aria-label="Filter by project" className="sm:w-48">
+						<SelectTrigger aria-label={t("Filter by project")} className="sm:w-48">
 							<SelectValue />
 						</SelectTrigger>
 						<SelectContent>
-							<SelectItem value="all">All projects</SelectItem>
+							<SelectItem value="all">{t("All projects")}</SelectItem>
 							{projectOptions.map((p) => (
 								<SelectItem key={p.id} value={p.id}>
 									{p.name}
@@ -136,28 +138,28 @@ export default function TaskBoardPage() {
 			) : tasks.error ? (
 				<EmptyState
 					icon={ListChecks}
-					title="Could not load tasks"
-					description={errorMessage(tasks.error)}
+					title={t("Could not load tasks")}
+					description={errorText(tasks.error)}
 					action={
 						<Button size="sm" variant="outline" onClick={() => void tasks.refetch()}>
-							<RefreshCw /> Retry
+							<RefreshCw /> {t("Retry")}
 						</Button>
 					}
 				/>
 			) : inScope.length === 0 ? (
 				<EmptyState
 					icon={ListChecks}
-					title="No tasks yet"
-					description="Delegate a task to an agent on a paired machine, or wait for another machine to send you one. Agents can also delegate on their own."
+					title={t("No tasks yet")}
+					description={t("Delegate a task to an agent on a paired machine, or wait for another machine to send you one. Agents can also delegate on their own.")}
 					action={
 						<Button variant="primary" onClick={() => openDialog({ kind: "delegate-task", workspaceId })}>
-							<Plus /> Delegate a task
+							<Plus /> {t("Delegate a task")}
 						</Button>
 					}
 				/>
 			) : bp === "mobile" ? (
 				<div className="flex min-h-0 flex-1 flex-col">
-					<div role="tablist" aria-label="Task status" className="scrollbar-none mx-4 mb-2 flex shrink-0 gap-1 overflow-x-auto rounded-lg bg-surface-2 p-0.5">
+					<div role="tablist" aria-label={t("Task status")} className="scrollbar-none mx-4 mb-2 flex shrink-0 gap-1 overflow-x-auto rounded-lg bg-surface-2 p-0.5">
 						{COLUMNS.map((c) => (
 							<button
 								key={c.id}
@@ -170,13 +172,13 @@ export default function TaskBoardPage() {
 									mobileColumn === c.id ? "bg-surface-3 text-foreground" : "text-muted-foreground",
 								)}
 							>
-								{c.id === "closed" ? "Closed" : c.label}
+								{c.id === "closed" ? t("Closed") : tr(c.label)}
 								<span className="tabular font-mono text-2xs text-subtle">{columns[c.id].length}</span>
 							</button>
 						))}
 					</div>
 					<div className="min-h-0 flex-1 px-4">
-						<ColumnList tasks={columns[mobileColumn]} projectName={projectName} now={now} empty={filtering ? "No tasks match the filters." : "Nothing here."} />
+						<ColumnList tasks={columns[mobileColumn]} projectName={projectName} now={now} empty={filtering ? t("No tasks match the filters.") : t("Nothing here.")} />
 					</div>
 				</div>
 			) : (
@@ -184,13 +186,13 @@ export default function TaskBoardPage() {
 					<LayoutGroup>
 						<div className="mx-auto grid min-h-0 w-full max-w-[1500px] flex-1 grid-cols-4 gap-3 px-4 pb-4 sm:px-6 lg:px-8">
 							{COLUMNS.map((c) => (
-								<section key={c.id} aria-label={c.label} className="flex min-h-0 flex-col rounded-2xl bg-surface-2/60 shadow-[inset_0_0_0_1px_var(--border)]">
-									<header className="flex shrink-0 items-baseline gap-2 px-3 pb-1.5 pt-3" title={c.hint}>
-										<h2 className="whitespace-nowrap text-xs font-semibold">{c.label}</h2>
+								<section key={c.id} aria-label={tr(c.label)} className="flex min-h-0 flex-col rounded-2xl bg-surface-2/60 shadow-[inset_0_0_0_1px_var(--border)]">
+									<header className="flex shrink-0 items-baseline gap-2 px-3 pb-1.5 pt-3" title={tr(c.hint)}>
+										<h2 className="whitespace-nowrap text-xs font-semibold">{tr(c.label)}</h2>
 										<span className="tabular font-mono text-2xs text-subtle">{columns[c.id].length}</span>
 									</header>
 									<div className="min-h-0 flex-1 px-2 pb-2">
-										<ColumnList tasks={columns[c.id]} projectName={projectName} now={now} empty={filtering ? "No tasks match." : "Nothing here."} animate />
+										<ColumnList tasks={columns[c.id]} projectName={projectName} now={now} empty={filtering ? t("No tasks match.") : t("Nothing here.")} animate />
 									</div>
 								</section>
 							))}
@@ -209,7 +211,7 @@ export default function TaskBoardPage() {
 							setProject("all");
 						}}
 					>
-						Clear filters
+						{t("Clear filters")}
 					</Button>
 				</div>
 			) : null}

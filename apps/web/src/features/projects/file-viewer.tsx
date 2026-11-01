@@ -5,7 +5,8 @@ import { AlertTriangle, ChevronRight, Download, FileQuestion, FileX, RefreshCw, 
 import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { CopyButton, HlLineView } from "@/components/code-block";
 import { LazyMarkdown } from "@/components/lazy-markdown";
-import { api, errorMessage, localUrl } from "@/lib/api";
+import { t } from "@/i18n";
+import { api, errorText, localUrl } from "@/lib/api";
 import { isMediaKind, previewKind } from "@/lib/file-kind";
 import { type HlLine, highlightLines, langFromPath } from "@/lib/highlight";
 import { qk } from "@/lib/queries";
@@ -71,7 +72,7 @@ export function FileViewer({ projectId, path, className, onClose }: FileViewerPr
 	return (
 		<div className={cn("flex h-full min-h-0 flex-col bg-background", className)}>
 			<div className="flex h-10 shrink-0 items-center gap-1 border-b px-2 coarse:h-12">
-				<nav aria-label="File path" className="scrollbar-none flex min-w-0 flex-1 items-center overflow-x-auto font-mono text-xs">
+				<nav aria-label={t("File path")} className="scrollbar-none flex min-w-0 flex-1 items-center overflow-x-auto font-mono text-xs">
 					{segments.map((seg, i) => (
 						<Fragment key={i}>
 							{i > 0 ? <ChevronRight aria-hidden className="mx-0.5 size-3 shrink-0 text-subtle" /> : null}
@@ -86,39 +87,39 @@ export function FileViewer({ projectId, path, className, onClose }: FileViewerPr
 					</Badge>
 				) : null}
 				{isMd && data?.content != null ? (
-					<div role="group" aria-label="Markdown view" className="flex shrink-0 rounded-md bg-surface-2 p-0.5 text-2xs font-medium">
+					<div role="group" aria-label={t("Markdown view")} className="flex shrink-0 rounded-md bg-surface-2 p-0.5 text-2xs font-medium">
 						{(["preview", "source"] as const).map((m) => (
 							<button
 								key={m}
 								type="button"
 								aria-pressed={mode === m}
 								onClick={() => setMode(m)}
-								className={cn("rounded px-2 py-1 capitalize outline-none transition-colors coarse:px-3 coarse:py-2", mode === m ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:text-foreground")}
+								className={cn("rounded px-2 py-1 first-letter:uppercase outline-none transition-colors coarse:px-3 coarse:py-2", mode === m ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:text-foreground")}
 							>
-								{m}
+								{m === "preview" ? t("Preview") : t("Source")}
 							</button>
 						))}
 					</div>
 				) : null}
 				{data?.content != null && !(isMd && mode === "preview") ? (
-					<Tip label={wrap ? "Disable line wrap" : "Wrap lines"}>
-						<Button variant="ghost" size="icon-sm" aria-label="Toggle line wrap" aria-pressed={wrap} onClick={() => setWrap(!wrap)} className={cn(wrap && "bg-surface-3 text-foreground")}>
+					<Tip label={wrap ? t("Disable line wrap") : t("Wrap lines")}>
+						<Button variant="ghost" size="icon-sm" aria-label={t("Toggle line wrap")} aria-pressed={wrap} onClick={() => setWrap(!wrap)} className={cn(wrap && "bg-surface-3 text-foreground")}>
 							<WrapText />
 						</Button>
 					</Tip>
 				) : null}
-				<span className="hidden sm:contents"><CopyButton text={path} label="Copy path" /></span>
-				<Tip label="Download">
+				<span className="hidden sm:contents"><CopyButton text={path} label={t("Copy path")} /></span>
+				<Tip label={t("Download")}>
 					<Button asChild variant="ghost" size="icon-sm">
-						<a href={downloadUrl} download={segments.at(-1)} aria-label={`Download ${segments.at(-1)}`}>
+						<a href={downloadUrl} download={segments.at(-1)} aria-label={t("Download {name}", { name: segments.at(-1) ?? path })}>
 							<Download />
 						</a>
 					</Button>
 				</Tip>
-				{data?.content != null ? <CopyButton text={data.content} label="Copy contents" /> : null}
+				{data?.content != null ? <CopyButton text={data.content} label={t("Copy contents")} /> : null}
 				{onClose ? (
-					<Tip label="Close file">
-						<Button variant="ghost" size="icon-sm" aria-label="Close file" onClick={onClose}>
+					<Tip label={t("Close file")}>
+						<Button variant="ghost" size="icon-sm" aria-label={t("Close file")} onClick={onClose}>
 							<X />
 						</Button>
 					</Tip>
@@ -128,9 +129,7 @@ export function FileViewer({ projectId, path, className, onClose }: FileViewerPr
 			{data?.truncated ? (
 				<div role="status" className="flex shrink-0 items-center gap-2 border-b bg-warning/10 px-3 py-1.5 text-xs text-warning">
 					<AlertTriangle className="size-3.5 shrink-0" />
-					<span>
-						Showing the beginning of this file only ({formatBytes(data.size)} total).
-					</span>
+					<span>{t("Showing the beginning of this file only ({size} total).", { size: formatBytes(data.size) })}</span>
 				</div>
 			) : null}
 
@@ -144,18 +143,18 @@ export function FileViewer({ projectId, path, className, onClose }: FileViewerPr
 				) : q.error ? (
 					<EmptyState
 						icon={FileX}
-						title="Could not open file"
-						description={errorMessage(q.error)}
+						title={t("Could not open file")}
+						description={errorText(q.error)}
 						action={
 							<Button size="sm" variant="outline" onClick={() => void q.refetch()}>
-								<RefreshCw /> Retry
+								<RefreshCw /> {t("Retry")}
 							</Button>
 						}
 					/>
 				) : !data ? null : data.binary ? (
-					<EmptyState icon={FileQuestion} title="Binary file" description={`This file can’t be shown as text (${formatBytes(data.size)}).`} action={<DownloadLink href={downloadUrl} name={segments.at(-1) ?? path} />} />
+					<EmptyState icon={FileQuestion} title={t("Binary file")} description={t("This file can’t be shown as text ({size}).", { size: formatBytes(data.size) })} action={<DownloadLink href={downloadUrl} name={segments.at(-1) ?? path} />} />
 				) : data.content === null ? (
-					<EmptyState icon={FileQuestion} title="File too large to preview" description={`This file is ${formatBytes(data.size)}, which exceeds the preview limit.`} action={<DownloadLink href={downloadUrl} name={segments.at(-1) ?? path} />} />
+					<EmptyState icon={FileQuestion} title={t("File too large to preview")} description={t("This file is {size}, which exceeds the preview limit.", { size: formatBytes(data.size) })} action={<DownloadLink href={downloadUrl} name={segments.at(-1) ?? path} />} />
 				) : isMd && mode === "preview" ? (
 					<div className="scrollbar-thin h-full overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
 						<div className="mx-auto max-w-3xl">
@@ -246,7 +245,7 @@ function CodeView({ content, lang, wrap }: { content: string; lang: string | nul
 					);
 				})}
 			</div>
-			<span className="sr-only">{formatNumber(lines.length)} lines</span>
+			<span className="sr-only">{t("{count, plural, one {# line} other {# lines}}", { count: lines.length })}</span>
 		</div>
 	);
 }
@@ -255,7 +254,7 @@ function DownloadLink({ href, name }: { href: string; name: string }) {
 	return (
 		<Button asChild size="sm" variant="outline">
 			<a href={href} download={name}>
-				<Download /> Download
+				<Download /> {t("Download")}
 			</a>
 		</Button>
 	);

@@ -1,6 +1,7 @@
 import type { Task } from "@clam/contracts";
 import { Check, CloudDownload, FolderGit2, Paperclip, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { T, t } from "@/i18n";
 import { useAgents, useProjects } from "@/lib/queries";
 import { formatBytes } from "@/lib/utils";
 import { useUi } from "@/lib/store";
@@ -14,6 +15,7 @@ import { projectsForRepo, repoSlug } from "./format.ts";
 import { useDecideTask } from "./hooks.ts";
 
 const ANY_AGENT = "__any__";
+const CODE = { code: <code className="font-mono text-foreground" /> };
 
 /** Executor side: decide an offered task — pick the local clone to run in and accept, or reject with a reason. `reaccept` re-runs a blocked task. */
 export function AcceptPanel({ task, reaccept }: { task: Task; reaccept?: boolean }) {
@@ -39,55 +41,55 @@ export function AcceptPanel({ task, reaccept }: { task: Task; reaccept?: boolean
 	return (
 		<Card className="shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--warning)_45%,transparent)]">
 			<CardHeader>
-				<CardTitle>{reaccept ? "Resolve and re-accept" : "Accept this task?"}</CardTitle>
+				<CardTitle>{reaccept ? t("Resolve and re-accept") : t("Accept this task?")}</CardTitle>
 			</CardHeader>
 			<CardContent className="flex flex-col gap-3.5 pt-3">
 				<p className="text-[13px] text-muted-foreground">
 					<PartyChip party={task.sender} role="sender" className="inline-flex align-middle" />{" "}
 					{repo && slug ? (
-						<>
-							wants one of your agents to work on <code className="font-mono text-foreground">{slug}</code>
-							{repo.branch ? (
-								<>
-									{" "}
-									from <code className="font-mono text-foreground">{repo.branch}</code>
-								</>
-							) : null}
-							. It runs in a local clone of that repository on this machine.
-						</>
+						repo.branch ? (
+							<T
+								text="wants one of your agents to work on <code>{slug}</code> from <code>{branch}</code>. It runs in a local clone of that repository on this machine."
+								params={{ slug, branch: repo.branch }}
+								tags={CODE}
+							/>
+						) : (
+							<T text="wants one of your agents to work on <code>{slug}</code>. It runs in a local clone of that repository on this machine." params={{ slug }} tags={CODE} />
+						)
+					) : task.deliverAs === "summary" ? (
+						t("wants one of your agents to answer a question. There is no repository: it runs in a fresh folder on this machine.")
+					) : task.deliverAs === "files" ? (
+						t("wants one of your agents to work on a folder task. There is no repository: it runs in a fresh folder on this machine and the changed files go back to the sender to preview and apply.")
 					) : (
-						<>
-							wants one of your agents to {task.deliverAs === "summary" ? "answer a question" : "work on a folder task"}. There is no repository: it runs in a fresh folder on this machine
-							{task.deliverAs === "files" ? " and the changed files go back to the sender to preview and apply" : ""}.
-						</>
+						t("wants one of your agents to work on a folder task. There is no repository: it runs in a fresh folder on this machine.")
 					)}
 				</p>
 				{task.inputFiles ? (
 					<p className="flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-2 text-xs text-muted-foreground">
 						<Paperclip className="size-3.5 shrink-0" aria-hidden />
-						Includes {task.inputFiles.fileCount} input {task.inputFiles.fileCount === 1 ? "file" : "files"} ({formatBytes(task.inputFiles.size)}), copied into the working folder.
+						{t("{count, plural, one {Includes # input file ({size}), copied into the working folder.} other {Includes # input files ({size}), copied into the working folder.}}", { count: task.inputFiles.fileCount, size: formatBytes(task.inputFiles.size) })}
 					</p>
 				) : null}
 				{repo && matches.length === 0 && projects.isSuccess ? (
 					<div className="flex flex-col gap-2 rounded-lg bg-surface-2 p-3 text-[13px]">
 						<p>
-							No project on this machine is linked to <code className="font-mono">{slug}</code>.
+							<T text="No project on this machine is linked to <code>{slug}</code>." params={{ slug: slug ?? "" }} tags={{ code: <code className="font-mono" /> }} />
 						</p>
 						<div className="flex flex-wrap items-center gap-2">
 							<Button size="sm" variant="primary" onClick={() => openDialog({ kind: "create-project", workspaceId: task.workspaceId, mode: "clone" })}>
-								<CloudDownload /> Clone this repo
+								<CloudDownload /> {t("Clone this repo")}
 							</Button>
-							<span className="text-xs text-subtle">Already cloned it? Link its GitHub repository on the project page, then accept here.</span>
+							<span className="text-xs text-subtle">{t("Already cloned it? Link its GitHub repository on the project page, then accept here.")}</span>
 						</div>
 					</div>
 				) : (
 					<div className="grid gap-3 sm:grid-cols-2">
 						{repo ? (
-							<Field label="Run in project" hint={matches.length > 1 ? "Several projects match this repository — choose one." : undefined}>
+							<Field label={t("Run in project")} hint={matches.length > 1 ? t("Several projects match this repository — choose one.") : undefined}>
 								{() => (
 									<Select value={projectId} onValueChange={setProjectId}>
 										<SelectTrigger>
-											<SelectValue placeholder="Select a project" />
+											<SelectValue placeholder={t("Select a project")} />
 										</SelectTrigger>
 										<SelectContent>
 											{matches.map((p) => (
@@ -104,14 +106,14 @@ export function AcceptPanel({ task, reaccept }: { task: Task; reaccept?: boolean
 							</Field>
 						) : null}
 						{(agents.data?.length ?? 0) > 1 ? (
-							<Field label="Agent">
+							<Field label={t("Agent")}>
 								{() => (
 									<Select value={agentId} onValueChange={setAgentId}>
 										<SelectTrigger>
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
-											<SelectItem value={ANY_AGENT}>Any available agent</SelectItem>
+											<SelectItem value={ANY_AGENT}>{t("Any available agent")}</SelectItem>
 											{agents.data?.map((a) => (
 												<SelectItem key={a.id} value={a.id}>
 													{a.name}
@@ -125,28 +127,28 @@ export function AcceptPanel({ task, reaccept }: { task: Task; reaccept?: boolean
 					</div>
 				)}
 				{rejecting ? (
-					<Field label="Reason" hint="Shown to the delegating node.">
-						{(id) => <Input id={id} autoFocus value={reason} maxLength={2000} onChange={(e) => setReason(e.target.value)} placeholder="e.g. I'm busy with a release" />}
+					<Field label={t("Reason")} hint={t("Shown to the delegating node.")}>
+						{(id) => <Input id={id} autoFocus value={reason} maxLength={2000} onChange={(e) => setReason(e.target.value)} placeholder={t("e.g. I'm busy with a release")} />}
 					</Field>
 				) : null}
 				<div className="flex flex-wrap items-center gap-2">
 					{rejecting ? (
 						<>
 							<Button variant="danger" loading={decide.isPending} disabled={!reason.trim()} onClick={() => decide.mutate({ decision: "reject", reason: reason.trim() })}>
-								<X /> Reject task
+								<X /> {t("Reject task")}
 							</Button>
 							<Button variant="ghost" onClick={() => setRejecting(false)}>
-								Back
+								{t("Back")}
 							</Button>
 						</>
 					) : (
 						<>
 							<Button variant="primary" loading={decide.isPending} disabled={repo !== null && !projectId} onClick={accept}>
-								<Check /> {reaccept ? "Re-accept" : "Accept"}
+								<Check /> {reaccept ? t("Re-accept") : t("Accept")}
 							</Button>
 							{reaccept ? null : (
 								<Button variant="outline" onClick={() => setRejecting(true)}>
-									Reject…
+									{t("Reject…")}
 								</Button>
 							)}
 						</>

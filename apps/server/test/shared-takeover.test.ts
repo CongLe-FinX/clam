@@ -4,6 +4,7 @@ import path from "node:path";
 import type { AgentSession, Checkpoint, SharedSession } from "@clam/contracts";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { api } from "./full-harness.ts";
+import { expectI18nMatches, expectTransferLocalised } from "./i18n-helpers.ts";
 import { eventually, signedRequest } from "./net-helpers.ts";
 import {
 	detailOn,
@@ -61,6 +62,8 @@ describe("manual takeover on B", () => {
 		const blocked = await sharedOn(pair.b, shared.id);
 		expect(blocked.takeoverAvailable).toBe(false);
 		expect(blocked.takeoverBlockedReason).toContain("is online");
+		expectI18nMatches({ i18n: blocked.takeoverBlockedI18n }, blocked.takeoverBlockedReason as string);
+		expect(blocked.takeoverBlockedI18n).toEqual({ key: "{name} (the driver) is online; ask it to transfer, or continue here anyway", params: { name: "node-a" } });
 		const refused = await api(pair.b).post<{ error: { code: string } }>(`/shared/${shared.id}/takeover`, {});
 		expect(refused.status).toBe(409);
 		expect(refused.body.error.code).toBe("driver_online");
@@ -246,6 +249,8 @@ describe("transfer with both nodes online", () => {
 		expect(started.body.transfer).toMatchObject({ toNodeId: pair.bId, toNodeName: "node-b" });
 		const done = await waitForShared(pair.a, shared.id, (s) => s.transfer?.phase === "continuing" && s.localRole === "former_driver", "the hand-over finished", 30_000);
 		expect(done).toMatchObject({ epoch: 2, driverNodeId: pair.bId, localSessionId: sessionId, transfer: { phase: "continuing", toNodeId: pair.bId } });
+		// the progress sentence of the record renders from its twin
+		expectTransferLocalised(done.transfer as NonNullable<SharedSession["transfer"]>);
 
 		const onB = await waitForShared(pair.b, shared.id, (s) => s.localRole === "driver" && s.epoch === 2, "B is the driver");
 		const fresh = await sessionOn(pair.b, onB.localSessionId as string);

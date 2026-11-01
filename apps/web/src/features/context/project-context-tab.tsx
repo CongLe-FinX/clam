@@ -3,8 +3,9 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { ChevronRight, Download, GitBranch, Info, Lightbulb, Plus, RefreshCw, ShieldAlert, TriangleAlert, Upload } from "lucide-react";
 import { lazy, type ReactNode, Suspense, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { errorMessage } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { errorText } from "@/lib/api";
+import { T, t, tr } from "@/i18n";
+import { cn, formatNumber } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Card, CardContent } from "@/ui/card";
@@ -15,8 +16,6 @@ import { useContextMutations, useContexts, useNodeNames } from "./hooks.ts";
 import { ContextRow } from "./list-row.tsx";
 
 const ContextEditorDialog = lazy(() => import("./editor-dialog.tsx"));
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
 	return (
@@ -58,14 +57,16 @@ function ExportReport({ result, contexts, workspaceId }: { result: ContextExport
 	return (
 		<div className="flex flex-col gap-2" role="status" aria-live="polite">
 			<p className="text-xs text-muted-foreground">
-				<span className="font-medium text-foreground">Export finished:</span> {plural(result.written.length, "file")} written, {result.unchanged.length} unchanged
-				{result.refused.length > 0 ? `, ${result.refused.length} blocked` : ""}. Files are in the working tree only; nothing was committed.
+				<span className="font-medium text-foreground">{t("Export finished:")}</span>{" "}
+				{result.refused.length > 0
+					? t("{written, plural, one {# file} other {# files}} written, {unchanged} unchanged, {blocked} blocked. Files are in the working tree only; nothing was committed.", { written: result.written.length, unchanged: result.unchanged.length, blocked: result.refused.length })
+					: t("{written, plural, one {# file} other {# files}} written, {unchanged} unchanged. Files are in the working tree only; nothing was committed.", { written: result.written.length, unchanged: result.unchanged.length })}
 			</p>
 			{result.refused.length > 0 ? (
 				<div role="alert" className="flex flex-col gap-2 rounded-lg bg-danger/10 p-3 shadow-[inset_0_0_0_1px_var(--danger)]">
 					<div className="flex items-start gap-2 text-xs text-danger">
 						<ShieldAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-						<p className="font-medium">Blocked by the secret scanner — nothing was written for these. Remove the secret from the context, then export again.</p>
+						<p className="font-medium">{t("Blocked by the secret scanner — nothing was written for these. Remove the secret from the context, then export again.")}</p>
 					</div>
 					<ul className="flex flex-col gap-1.5">
 						{result.refused.map((r) => {
@@ -81,7 +82,7 @@ function ExportReport({ result, contexts, workspaceId }: { result: ContextExport
 											<span className="font-mono text-2xs">{r.contextId}</span>
 										)}
 										<Badge variant="danger">{r.rule}</Badge>
-										<span className="tabular text-2xs text-subtle">line {r.line}</span>
+										<span className="tabular text-2xs text-subtle">{t("line {line}", { line: r.line })}</span>
 									</span>
 									<span className="break-all font-mono text-2xs text-muted-foreground">{r.path}</span>
 								</li>
@@ -90,14 +91,14 @@ function ExportReport({ result, contexts, workspaceId }: { result: ContextExport
 					</ul>
 				</div>
 			) : null}
-			<PathList label="Written" items={result.written} />
+			<PathList label={t("Written")} items={result.written} />
 			{result.removed.length > 0 ? (
 				<>
-					<p className="text-xs text-muted-foreground">Removed from the working tree because the context was unshared or deleted:</p>
-					<PathList label="Removed" items={result.removed} />
+					<p className="text-xs text-muted-foreground">{t("Removed from the working tree because the context was unshared or deleted:")}</p>
+					<PathList label={t("Removed")} items={result.removed} />
 				</>
 			) : null}
-			<PathList label="Unchanged" items={result.unchanged} />
+			<PathList label={t("Unchanged")} items={result.unchanged} />
 		</div>
 	);
 }
@@ -107,14 +108,16 @@ function ImportReport({ result, contexts, workspaceId, projectId }: { result: Co
 	return (
 		<div className="flex flex-col gap-2" role="status" aria-live="polite">
 			<p className="text-xs text-muted-foreground">
-				<span className="font-medium text-foreground">Import finished:</span> {result.created.length} created, {result.updated.length} updated, {result.unchanged.length} unchanged
-				{result.conflicts.length > 0 ? `, ${result.conflicts.length} in conflict` : ""}.
+				<span className="font-medium text-foreground">{t("Import finished:")}</span>{" "}
+				{result.conflicts.length > 0
+					? t("{created} created, {updated} updated, {unchanged} unchanged, {conflicts} in conflict.", { created: result.created.length, updated: result.updated.length, unchanged: result.unchanged.length, conflicts: result.conflicts.length })
+					: t("{created} created, {updated} updated, {unchanged} unchanged.", { created: result.created.length, updated: result.updated.length, unchanged: result.unchanged.length })}
 			</p>
 			{result.conflicts.length > 0 ? (
 				<div role="alert" className="flex flex-col gap-2 rounded-lg bg-warning/10 p-3 shadow-[inset_0_0_0_1px_var(--warning)]">
 					<div className="flex items-start gap-2 text-xs text-warning">
 						<TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-						<p className="font-medium">Conflicts are never auto-merged — resolve them in Shared Context.</p>
+						<p className="font-medium">{t("Conflicts are never auto-merged — resolve them in Shared Context.")}</p>
 					</div>
 					<ul className="flex flex-col gap-1">
 						{result.conflicts.map((ref) => {
@@ -137,7 +140,7 @@ function ImportReport({ result, contexts, workspaceId, projectId }: { result: Co
 			) : null}
 			{result.skipped.length > 0 ? (
 				<details className="rounded-lg bg-surface-2 px-3 py-2 text-xs">
-					<summary className="cursor-pointer select-none font-medium coarse:min-h-11 coarse:leading-[2.75rem]">{plural(result.skipped.length, "file")} ignored</summary>
+					<summary className="cursor-pointer select-none font-medium coarse:min-h-11 coarse:leading-[2.75rem]">{t("{count, plural, one {# file ignored} other {# files ignored}}", { count: result.skipped.length })}</summary>
 					<ul className="mt-1.5 flex flex-col gap-1">
 						{result.skipped.map((k) => (
 							<li key={k.path} className="flex flex-col gap-0.5">
@@ -148,9 +151,9 @@ function ImportReport({ result, contexts, workspaceId, projectId }: { result: Co
 					</ul>
 				</details>
 			) : null}
-			<PathList label="Created" items={result.created} />
-			<PathList label="Updated" items={result.updated} />
-			<PathList label="Unchanged" items={result.unchanged} />
+			<PathList label={t("Created")} items={result.created} />
+			<PathList label={t("Updated")} items={result.updated} />
+			<PathList label={t("Unchanged")} items={result.unchanged} />
 		</div>
 	);
 }
@@ -163,19 +166,19 @@ function GitSyncCard({ project, contexts }: { project: Project; contexts: Contex
 	const doExport = () =>
 		exportClmesh.mutate(project.id, {
 			onSuccess: (r) => {
-				if (r.refused.length > 0) toast.warning(`${plural(r.refused.length, "context")} blocked by the secret scanner`);
-				else toast.success(r.written.length ? `Exported ${plural(r.written.length, "file")} to .clmesh/` : "Nothing to export — .clmesh/ is up to date");
+				if (r.refused.length > 0) toast.warning(t("{count, plural, one {# context blocked by the secret scanner} other {# contexts blocked by the secret scanner}}", { count: r.refused.length }));
+				else toast.success(r.written.length ? t("{count, plural, one {Exported # file to .clmesh/} other {Exported # files to .clmesh/}}", { count: r.written.length }) : t("Nothing to export — .clmesh/ is up to date"));
 			},
-			onError: (e) => toast.error("Export failed", { description: errorMessage(e) }),
+			onError: (e) => toast.error(t("Export failed"), { description: errorText(e) }),
 		});
 	const doImport = () =>
 		importClmesh.mutate(project.id, {
 			onSuccess: (r) => {
 				const n = r.created.length + r.updated.length;
-				if (r.conflicts.length > 0) toast.warning(`Imported ${n}, ${plural(r.conflicts.length, "conflict")} to resolve`);
-				else toast.success(n ? `Imported ${n} ${n === 1 ? "context" : "contexts"} from .clmesh/` : "Nothing new in .clmesh/");
+				if (r.conflicts.length > 0) toast.warning(t("Imported {n}, {count, plural, one {# conflict} other {# conflicts}} to resolve", { n, count: r.conflicts.length }));
+				else toast.success(n ? t("{count, plural, one {Imported # context from .clmesh/} other {Imported # contexts from .clmesh/}}", { count: n }) : t("Nothing new in .clmesh/"));
 			},
-			onError: (e) => toast.error("Import failed", { description: errorMessage(e) }),
+			onError: (e) => toast.error(t("Import failed"), { description: errorText(e) }),
 		});
 
 	return (
@@ -183,36 +186,36 @@ function GitSyncCard({ project, contexts }: { project: Project; contexts: Contex
 			<CardContent className="flex flex-col gap-3">
 				<div className="flex items-center gap-2">
 					<GitBranch className="size-4 shrink-0 text-accent" aria-hidden />
-					<h3 className="text-[13px] font-semibold tracking-tight">Git sync (.clmesh/)</h3>
+					<h3 className="text-[13px] font-semibold tracking-tight">{t("Git sync (.clmesh/)")}</h3>
 				</div>
 				<p className="text-xs text-muted-foreground">
-					Only <span className="font-medium text-foreground">shareable</span> contexts reach Git. Private contexts stay on this machine. Export writes files into the working tree — it never commits or pushes; review and commit them like any other change.
+					<T text="Only <b>shareable</b> contexts reach Git. Private contexts stay on this machine. Export writes files into the working tree — it never commits or pushes; review and commit them like any other change." tags={{ b: <span className="font-medium text-foreground" /> }} />
 				</p>
-				<div className="flex flex-wrap gap-1.5" aria-label="Sharing summary">
-					<Badge variant="success">{shareable} shareable</Badge>
-					<Badge variant="neutral">{privateCount} private</Badge>
+				<div className="flex flex-wrap gap-1.5" aria-label={t("Sharing summary")}>
+					<Badge variant="success">{t("{count} shareable", { count: formatNumber(shareable) })}</Badge>
+					<Badge variant="neutral">{t("{count} private", { count: formatNumber(privateCount) })}</Badge>
 				</div>
 				<div className="flex flex-wrap gap-2">
-					<Button variant="outline" onClick={doExport} loading={exportClmesh.isPending} disabled={importClmesh.isPending || shareable === 0} title={shareable === 0 ? "Mark a context shareable first" : undefined}>
-						<Upload /> Export shareable contexts to .clmesh/
+					<Button variant="outline" onClick={doExport} loading={exportClmesh.isPending} disabled={importClmesh.isPending || shareable === 0} title={shareable === 0 ? t("Mark a context shareable first") : undefined}>
+						<Upload /> {t("Export shareable contexts to .clmesh/")}
 					</Button>
 					<Button variant="outline" onClick={doImport} loading={importClmesh.isPending} disabled={exportClmesh.isPending}>
-						<Download /> Import from .clmesh/
+						<Download /> {t("Import from .clmesh/")}
 					</Button>
 				</div>
 				{exportClmesh.isError ? (
 					<p role="alert" className="text-xs text-danger">
-						{errorMessage(exportClmesh.error)}
+						{errorText(exportClmesh.error)}
 					</p>
 				) : null}
 				{importClmesh.isError ? (
 					<p role="alert" className="text-xs text-danger">
-						{errorMessage(importClmesh.error)}
+						{errorText(importClmesh.error)}
 					</p>
 				) : null}
 				{exportClmesh.data ? <ExportReport result={exportClmesh.data} contexts={contexts} workspaceId={project.workspaceId} /> : null}
 				{importClmesh.data ? <ImportReport result={importClmesh.data} contexts={contexts} workspaceId={project.workspaceId} projectId={project.id} /> : null}
-				<p className="text-2xs text-subtle">Import after a pull to bring teammates' contexts in. Shareable contexts also sync machine-to-machine to workspace members, with or without Git.</p>
+				<p className="text-2xs text-subtle">{t("Import after a pull to bring teammates' contexts in. Shareable contexts also sync machine-to-machine to workspace members, with or without Git.")}</p>
 			</CardContent>
 		</Card>
 	);
@@ -243,17 +246,17 @@ export default function ProjectContextTab({ project }: { project: Project }) {
 		<div className="flex flex-col gap-4">
 			<div className="flex flex-wrap items-center justify-between gap-3">
 				<div className="flex min-w-0 flex-col gap-0.5">
-					<h2 className="text-[15px] font-semibold tracking-tight">Project context</h2>
-					<p className="text-xs text-muted-foreground">Memory, plans and decisions for {project.name}. Agents get a short preface of it in new sessions.</p>
+					<h2 className="text-[15px] font-semibold tracking-tight">{t("Project context")}</h2>
+					<p className="text-xs text-muted-foreground">{t("Memory, plans and decisions for {name}. Agents get a short preface of it in new sessions.", { name: project.name })}</p>
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
 					<Button asChild variant="ghost">
 						<Link to="/workspaces/$workspaceId/context" params={{ workspaceId: project.workspaceId }} search={{ project: project.id }}>
-							Open in Shared Context
+							{t("Open in Shared Context")}
 						</Link>
 					</Button>
 					<Button variant="primary" onClick={() => setAdding(true)}>
-						<Plus /> Add context
+						<Plus /> {t("Add context")}
 					</Button>
 				</div>
 			</div>
@@ -262,11 +265,11 @@ export default function ProjectContextTab({ project }: { project: Project }) {
 				<div role="alert" className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg bg-danger/10 px-3 py-2.5 text-xs shadow-[inset_0_0_0_1px_var(--danger)]">
 					<TriangleAlert className="size-4 shrink-0 text-danger" aria-hidden />
 					<p className="min-w-0 flex-1 basis-56 text-danger">
-						<span className="font-medium">{plural(conflicts, "context")} in conflict.</span> Another machine edited the same version — nothing was merged.
+						<T text="<b>{count, plural, one {# context} other {# contexts}} in conflict.</b> Another machine edited the same version — nothing was merged." params={{ count: conflicts }} tags={{ b: <span className="font-medium" /> }} />
 					</p>
 					<Button asChild size="sm" variant="outline">
 						<Link to="/workspaces/$workspaceId/context" params={{ workspaceId: project.workspaceId }} search={{ project: project.id }}>
-							Resolve
+							{t("Resolve")}
 						</Link>
 					</Button>
 				</div>
@@ -277,12 +280,12 @@ export default function ProjectContextTab({ project }: { project: Project }) {
 			) : (
 				<div className="flex items-start gap-2 rounded-lg bg-surface-2/60 px-3 py-2.5 text-xs text-muted-foreground">
 					<Info className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
-					<p>Contexts sync machine-to-machine to workspace members; no Git repository is needed.</p>
+					<p>{t("Contexts sync machine-to-machine to workspace members; no Git repository is needed.")}</p>
 				</div>
 			)}
 
 			{q.isPending ? (
-				<div className="flex flex-col gap-2" aria-busy="true" aria-label="Loading contexts">
+				<div className="flex flex-col gap-2" aria-busy="true" aria-label={t("Loading contexts")}>
 					<Skeleton className="h-7 w-2/3" />
 					<Skeleton className="h-14" />
 					<Skeleton className="h-14" />
@@ -291,42 +294,42 @@ export default function ProjectContextTab({ project }: { project: Project }) {
 			) : q.isError ? (
 				<EmptyState
 					icon={TriangleAlert}
-					title="Could not load contexts"
-					description={errorMessage(q.error)}
+					title={t("Could not load contexts")}
+					description={errorText(q.error)}
 					className="py-8"
 					action={
 						<Button variant="outline" loading={q.isFetching} onClick={() => void q.refetch()}>
-							<RefreshCw /> Retry
+							<RefreshCw /> {t("Retry")}
 						</Button>
 					}
 				/>
 			) : all.length === 0 ? (
 				<EmptyState
 					icon={Lightbulb}
-					title="No project memory yet"
-					description="Project memory holds what agents and teammates should remember about this project: conventions, decisions, plans. Agents get it as a short preface in new sessions and can read and add to it with host tools. Contexts are private until you mark them shareable."
+					title={t("No project memory yet")}
+					description={t("Project memory holds what agents and teammates should remember about this project: conventions, decisions, plans. Agents get it as a short preface in new sessions and can read and add to it with host tools. Contexts are private until you mark them shareable.")}
 					action={
 						<Button variant="primary" onClick={() => setAdding(true)}>
-							<Plus /> Add the first context
+							<Plus /> {t("Add the first context")}
 						</Button>
 					}
 				/>
 			) : (
 				<div className="flex flex-col gap-2">
-					<div role="group" aria-label="Filter by type" className="scrollbar-thin -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
+					<div role="group" aria-label={t("Filter by type")} className="scrollbar-thin -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
 						<Chip active={type === "all"} onClick={() => setType("all")}>
-							All <span className="tabular opacity-70">{all.length}</span>
+							{t("All")} <span className="tabular opacity-70">{all.length}</span>
 						</Chip>
-						{CONTEXT_TYPES.filter((t) => counts.has(t.id) || type === t.id).map((t) => (
-							<Chip key={t.id} active={type === t.id} onClick={() => setType(t.id)}>
-								<t.icon aria-hidden /> {t.plural} <span className="tabular opacity-70">{counts.get(t.id) ?? 0}</span>
+						{CONTEXT_TYPES.filter((ct) => counts.has(ct.id) || type === ct.id).map((ct) => (
+							<Chip key={ct.id} active={type === ct.id} onClick={() => setType(ct.id)}>
+								<ct.icon aria-hidden /> {tr(ct.plural)} <span className="tabular opacity-70">{counts.get(ct.id) ?? 0}</span>
 							</Chip>
 						))}
 					</div>
 					{sorted.length === 0 ? (
-						<p className="px-1 py-6 text-center text-[13px] text-muted-foreground">No contexts of this type.</p>
+						<p className="px-1 py-6 text-center text-[13px] text-muted-foreground">{t("No contexts of this type.")}</p>
 					) : (
-						<ul className="flex flex-col gap-0.5 rounded-xl bg-surface-1 p-1 shadow-[inset_0_0_0_1px_var(--border)]" aria-label="Project contexts">
+						<ul className="flex flex-col gap-0.5 rounded-xl bg-surface-1 p-1 shadow-[inset_0_0_0_1px_var(--border)]" aria-label={t("Project contexts")}>
 							{sorted.map((c) => (
 								<li key={c.id}>
 									<ContextRow context={c} nodeNames={nodeNames} onSelect={() => open(c.id)} />
@@ -345,7 +348,7 @@ export default function ProjectContextTab({ project }: { project: Project }) {
 						onClose={() => setAdding(false)}
 						onSaved={(c) => {
 							setAdding(false);
-							toast.success(`Added “${c.title}”`);
+							toast.success(t("Added “{title}”", { title: c.title }));
 						}}
 					/>
 				</Suspense>

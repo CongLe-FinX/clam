@@ -3,7 +3,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, CircleDashed, ExternalLink, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, Plus, RefreshCw, UploadCloud, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ApiError, api, errorMessage } from "@/lib/api";
+import { msg, T, t, tr, type Msg } from "@/i18n";
+import { ApiError, api, errorText } from "@/lib/api";
 import { useProject } from "@/lib/queries";
 import { cn, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
@@ -21,17 +22,17 @@ import { gk, type PullState, useBranches, usePullRequests } from "./hooks.ts";
 import { runPush } from "./ops.ts";
 import { normalizeRemoteBranch } from "./status-utils.ts";
 
-const STATES: Array<{ id: PullState; label: string }> = [
-	{ id: "open", label: "Open" },
-	{ id: "closed", label: "Closed" },
-	{ id: "all", label: "All" },
+const STATES: Array<{ id: PullState; label: Msg }> = [
+	{ id: "open", label: msg("Open") },
+	{ id: "closed", label: msg("Closed") },
+	{ id: "all", label: msg("All") },
 ];
 
 function prIcon(pr: PullRequest) {
-	if (pr.state === "merged") return <GitMerge className="size-4 text-accent" aria-label="Merged" />;
-	if (pr.state === "closed") return <GitPullRequestClosed className="size-4 text-danger" aria-label="Closed" />;
-	if (pr.draft) return <GitPullRequestDraft className="size-4 text-subtle" aria-label="Draft" />;
-	return <GitPullRequest className="size-4 text-success" aria-label="Open" />;
+	if (pr.state === "merged") return <GitMerge className="size-4 text-accent" aria-label={t("Merged")} />;
+	if (pr.state === "closed") return <GitPullRequestClosed className="size-4 text-danger" aria-label={t("Closed")} />;
+	if (pr.draft) return <GitPullRequestDraft className="size-4 text-subtle" aria-label={t("Draft")} />;
+	return <GitPullRequest className="size-4 text-success" aria-label={t("Open")} />;
 }
 
 function ChecksBadge({ checks }: { checks: NonNullable<PullRequest["checks"]> }) {
@@ -39,23 +40,23 @@ function ChecksBadge({ checks }: { checks: NonNullable<PullRequest["checks"]> })
 		case "success":
 			return (
 				<Badge variant="success">
-					<CheckCircle2 aria-hidden /> Checks passing
+					<CheckCircle2 aria-hidden /> {t("Checks passing")}
 				</Badge>
 			);
 		case "failure":
 			return (
 				<Badge variant="danger">
-					<XCircle aria-hidden /> Checks failing
+					<XCircle aria-hidden /> {t("Checks failing")}
 				</Badge>
 			);
 		case "pending":
 			return (
 				<Badge variant="warning">
-					<CircleDashed aria-hidden /> Checks running
+					<CircleDashed aria-hidden /> {t("Checks running")}
 				</Badge>
 			);
 		default:
-			return <Badge variant="neutral">No checks</Badge>;
+			return <Badge variant="neutral">{t("No checks")}</Badge>;
 	}
 }
 
@@ -68,27 +69,27 @@ function PullRow({ pr }: { pr: PullRequest }) {
 					<a href={pr.htmlUrl} target="_blank" rel="noreferrer noopener" className="min-w-0 flex-1 text-[13px] font-medium leading-snug outline-none hover:underline focus-visible:underline">
 						{pr.title} <span className="font-normal text-subtle">#{pr.number}</span>
 					</a>
-					<Tip label="Open on GitHub">
-						<a href={pr.htmlUrl} target="_blank" rel="noreferrer noopener" aria-label={`Open pull request #${pr.number} on GitHub`} className="grid size-6 shrink-0 place-items-center rounded-md text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-9">
+					<Tip label={t("Open on GitHub")}>
+						<a href={pr.htmlUrl} target="_blank" rel="noreferrer noopener" aria-label={t("Open pull request #{number} on GitHub", { number: pr.number })} className="grid size-6 shrink-0 place-items-center rounded-md text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-9">
 							<ExternalLink className="size-3.5" />
 						</a>
 					</Tip>
 				</div>
 				<div className="flex min-w-0 flex-wrap items-center gap-1.5">
-					<Badge variant={pr.state === "open" ? "success" : pr.state === "merged" ? "accent" : "danger"} className="capitalize">
-						{pr.state}
+					<Badge variant={pr.state === "open" ? "success" : pr.state === "merged" ? "accent" : "danger"}>
+						{pr.state === "open" ? t("Open") : pr.state === "merged" ? t("Merged") : t("Closed")}
 					</Badge>
-					{pr.draft ? <Badge variant="neutral">Draft</Badge> : null}
+					{pr.draft ? <Badge variant="neutral">{t("Draft")}</Badge> : null}
 					{pr.checks ? <ChecksBadge checks={pr.checks} /> : null}
 					{pr.state === "open" ? (
 						pr.mergeable === false ? (
 							<Badge variant="danger">
-								<AlertCircle aria-hidden /> Conflicts
+								<AlertCircle aria-hidden /> {t("Conflicts")}
 							</Badge>
 						) : pr.mergeable === true ? (
-							<Badge variant="success">Mergeable</Badge>
+							<Badge variant="success">{t("Mergeable")}</Badge>
 						) : (
-							<Badge variant="neutral">Checking mergeability…</Badge>
+							<Badge variant="neutral">{t("Checking mergeability…")}</Badge>
 						)
 					) : null}
 				</div>
@@ -109,7 +110,7 @@ export function PullRequestsPanel({ projectId, status, onCreate, active }: { pro
 	return (
 		<div className="flex h-full min-h-0 flex-col">
 			<div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-2">
-				<div role="group" aria-label="Pull request state" className="flex rounded-lg bg-surface-2 p-0.5">
+				<div role="group" aria-label={t("Pull request state")} className="flex rounded-lg bg-surface-2 p-0.5">
 					{STATES.map((s) => (
 						<button
 							key={s.id}
@@ -118,17 +119,17 @@ export function PullRequestsPanel({ projectId, status, onCreate, active }: { pro
 							onClick={() => setState(s.id)}
 							className={cn("h-6 rounded-md px-2.5 text-xs font-medium outline-none transition-colors coarse:h-9", state === s.id ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:text-foreground")}
 						>
-							{s.label}
+							{tr(s.label)}
 						</button>
 					))}
 				</div>
-				<Tip label="Refresh">
-					<Button variant="ghost" size="icon-sm" aria-label="Refresh pull requests" onClick={() => void q.refetch()} disabled={q.isFetching}>
+				<Tip label={t("Refresh")}>
+					<Button variant="ghost" size="icon-sm" aria-label={t("Refresh pull requests")} onClick={() => void q.refetch()} disabled={q.isFetching}>
 						<RefreshCw className={cn(q.isFetching && "animate-spin")} />
 					</Button>
 				</Tip>
 				<Button variant="primary" size="sm" className="ml-auto" onClick={onCreate} disabled={!hasGithub || !status.branch}>
-					<Plus /> New
+					<Plus /> {t("New")}
 				</Button>
 			</div>
 			<div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain">
@@ -140,12 +141,12 @@ export function PullRequestsPanel({ projectId, status, onCreate, active }: { pro
 				) : q.error ? (
 					<EmptyState
 						icon={GitPullRequest}
-						title={noRepo ? "No GitHub repository linked" : "Could not load pull requests"}
-						description={errorMessage(q.error)}
+						title={noRepo ? t("No GitHub repository linked") : t("Could not load pull requests")}
+						description={errorText(q.error)}
 						action={
 							noRepo ? undefined : (
 								<Button size="sm" variant="outline" onClick={() => void q.refetch()}>
-									<RefreshCw /> Retry
+									<RefreshCw /> {t("Retry")}
 								</Button>
 							)
 						}
@@ -153,8 +154,8 @@ export function PullRequestsPanel({ projectId, status, onCreate, active }: { pro
 				) : q.data.length === 0 ? (
 					<EmptyState
 						icon={GitPullRequest}
-						title={state === "open" ? "No open pull requests" : state === "closed" ? "No closed pull requests" : "No pull requests"}
-						description={hasGithub ? "Push a branch and open a pull request from here." : "This repository has no GitHub remote."}
+						title={state === "open" ? t("No open pull requests") : state === "closed" ? t("No closed pull requests") : t("No pull requests")}
+						description={hasGithub ? t("Push a branch and open a pull request from here.") : t("This repository has no GitHub remote.")}
 						className="py-10"
 					/>
 				) : (
@@ -219,19 +220,19 @@ export function CreatePullRequestDialog({
 		mutationFn: async () => {
 			if (needsPush) {
 				const pushed = await runPush(qc, projectId, { setUpstream: true, quiet: true });
-				if (!pushed) throw new Error("The push failed — see the notice in the Git panel for the remote's message.");
-				if (pushed.result === "rejected") throw new Error(pushed.message || "The push was rejected.");
+				if (!pushed) throw new Error(t("The push failed — see the notice in the Git panel for the remote's message."));
+				if (pushed.result === "rejected") throw new Error(pushed.message || t("The push was rejected."));
 			}
 			return api.post<PullRequest>(routes.gitPullRequests(projectId), { title: title.trim(), body, base, head: head ?? undefined, draft });
 		},
 		onSuccess: (pr) => {
 			void qc.invalidateQueries({ queryKey: gk.pullsRoot(projectId) });
-			toast.success(`Pull request #${pr.number} created`, { description: pr.title, action: { label: "Open", onClick: () => window.open(pr.htmlUrl, "_blank", "noopener,noreferrer") } });
+			toast.success(t("Pull request #{number} created", { number: pr.number }), { description: pr.title, action: { label: t("Open"), onClick: () => window.open(pr.htmlUrl, "_blank", "noopener,noreferrer") } });
 			onCreated(pr);
 		},
 		onError: (e) => {
 			const d = e instanceof ApiError && e.details && typeof e.details === "object" ? (e.details as { url?: unknown; ssoUrl?: unknown }) : {};
-			setError({ message: errorMessage(e), url: typeof d.url === "string" ? d.url : undefined, ssoUrl: typeof d.ssoUrl === "string" ? d.ssoUrl : undefined });
+			setError({ message: errorText(e), url: typeof d.url === "string" ? d.url : undefined, ssoUrl: typeof d.ssoUrl === "string" ? d.ssoUrl : undefined });
 		},
 	});
 
@@ -240,14 +241,16 @@ export function CreatePullRequestDialog({
 		<Dialog open onOpenChange={(o) => !o && !create.isPending && onClose()}>
 			<DialogContent className="max-w-xl">
 				<DialogHeader>
-					<DialogTitle>Create pull request</DialogTitle>
+					<DialogTitle>{t("Create pull request")}</DialogTitle>
 					<DialogDescription>
 						{head ? (
-							<>
-								Open a pull request from <span className="font-mono text-foreground">{head}</span> into <span className="font-mono text-foreground">{base || defaultBase}</span>.
-							</>
+							<T
+								text="Open a pull request from <b>{head}</b> into <b>{base}</b>."
+								params={{ head, base: base || defaultBase }}
+								tags={{ b: <span className="font-mono text-foreground" /> }}
+							/>
 						) : (
-							"Check out a branch first."
+							t("Check out a branch first.")
 						)}
 					</DialogDescription>
 				</DialogHeader>
@@ -260,11 +263,11 @@ export function CreatePullRequestDialog({
 					}}
 				>
 					<div className="grid gap-3 sm:grid-cols-2">
-						<Field label="Base branch" hint="Merge into">
+						<Field label={t("Base branch")} hint={t("Merge into")}>
 							{() => (
 								<Select value={base} onValueChange={setBase}>
 									<SelectTrigger>
-										<SelectValue placeholder="Select base" />
+										<SelectValue placeholder={t("Select base")} />
 									</SelectTrigger>
 									<SelectContent>
 										{baseOptions.map((b) => (
@@ -276,16 +279,16 @@ export function CreatePullRequestDialog({
 								</Select>
 							)}
 						</Field>
-						<Field label="Compare branch" hint="Current branch">
+						<Field label={t("Compare branch")} hint={t("Current branch")}>
 							{(id) => <Input id={id} value={head ?? ""} readOnly className="font-mono text-xs" />}
 						</Field>
 					</div>
 					{sameAsBase ? (
 						<p role="alert" className="text-xs text-danger">
-							The compare branch is the base branch. Create or switch to another branch first.
+							{t("The compare branch is the base branch. Create or switch to another branch first.")}
 						</p>
 					) : null}
-					<Field label="Title">
+					<Field label={t("Title")}>
 						{(id) => (
 							<Input
 								id={id}
@@ -296,26 +299,26 @@ export function CreatePullRequestDialog({
 									setTitleTouched(true);
 									setTitle(e.target.value);
 								}}
-								placeholder="Summarize the change"
+								placeholder={t("Summarize the change")}
 							/>
 						)}
 					</Field>
-					<Field label="Description" hint="Markdown supported. Optional.">
+					<Field label={t("Description")} hint={t("Markdown supported. Optional.")}>
 						{(id) => <Textarea id={id} value={body} onChange={(e) => setBody(e.target.value)} rows={5} />}
 					</Field>
 					<label className="flex cursor-pointer items-center gap-2.5 text-[13px]">
-						<Switch checked={draft} onCheckedChange={setDraft} aria-label="Create as draft" />
+						<Switch checked={draft} onCheckedChange={setDraft} aria-label={t("Create as draft")} />
 						<span>
-							Create as draft
-							<span className="block text-xs text-subtle">Draft pull requests cannot be merged until marked ready.</span>
+							{t("Create as draft")}
+							<span className="block text-xs text-subtle">{t("Draft pull requests cannot be merged until marked ready.")}</span>
 						</span>
 					</label>
 					{needsPush ? (
 						<p className="flex items-start gap-2 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning" role="status">
 							<UploadCloud className="mt-0.5 size-4 shrink-0" />
 							{status.upstream
-								? `${status.ahead} ${status.ahead === 1 ? "commit is" : "commits are"} not pushed yet. They will be pushed to ${status.upstream} first.`
-								: `${head ?? "This branch"} is not on GitHub yet. It will be pushed (and set to track origin) before the pull request is created.`}
+								? t("{count, plural, one {# commit is} other {# commits are}} not pushed yet. They will be pushed to {upstream} first.", { count: status.ahead, upstream: status.upstream })
+								: t("{branch} is not on GitHub yet. It will be pushed (and set to track origin) before the pull request is created.", { branch: head ?? t("This branch") })}
 						</p>
 					) : null}
 					{error ? (
@@ -323,23 +326,23 @@ export function CreatePullRequestDialog({
 							<p className="whitespace-pre-wrap break-words font-mono">{error.message}</p>
 							{error.url ? (
 								<a href={error.url} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 underline underline-offset-2">
-									Open the existing pull request <ExternalLink className="size-3" />
+									{t("Open the existing pull request")} <ExternalLink className="size-3" />
 								</a>
 							) : null}
 							{error.ssoUrl ? (
 								<a href={error.ssoUrl} target="_blank" rel="noreferrer noopener" className="inline-flex items-center gap-1 underline underline-offset-2">
-									Authorize the token for SSO <ExternalLink className="size-3" />
+									{t("Authorize the token for SSO")} <ExternalLink className="size-3" />
 								</a>
 							) : null}
 						</div>
 					) : null}
 					<DialogFooter>
 						<Button variant="ghost" onClick={onClose} disabled={create.isPending}>
-							Cancel
+							{t("Cancel")}
 						</Button>
 						<Button type="submit" variant="primary" loading={create.isPending} disabled={!ready}>
 							{needsPush ? <UploadCloud /> : <GitPullRequest />}
-							{needsPush ? (draft ? "Push & create draft PR" : "Push & create PR") : draft ? "Create draft PR" : "Create pull request"}
+							{needsPush ? (draft ? t("Push & create draft PR") : t("Push & create PR")) : draft ? t("Create draft PR") : t("Create pull request")}
 						</Button>
 					</DialogFooter>
 				</form>

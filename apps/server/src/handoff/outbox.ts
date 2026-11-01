@@ -1,5 +1,5 @@
 import { wire } from "@clam/agent-network";
-import type { HandoffState } from "@clam/contracts";
+import { type HandoffState, i18nMsg, plainMsg } from "@clam/contracts";
 import { hasPassed } from "@clam/handoff-engine";
 import { errorText } from "../network/util.ts";
 import type { OutboxHandler } from "../tasks/outbox.ts";
@@ -41,8 +41,8 @@ export function handoffOutboxHandlers(hub: HandoffHub): Record<HandoffOutboxKind
 				const stale = item.lastStatus === 409;
 				try {
 					hub.transition(row.id, "rejected", {
-						summary: `${row.targetNodeName} refused the offer: ${reason}`,
-						failure: { code: stale ? "superseded" : "manifest_invalid", detail: reason, step: null },
+						summary: i18nMsg("{node} refused the offer: {reason}", { node: row.targetNodeName, reason }),
+						failure: { code: stale ? "superseded" : "manifest_invalid", detail: plainMsg(reason), step: null },
 						notify: false,
 					});
 				} catch (error) {
@@ -65,8 +65,8 @@ export function handoffOutboxHandlers(hub: HandoffHub): Record<HandoffOutboxKind
 					}
 					return;
 				}
-				const detail = parsed.data.reason ?? "The source no longer wants this handoff";
-				hub.target.receiveState(row.peerId, row.id, { epoch: row.toEpoch, state: "cancelled", summary: detail, at: new Date().toISOString() });
+				const detail = parsed.data.reason ? plainMsg(parsed.data.reason) : i18nMsg("The source no longer wants this handoff");
+				hub.target.receiveState(row.peerId, row.id, { epoch: row.toEpoch, state: "cancelled", summary: detail.text, summaryI18n: detail.i18n, at: new Date().toISOString() });
 			},
 			dead(item, reason) {
 				const id = handoffIdOf(item);
@@ -90,7 +90,8 @@ export function handoffOutboxHandlers(hub: HandoffHub): Record<HandoffOutboxKind
 				if (!row || row.role !== "target") return;
 				if (item.lastStatus === 409) {
 					// stale_epoch / not accepting: the source reclaimed (docs §6.2) — never proceed to step 9.
-					hub.target.receiveState(row.peerId, row.id, { epoch: row.toEpoch, state: "reclaimed", summary: `The source refused the ack: ${reason}`, at: new Date().toISOString() });
+					const refused = i18nMsg("The source refused the ack: {reason}", { reason });
+					hub.target.receiveState(row.peerId, row.id, { epoch: row.toEpoch, state: "reclaimed", summary: refused.text, summaryI18n: refused.i18n, at: new Date().toISOString() });
 					return;
 				}
 				if (row.state === "acked" && !hasPassed(Date.now(), row.deadlineAt)) requeue(item, item.attempts);
@@ -112,7 +113,7 @@ export function handoffOutboxHandlers(hub: HandoffHub): Record<HandoffOutboxKind
 				const row = id ? store.find(id) : undefined;
 				if (!row) return;
 				store.patchMeta(row.id, { senderNotified: true });
-				hub.note(row.id, "The task's sender knows the new executor");
+				hub.note(row.id, i18nMsg("The task's sender knows the new executor"));
 			},
 			dead(item, reason) {
 				const id = handoffIdOf(item);
@@ -120,7 +121,7 @@ export function handoffOutboxHandlers(hub: HandoffHub): Record<HandoffOutboxKind
 				if (!row) return;
 				// A 403/404/409 will not change by waiting (the sender revoked us, forgot the task, or follows another executor already).
 				if (item.lastStatus !== null && [403, 404, 409].includes(item.lastStatus)) {
-					hub.note(row.id, `The task's sender did not accept the executor change: ${reason}`);
+					hub.note(row.id, i18nMsg("The task's sender did not accept the executor change: {reason}", { reason }));
 					return;
 				}
 				requeue(item, item.attempts);

@@ -1,5 +1,6 @@
 import { CircleCheck, Info, TriangleAlert, X, XCircle } from "lucide-react";
 import { useState } from "react";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { type GitNotice, useGitUi } from "./store.ts";
 
@@ -21,21 +22,21 @@ export function NoticeBanner({ projectId, onOpenPath }: { projectId: string; onO
 }
 
 function NoticeCard({ notice, onDismiss, onOpenPath }: { notice: GitNotice; onDismiss: () => void; onOpenPath?: (path: string) => void }) {
-	const t = tones[notice.tone];
+	const tone = tones[notice.tone];
 	const [all, setAll] = useState(false);
 	const paths = notice.paths ?? [];
 	const visible = all ? paths : paths.slice(0, SHOWN_PATHS);
-	const Icon = t.icon;
+	const Icon = tone.icon;
 	return (
-		<div role={notice.tone === "error" ? "alert" : "status"} className={cn("animate-slide-up scrollbar-thin mx-2.5 my-2 max-h-[min(18rem,40%)] shrink-0 overflow-y-auto rounded-xl p-3 text-[13px]", t.box, t.ring)}>
+		<div role={notice.tone === "error" ? "alert" : "status"} className={cn("animate-slide-up scrollbar-thin mx-2.5 my-2 max-h-[min(18rem,40%)] shrink-0 overflow-y-auto rounded-xl p-3 text-[13px]", tone.box, tone.ring)}>
 			<div className="flex items-start gap-2.5">
 				<Icon aria-hidden className="mt-0.5 size-4 shrink-0" />
 				<div className="flex min-w-0 flex-1 flex-col gap-2 text-foreground">
-					<p className={cn("font-medium", t.box.split(" ").pop())}>{notice.title}</p>
+					<p className={cn("font-medium", tone.box.split(" ").pop())}>{notice.title}</p>
 					{notice.body ? <p className="leading-relaxed text-muted-foreground">{notice.body}</p> : null}
 					{paths.length > 0 ? (
 						<div>
-							<p className="mb-1 text-2xs font-semibold uppercase tracking-wider text-subtle">Blocking files</p>
+							<p className="mb-1 text-2xs font-semibold uppercase tracking-wider text-subtle">{t("Blocking files")}</p>
 							<ul className="flex flex-col gap-0.5">
 								{visible.map((p) => (
 									<li key={p}>
@@ -47,7 +48,7 @@ function NoticeCard({ notice, onDismiss, onOpenPath }: { notice: GitNotice; onDi
 							</ul>
 							{paths.length > SHOWN_PATHS && !all ? (
 								<button type="button" onClick={() => setAll(true)} className="mt-1 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">
-									Show {paths.length - SHOWN_PATHS} more
+									{t("Show {count} more", { count: paths.length - SHOWN_PATHS })}
 								</button>
 							) : null}
 						</div>
@@ -57,12 +58,12 @@ function NoticeCard({ notice, onDismiss, onOpenPath }: { notice: GitNotice; onDi
 					) : null}
 					{notice.next ? (
 						<p className="leading-relaxed">
-							<span className="font-medium">Next: </span>
+							<span className="font-medium">{t("Next:")} </span>
 							<span className="text-muted-foreground">{notice.next}</span>
 						</p>
 					) : null}
 				</div>
-				<button type="button" aria-label="Dismiss" onClick={onDismiss} className="grid size-6 shrink-0 place-items-center rounded-md text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-9">
+				<button type="button" aria-label={t("Dismiss")} onClick={onDismiss} className="grid size-6 shrink-0 place-items-center rounded-md text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-9">
 					<X className="size-3.5" />
 				</button>
 			</div>

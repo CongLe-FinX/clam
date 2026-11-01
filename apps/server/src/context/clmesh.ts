@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import type { ContextExportResult, ContextImportResult, ContextType } from "@clam/contracts";
+import { i18nMsg, type ContextExportResult, type ContextImportResult, type ContextType } from "@clam/contracts";
 import {
 	CLMESH_INDEX,
 	MAX_FILE_BYTES,
@@ -62,7 +62,7 @@ export class ClmeshService {
 	private async scopeOf(projectId: string): Promise<Scope> {
 		const { row, dir } = await this.hub.ctx.gitService.resolve(projectId);
 		if (projectVcs(dir) !== "git") {
-			throw new ApiError(409, "not_a_git_project", "Exporting to and importing from .clmesh/ needs a git project; this project is a plain folder (its contexts still sync to the other nodes of the workspace).");
+			throw new ApiError(409, "not_a_git_project", i18nMsg("Exporting to and importing from .clmesh/ needs a git project; this project is a plain folder (its contexts still sync to the other nodes of the workspace)."));
 		}
 		return { projectId, projectName: row.name, workspaceId: row.workspaceId, dir, key: projectKeyOf(row) };
 	}
@@ -71,7 +71,7 @@ export class ClmeshService {
 	private async rootOf(scope: Scope, create: boolean): Promise<string | null> {
 		const root = path.join(scope.dir, CLMESH);
 		const info = await lstat(root).catch(() => null);
-		if (info && (info.isSymbolicLink() || !info.isDirectory())) throw new ApiError(409, "clmesh_not_a_directory", ".clmesh exists but is not a plain directory");
+		if (info && (info.isSymbolicLink() || !info.isDirectory())) throw new ApiError(409, "clmesh_not_a_directory", i18nMsg(".clmesh exists but is not a plain directory"));
 		if (!info) {
 			if (!create) return null;
 			await mkdir(root, { recursive: true });

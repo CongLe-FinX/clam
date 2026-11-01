@@ -5,6 +5,7 @@ import type { artifacts, projects } from "@clam/database";
 import { applyBundle, createBundle, readBundleManifest, scanFolder } from "@clam/workspace-files";
 import { eq } from "drizzle-orm";
 import { projects as projectsTable } from "@clam/database";
+import { i18nMsg } from "@clam/contracts";
 import { ApiError } from "../http/errors.ts";
 import { KeyedLock, errorText } from "../network/util.ts";
 import { applyFiles, findSecrets, guardBundle, previewFiles } from "../services/files-bundles.ts";
@@ -65,14 +66,14 @@ export class TaskFiles {
 			const { manifest } = built;
 			const tooLarge = manifest.skipped.filter((s) => s.reason === "too_large");
 			if (tooLarge.length > 0) {
-				throw new ApiError(413, "input_too_large", `Input files are over the ${Math.round(MAX_ARTIFACT_BYTES / 1024 / 1024)} MiB limit (${tooLarge.slice(0, 5).map((s) => s.path).join(", ")}); send fewer or smaller files`);
+				throw new ApiError(413, "input_too_large", i18nMsg("Input files are over the {limit} MiB limit ({paths}); send fewer or smaller files", { limit: Math.round(MAX_ARTIFACT_BYTES / 1024 / 1024), paths: tooLarge.slice(0, 5).map((s) => s.path).join(", ") }));
 			}
 			if (manifest.files.length === 0) {
-				throw ApiError.badRequest("None of the input paths holds a file that can be sent (missing, empty or excluded by default, such as .git, node_modules or .env files)");
+				throw ApiError.badRequest(i18nMsg("None of the input paths holds a file that can be sent (missing, empty or excluded by default, such as .git, node_modules or .env files)"));
 			}
 			const secrets = await findSecrets(project.path, manifest.files);
 			if (secrets.length > 0) {
-				throw new ApiError(422, "input_contains_secrets", `Input files look like they contain credentials (${secrets.slice(0, 5).map((s) => `${s.path}: ${s.rules.join("/")}`).join("; ")}); nothing was sent`, { files: secrets });
+				throw new ApiError(422, "input_contains_secrets", i18nMsg("Input files look like they contain credentials ({files}); nothing was sent", { files: secrets.slice(0, 5).map((s) => `${s.path}: ${s.rules.join("/")}`).join("; ") }), { files: secrets });
 			}
 			const artifact = await this.artifacts.placeFile(taskId, { name: "input-files.tar.gz", mediaType: BUNDLE_MEDIA_TYPE, file: scratch });
 			return { artifact, announced: { artifactId: artifact.id, sha256: artifact.sha256, size: artifact.size, fileCount: manifest.files.length } };
@@ -148,7 +149,7 @@ export class TaskFiles {
 				if (attempt < FETCH_ATTEMPTS) await new Promise((resolve) => setTimeout(resolve, FETCH_PAUSE_MS * attempt));
 			}
 		}
-		throw new ApiError(502, "inputs_unavailable", `The input files could not be fetched from ${task.senderNodeName}: ${errorText(last)}`);
+		throw new ApiError(502, "inputs_unavailable", i18nMsg("The input files could not be fetched from {node}: {error}", { node: task.senderNodeName, error: errorText(last) }));
 	}
 
 	/**
@@ -195,13 +196,13 @@ export class TaskFiles {
 
 	/** The result bundle of an outgoing task on this node's disk (downloaded from the executor once, then cached). */
 	private assertOutgoing(task: TaskRow): void {
-		if (task.direction !== "outgoing") throw ApiError.conflict("The files of a task come back to the node that delegated it; this node executed it, so they are already in its project folder");
+		if (task.direction !== "outgoing") throw ApiError.conflict(i18nMsg("The files of a task come back to the node that delegated it; this node executed it, so they are already in its project folder"));
 	}
 
 	private resultBundle(task: TaskRow): Promise<string> {
 		this.assertOutgoing(task);
 		const listed = task.result?.files;
-		if (!listed) throw new ApiError(409, "no_result_files", "This task has no result files");
+		if (!listed) throw new ApiError(409, "no_result_files", i18nMsg("This task has no result files"));
 		return this.lock.run(`result:${task.id}`, async () => {
 			const cached = this.hub.store.artifact(task.id, listed.artifactId);
 			if (cached) return this.artifacts.absolutePath(cached);

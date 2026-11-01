@@ -2,6 +2,7 @@ import type { ListeningPort } from "@clam/contracts";
 import { ChevronRight, Server, ServerOff } from "lucide-react";
 import { useState } from "react";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/ui/sheet";
@@ -30,13 +31,13 @@ function runsAs(p: ListeningPort): string | null {
 
 /** Full, untruncated name: the page title, else what runs there. */
 function fullTitle(p: ListeningPort): string {
-	return p.title?.trim() || runsAs(p) || "Web server";
+	return p.title?.trim() || runsAs(p) || t("Web server");
 }
 
 function Chip({ port, onOpen }: { port: ListeningPort; onOpen: (url: string) => void }) {
 	const full = fullTitle(port);
 	return (
-		<button type="button" className={chipClass} onClick={() => onOpen(port.url)} title={`${full} · ${port.url}${runsAs(port) ? ` · ${runsAs(port)}` : ""}`} aria-label={`Open ${full} on port ${port.port}`}>
+		<button type="button" className={chipClass} onClick={() => onOpen(port.url)} title={`${full} · ${port.url}${runsAs(port) ? ` · ${runsAs(port)}` : ""}`} aria-label={t("Open {name} on port {port}", { name: full, port: port.port })}>
 			<span className="truncate text-foreground/90">{shortTitle(full)}</span>
 			<span className="shrink-0 font-mono text-2xs text-subtle">:{port.port}</span>
 		</button>
@@ -47,7 +48,7 @@ function OtherPorts({ ports, onOpen, compact }: { ports: ListeningPort[]; onOpen
 	const [open, setOpen] = useState(false);
 	if (ports.length === 0) return null;
 	const trigger = (onClick?: () => void) => (
-		<button type="button" className={cn(chipClass, "gap-0.5 px-2.5")} aria-label={`${ports.length} more local web servers`} aria-expanded={open} onClick={onClick}>
+		<button type="button" className={cn(chipClass, "gap-0.5 px-2.5")} aria-label={t("{count, plural, one {# more local web server} other {# more local web servers}}", { count: ports.length })} aria-expanded={open} onClick={onClick}>
 			+{ports.length}
 			<ChevronRight className="size-3 opacity-60" />
 		</button>
@@ -84,8 +85,8 @@ function OtherPorts({ ports, onOpen, compact }: { ports: ListeningPort[]; onOpen
 					<SheetContent side="bottom" className="max-h-[70dvh]">
 						<SwipeZone onDismiss={() => setOpen(false)} />
 						<div className="px-4 pb-1 pt-3">
-							<SheetTitle>More on this machine</SheetTitle>
-							<SheetDescription>Local web servers. Tap one to open it in this tab.</SheetDescription>
+							<SheetTitle>{t("More on this machine")}</SheetTitle>
+							<SheetDescription>{t("Local web servers. Tap one to open it in this tab.")}</SheetDescription>
 						</div>
 						<div className="px-2 pb-3">{list}</div>
 					</SheetContent>
@@ -97,7 +98,7 @@ function OtherPorts({ ports, onOpen, compact }: { ports: ListeningPort[]; onOpen
 		<Popover open={open} onOpenChange={setOpen}>
 			<PopoverTrigger asChild>{trigger()}</PopoverTrigger>
 			<PopoverContent align="start" className="w-80 p-1.5">
-				<p className="px-2.5 pb-1 pt-1 text-2xs font-medium uppercase tracking-wider text-subtle">More on this machine</p>
+				<p className="px-2.5 pb-1 pt-1 text-2xs font-medium uppercase tracking-wider text-subtle">{t("More on this machine")}</p>
 				{list}
 			</PopoverContent>
 		</Popover>
@@ -107,7 +108,7 @@ function OtherPorts({ ports, onOpen, compact }: { ports: ListeningPort[]; onOpen
 function EmptyPorts() {
 	return (
 		<span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-subtle">
-			<ServerOff className="size-3.5" /> No local web servers detected
+			<ServerOff className="size-3.5" /> {t("No local web servers detected")}
 		</span>
 	);
 }
@@ -121,9 +122,9 @@ export function PortsRow({ ports, onOpen, className }: { ports: ListeningPort[] 
 	return (
 		<div className={cn("flex min-w-0 items-center gap-2 px-2 py-1.5 sm:px-3", className)}>
 			<span className="hidden shrink-0 items-center gap-1.5 text-2xs font-medium uppercase tracking-wider text-subtle md:flex">
-				<Server className="size-3.5" /> Running on this machine
+				<Server className="size-3.5" /> {t("Running on this machine")}
 			</span>
-			<div className="scrollbar-none flex min-h-7 min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain coarse:min-h-11" role="list" aria-label="Running on this machine">
+			<div className="scrollbar-none flex min-h-7 min-w-0 flex-1 items-center gap-1.5 overflow-x-auto overscroll-x-contain coarse:min-h-11" role="list" aria-label={t("Running on this machine")}>
 				{ports === undefined ? (
 					<>
 						<Skeleton className="h-7 w-32 rounded-full coarse:h-11" />

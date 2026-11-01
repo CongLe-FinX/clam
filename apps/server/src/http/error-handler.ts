@@ -1,4 +1,4 @@
-import type { ApiErrorBody } from "@clam/contracts";
+import { type ApiErrorBody, i18nMsg } from "@clam/contracts";
 import { AgentRuntimeError } from "@clam/agent-runtime";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ZodError } from "zod";
@@ -22,7 +22,8 @@ const RUNTIME_STATUS: Record<AgentRuntimeError["code"], number> = {
 
 /** The one 404 every unknown route answers with (also used where a gate hides a whole surface behind the same answer). */
 export function sendNotFound(request: FastifyRequest, reply: FastifyReply): FastifyReply {
-	return reply.status(404).send({ error: { code: "not_found", message: `Route ${request.method} ${request.url.split("?")[0]} not found` } } satisfies ApiErrorBody);
+	const say = i18nMsg("Route {method} {path} not found", { method: request.method, path: request.url.split("?")[0] ?? "" });
+	return reply.status(404).send({ error: { code: "not_found", message: say.text, i18n: say.i18n } } satisfies ApiErrorBody);
 }
 
 /** Map any thrown value to the `ApiErrorBody` envelope used by every non-2xx JSON response. */
@@ -32,7 +33,7 @@ export function installErrorHandler(app: FastifyInstance): void {
 		let body: ApiErrorBody;
 		if (error instanceof ApiError) {
 			status = error.status;
-			body = { error: { code: error.code, message: error.message, details: error.details } };
+			body = { error: { code: error.code, message: error.message, details: error.details, ...(error.i18n && { i18n: error.i18n }) } };
 		} else if (error instanceof ZodError) {
 			status = 400;
 			body = {
@@ -52,7 +53,8 @@ export function installErrorHandler(app: FastifyInstance): void {
 			body = { error: { code: status === 404 ? "not_found" : (e.code ?? "invalid_request").toLowerCase(), message: e.message } };
 		} else {
 			request.log.error({ err: error }, "unhandled error");
-			body = { error: { code: "internal_error", message: "Internal server error" } };
+			const say = i18nMsg("Internal server error");
+			body = { error: { code: "internal_error", message: say.text, i18n: say.i18n } };
 		}
 		if (status >= 500 && !(error instanceof ApiError)) request.log.warn({ err: error, status }, "request failed");
 		return reply.status(status).send(body);

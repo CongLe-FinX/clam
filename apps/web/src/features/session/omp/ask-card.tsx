@@ -2,7 +2,8 @@ import type { AskQuestion } from "@clam/contracts";
 import { ArrowLeft, ArrowRight, Check, ChevronDown, CornerDownLeft, MessageCircleQuestion, PencilLine, Send, X } from "lucide-react";
 import { memo, type RefObject, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { LazyMarkdown } from "@/components/lazy-markdown";
-import { errorMessage } from "@/lib/api";
+import { T, t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Tip } from "@/ui/tooltip";
@@ -21,12 +22,12 @@ import {
 import { CountdownBar, CountdownPill, useRemaining } from "./countdown.tsx";
 import type { OmpStore, PendingRequest } from "./omp-store.ts";
 
-function isTyping(t: EventTarget | null): boolean {
-	return t instanceof HTMLElement && (t.isContentEditable || t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT");
+function isTyping(el: EventTarget | null): boolean {
+	return el instanceof HTMLElement && (el.isContentEditable || el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT");
 }
 
 /** Short chip label of a question: the agent's `header`, else a numbered fallback. */
-export const questionLabel = (q: AskQuestion, index: number): string => q.header ?? `Question ${index + 1}`;
+export const questionLabel = (q: AskQuestion, index: number): string => q.header ?? t("Question {number}", { number: index + 1 });
 
 // ───────────────────────────── option card ─────────────────────────────
 
@@ -75,7 +76,7 @@ const OptionCard = memo(function OptionCard({
 			<span className="flex min-w-0 flex-1 flex-col gap-0.5">
 				<span className="flex min-w-0 items-center gap-2">
 					<span className="min-w-0 break-words text-[13.5px] font-medium leading-snug">{label}</span>
-					{recommended ? <span className="shrink-0 rounded bg-accent-soft px-1.5 py-0.5 text-2xs font-medium text-accent">Recommended</span> : null}
+					{recommended ? <span className="shrink-0 rounded bg-accent-soft px-1.5 py-0.5 text-2xs font-medium text-accent">{t("Recommended")}</span> : null}
 				</span>
 				{description ? <span className="break-words text-xs leading-snug text-muted-foreground">{description}</span> : null}
 			</span>
@@ -115,7 +116,7 @@ function QuestionStep({
 			<div role={multi ? "group" : "radiogroup"} aria-labelledby={`${groupId}-q`} className="flex min-w-0 flex-col gap-2">
 				<p id={`${groupId}-q`} className="text-[15px] font-medium leading-snug">
 					{question.question}
-					{multi ? <span className="ml-2 align-middle text-2xs font-normal text-subtle">Select all that apply</span> : null}
+					{multi ? <span className="ml-2 align-middle text-2xs font-normal text-subtle">{t("Select all that apply")}</span> : null}
 				</p>
 				<div className="flex flex-col gap-1.5">
 					{question.options.map((option, i) => (
@@ -157,7 +158,7 @@ function QuestionStep({
 							>
 								{draft.otherOn ? <Check className="animate-pop-in size-3" strokeWidth={3} /> : <PencilLine className="size-3 text-subtle" />}
 							</span>
-							<span className="flex-1 text-[13.5px] font-medium">Other</span>
+							<span className="flex-1 text-[13.5px] font-medium">{t("Other")}</span>
 							<kbd aria-hidden className="hidden h-5 min-w-5 shrink-0 place-items-center rounded bg-background px-1 font-mono text-2xs text-subtle shadow-[inset_0_0_0_1px_var(--border)] fine:grid">
 								o
 							</kbd>
@@ -174,8 +175,8 @@ function QuestionStep({
 									}
 								}}
 								rows={2}
-								placeholder="Type your own answer"
-								aria-label={`Your own answer to: ${question.question}`}
+								placeholder={t("Type your own answer")}
+								aria-label={t("Your own answer to: {question}", { question: question.question })}
 								className="animate-fade-in w-full resize-none rounded-lg bg-background px-2.5 py-2 text-[13.5px] leading-snug shadow-[inset_0_0_0_1px_var(--border-strong)] outline-none placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1.5px_var(--accent)]"
 							/>
 						) : null}
@@ -184,7 +185,7 @@ function QuestionStep({
 			</div>
 			{preview?.preview ? (
 				<div className="flex min-h-0 min-w-0 flex-col gap-1.5">
-					<span className="text-2xs font-medium uppercase tracking-wider text-subtle">Preview · {preview.label}</span>
+					<span className="text-2xs font-medium uppercase tracking-wider text-subtle">{t("Preview · {label}", { label: preview.label })}</span>
 					<div key={shown} className="animate-fade-in scrollbar-thin max-h-56 min-h-16 overflow-auto rounded-xl bg-surface-2 p-3 text-[13px] shadow-[inset_0_0_0_1px_var(--border)] md:max-h-72">
 						<LazyMarkdown text={preview.preview} />
 					</div>
@@ -199,7 +200,7 @@ function QuestionStep({
 function Summary({ questions, draft, onEdit }: { questions: readonly AskQuestion[]; draft: AskDraft; onEdit: (i: number) => void }) {
 	return (
 		<div className="flex flex-col gap-2.5">
-			<p className="text-[15px] font-medium leading-snug">Review your answers</p>
+			<p className="text-[15px] font-medium leading-snug">{t("Review your answers")}</p>
 			<ul className="flex flex-col gap-1.5">
 				{questions.map((q, i) => {
 					const d = draft.answers[i] as QuestionDraft;
@@ -218,11 +219,11 @@ function Summary({ questions, draft, onEdit }: { questions: readonly AskQuestion
 										))}
 									</span>
 								) : (
-									<span className="text-[13px] italic text-subtle">No selection</span>
+									<span className="text-[13px] italic text-subtle">{t("No selection")}</span>
 								)}
 							</div>
-							<Tip label="Change this answer">
-								<Button variant="ghost" size="icon-sm" aria-label={`Change answer to ${questionLabel(q, i)}`} onClick={() => onEdit(i)}>
+							<Tip label={t("Change this answer")}>
+								<Button variant="ghost" size="icon-sm" aria-label={t("Change answer to {question}", { question: questionLabel(q, i) })} onClick={() => onEdit(i)}>
 									<PencilLine />
 								</Button>
 							</Tip>
@@ -260,7 +261,7 @@ export function AskCard({ store, request, onCollapse, className }: { store: OmpS
 	const onSummary = draft.step === summaryStep && !single;
 	const question = questions[Math.min(draft.step, lastQuestion)];
 	const current = draft.answers[Math.min(draft.step, lastQuestion)];
-	const sendLabel = "Send answers";
+	const sendLabel = t("Send answers");
 
 	const update = useCallback((i: number, d: QuestionDraft) => setDraft((prev) => ({ ...prev, answers: prev.answers.map((a, j) => (j === i ? d : a)) })), []);
 
@@ -270,7 +271,7 @@ export function AskCard({ store, request, onCollapse, className }: { store: OmpS
 		try {
 			await store.answerAsk(request.requestId, toAnswers(questions, draft));
 		} catch (e) {
-			setError(errorMessage(e));
+			setError(errorText(e));
 			setSending(false);
 		}
 	}, [store, request.requestId, questions, draft]);
@@ -281,7 +282,7 @@ export function AskCard({ store, request, onCollapse, className }: { store: OmpS
 		try {
 			await store.respond(request.requestId, null);
 		} catch (e) {
-			setError(errorMessage(e));
+			setError(errorText(e));
 			setSending(false);
 		}
 	}, [store, request.requestId]);
@@ -332,10 +333,10 @@ export function AskCard({ store, request, onCollapse, className }: { store: OmpS
 	const answeredCount = useMemo(() => draft.answers.filter((a) => isAnswered(a)).length, [draft.answers]);
 
 	if (!question || !current) return null;
-	const header = onSummary ? "Review" : questionLabel(question, draft.step);
+	const header = onSummary ? t("Review") : questionLabel(question, draft.step);
 
 	return (
-		<section ref={cardRef} tabIndex={-1} aria-label="Question from the agent" className={cn("flex min-h-0 flex-col overflow-hidden rounded-2xl bg-overlay shadow-pop outline-none", className)}>
+		<section ref={cardRef} tabIndex={-1} aria-label={t("Question from the agent")} className={cn("flex min-h-0 flex-col overflow-hidden rounded-2xl bg-overlay shadow-pop outline-none", className)}>
 			{remaining !== null && request.timeoutMs !== undefined ? <CountdownBar remaining={remaining} total={request.timeoutMs} /> : null}
 			<div className="flex shrink-0 items-center gap-2 px-3.5 pt-3 pb-1.5">
 				<span aria-hidden className="grid size-6 shrink-0 place-items-center rounded-lg bg-accent-soft text-accent">
@@ -343,7 +344,7 @@ export function AskCard({ store, request, onCollapse, className }: { store: OmpS
 				</span>
 				<span className="min-w-0 truncate rounded-md bg-surface-3 px-2 py-0.5 text-2xs font-medium text-muted-foreground">{header}</span>
 				{!single ? (
-					<div role="progressbar" aria-label="Progress" aria-valuemin={1} aria-valuemax={segments} aria-valuenow={stepIndex + 1} className="flex flex-1 items-center gap-1 px-1">
+					<div role="progressbar" aria-label={t("Progress")} aria-valuemin={1} aria-valuemax={segments} aria-valuenow={stepIndex + 1} className="flex flex-1 items-center gap-1 px-1">
 						{Array.from({ length: segments }, (_, i) => (
 							<span key={i} className={cn("h-1 min-w-3 flex-1 rounded-full transition-colors duration-200", i < stepIndex ? "bg-accent" : i === stepIndex ? "bg-accent/55" : "bg-surface-3")} />
 						))}
@@ -352,14 +353,14 @@ export function AskCard({ store, request, onCollapse, className }: { store: OmpS
 					<span className="flex-1" />
 				)}
 				{remaining !== null ? <CountdownPill remaining={remaining} /> : null}
-				<Tip label="Cancel — this stops the agent's current turn">
-					<Button variant="ghost" size="icon-sm" aria-label="Cancel question and stop the agent's turn" disabled={sending} onClick={() => void decline()}>
+				<Tip label={t("Cancel — this stops the agent's current turn")}>
+					<Button variant="ghost" size="icon-sm" aria-label={t("Cancel question and stop the agent's turn")} disabled={sending} onClick={() => void decline()}>
 						<X />
 					</Button>
 				</Tip>
 				{onCollapse ? (
-					<Tip label="Minimise">
-						<Button variant="ghost" size="icon-sm" aria-label="Minimise question" onClick={onCollapse}>
+					<Tip label={t("Minimise")}>
+						<Button variant="ghost" size="icon-sm" aria-label={t("Minimise question")} onClick={onCollapse}>
 							<ChevronDown />
 						</Button>
 					</Tip>
@@ -384,15 +385,15 @@ export function AskCard({ store, request, onCollapse, className }: { store: OmpS
 			<div className="flex shrink-0 items-center gap-2 border-t bg-surface-1 px-3.5 py-2.5">
 				{!single && draft.step > 0 ? (
 					<Button variant="ghost" onClick={back} disabled={sending}>
-						<ArrowLeft /> Back
+						<ArrowLeft /> {t("Back")}
 					</Button>
 				) : (
 					<span className="hidden text-2xs text-subtle fine:inline">
-						<kbd className="rounded bg-surface-3 px-1 font-mono">1</kbd>–<kbd className="rounded bg-surface-3 px-1 font-mono">{Math.min(9, question.options.length || 1)}</kbd> pick · <kbd className="rounded bg-surface-3 px-1 font-mono">o</kbd> other
+						<T text="<k>1</k>–<k>{max}</k> pick · <k>o</k> other" params={{ max: Math.min(9, question.options.length || 1) }} tags={{ k: <kbd className="rounded bg-surface-3 px-1 font-mono" /> }} />
 					</span>
 				)}
 				<span className="flex-1" />
-				{!single && !onSummary ? <span className="tabular text-2xs text-subtle">{answeredCount}/{questions.length} answered</span> : null}
+				{!single && !onSummary ? <span className="tabular text-2xs text-subtle">{t("{answered}/{total} answered", { answered: answeredCount, total: questions.length })}</span> : null}
 				{onSummary || single ? (
 					<Button variant="primary" loading={sending} disabled={single && !canAdvance(question, current)} onClick={next}>
 						<Send /> {sendLabel}
@@ -400,7 +401,7 @@ export function AskCard({ store, request, onCollapse, className }: { store: OmpS
 					</Button>
 				) : (
 					<Button variant="primary" disabled={!canAdvance(question, current)} onClick={next}>
-						{draft.step === lastQuestion ? "Review" : "Next"} <ArrowRight />
+						{draft.step === lastQuestion ? t("Review") : t("Next")} <ArrowRight />
 					</Button>
 				)}
 			</div>

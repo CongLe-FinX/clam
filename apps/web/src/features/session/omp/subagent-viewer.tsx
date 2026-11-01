@@ -2,7 +2,8 @@ import { Send, Square, X } from "lucide-react";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
-import { errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { cn, formatDuration } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/ui/sheet";
@@ -24,9 +25,9 @@ function SteerBox({ store, s }: { store: OmpStore; s: SubagentRec }) {
 		try {
 			await store.steerSubagent(s.id, message);
 			setText("");
-			toast.success(`Sent to ${s.id}`);
+			toast.success(t("Sent to {id}", { id: s.id }));
 		} catch (e) {
-			toast.error(`${s.id} did not take the message: ${errorMessage(e)}`);
+			toast.error(t("{id} did not take the message: {error}", { id: s.id, error: errorText(e) }));
 		} finally {
 			setSending(false);
 			ref.current?.focus();
@@ -45,12 +46,12 @@ function SteerBox({ store, s }: { store: OmpStore; s: SubagentRec }) {
 					}
 				}}
 				rows={1}
-				placeholder={`Message ${s.id}…`}
-				aria-label={`Message ${s.id}`}
+				placeholder={t("Message {id}…", { id: s.id })}
+				aria-label={t("Message {id}", { id: s.id })}
 				className="scrollbar-thin max-h-32 min-h-10 flex-1 resize-none rounded-xl bg-surface-2 px-3 py-2.5 text-[13.5px] leading-snug shadow-[inset_0_0_0_1px_var(--border)] outline-none [field-sizing:content] placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1.5px_var(--accent)]"
 			/>
-			<Tip label="Send" shortcut="Enter">
-				<Button variant="primary" size="icon" aria-label="Send message" loading={sending} disabled={text.trim() === ""} onClick={() => void send()} className="size-10 coarse:size-11">
+			<Tip label={t("Send")} shortcut="Enter">
+				<Button variant="primary" size="icon" aria-label={t("Send message")} loading={sending} disabled={text.trim() === ""} onClick={() => void send()} className="size-10 coarse:size-11">
 					<Send />
 				</Button>
 			</Tip>
@@ -84,10 +85,10 @@ function ViewerHeader({ store, s, onClose }: { store: OmpStore; s: SubagentRec; 
 				</div>
 				{live ? (
 					<Button variant="outline" size="sm" loading={stopping} onClick={stop} className="text-danger">
-						<Square className="fill-current" /> Stop
+						<Square className="fill-current" /> {t("Stop")}
 					</Button>
 				) : null}
-				<Button variant="ghost" size="icon" aria-label="Close transcript" onClick={onClose}>
+				<Button variant="ghost" size="icon" aria-label={t("Close transcript")} onClick={onClose}>
 					<X />
 				</Button>
 			</div>

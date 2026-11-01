@@ -1,17 +1,18 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AlertTriangle, Bot, CheckCircle2, ChevronDown, Info, ShieldQuestion, Terminal, Trash2, Zap } from "lucide-react";
 import { memo, type ReactNode, useCallback, useLayoutEffect, useRef, useState } from "react";
-import { cn, formatDuration } from "@/lib/utils";
+import { t } from "@/i18n";
+import { cn, formatDuration, formatTime } from "@/lib/utils";
 import { Tip } from "@/ui/tooltip";
 import { type LogEntry, type SessionStream, useLog, useToolRec } from "./stream-store.ts";
 import { StatusGlyph, toolDuration, useNow } from "./tool-card.tsx";
 import { summarizeArgs, toolIcon } from "./tool-meta.tsx";
 
 const ROW = 28;
-const time = new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+const TIME_OPTS: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false };
 
 function Time({ at }: { at: number }) {
-	return <span className="tabular w-[4.5rem] shrink-0 font-mono text-2xs text-subtle">{time.format(at)}</span>;
+	return <span className="tabular w-[4.5rem] shrink-0 font-mono text-2xs text-subtle">{formatTime(at, TIME_OPTS)}</span>;
 }
 
 const ToolLogRow = memo(function ToolLogRow({ stream, entry }: { stream: SessionStream; entry: LogEntry }) {
@@ -81,7 +82,7 @@ export function RuntimeLog({ stream, onCollapse, className, headerLead }: { stre
 	return (
 		<div className={cn("flex h-full min-h-0 flex-col bg-surface-1", className)}>
 			<div className="flex h-9 shrink-0 items-center gap-2 border-b px-3 coarse:h-11">
-				{headerLead ?? <h2 className="text-2xs font-semibold uppercase tracking-wider text-subtle">Runtime log</h2>}
+				{headerLead ?? <h2 className="text-2xs font-semibold uppercase tracking-wider text-subtle">{t("Runtime log")}</h2>}
 				{headerLead ? null : <span className="tabular font-mono text-2xs text-subtle">{log.length}</span>}
 				<div className="ml-auto flex items-center gap-0.5">
 					{!following ? (
@@ -95,13 +96,13 @@ export function RuntimeLog({ stream, onCollapse, className, headerLead }: { stre
 							}}
 							className="h-6 rounded-md px-2 text-2xs font-medium text-accent outline-none hover:bg-accent-soft coarse:h-9"
 						>
-							Follow
+							{t("Follow")}
 						</button>
 					) : null}
-					<Tip label="Clear log">
+					<Tip label={t("Clear log")}>
 						<button
 							type="button"
-							aria-label="Clear log"
+							aria-label={t("Clear log")}
 							disabled={log.length === 0}
 							onClick={stream.clearLog}
 							className="grid size-6 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground disabled:pointer-events-none disabled:opacity-40 coarse:size-9"
@@ -110,8 +111,8 @@ export function RuntimeLog({ stream, onCollapse, className, headerLead }: { stre
 						</button>
 					</Tip>
 					{onCollapse ? (
-						<Tip label="Collapse">
-							<button type="button" aria-label="Collapse runtime log" onClick={onCollapse} className="grid size-6 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground">
+						<Tip label={t("Collapse")}>
+							<button type="button" aria-label={t("Collapse runtime log")} onClick={onCollapse} className="grid size-6 place-items-center rounded-md text-subtle outline-none transition-colors hover:bg-surface-3 hover:text-foreground">
 								<ChevronDown className="size-3.5" />
 							</button>
 						</Tip>
@@ -119,9 +120,9 @@ export function RuntimeLog({ stream, onCollapse, className, headerLead }: { stre
 				</div>
 			</div>
 			{log.length === 0 ? (
-				<div className="grid flex-1 place-items-center px-4 text-center text-xs text-subtle">Tool executions and runtime events appear here.</div>
+				<div className="grid flex-1 place-items-center px-4 text-center text-xs text-subtle">{t("Tool executions and runtime events appear here.")}</div>
 			) : (
-				<div ref={ref} onScroll={onScroll} role="log" aria-label="Runtime log" className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]">
+				<div ref={ref} onScroll={onScroll} role="log" aria-label={t("Runtime log")} className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain [overflow-anchor:none]">
 					<div className="relative w-full" style={{ height: v.getTotalSize() }}>
 						{v.getVirtualItems().map((item) => {
 							const entry = log[item.index];

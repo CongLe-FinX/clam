@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { lstat, stat } from "node:fs/promises";
 import path from "node:path";
-import { ATTACHMENT_MAX_BYTES, routes, type FileEntry } from "@clam/contracts";
+import { ATTACHMENT_MAX_BYTES, routes, type FileEntry, i18nMsg } from "@clam/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { RoutePluginOptions } from "../context.ts";
@@ -27,10 +27,10 @@ export default async function projectFileRoutes(app: FastifyInstance, { ctx }: R
 		const row = requireProject(ctx, req.params.id);
 		const query = RawQuery.parse(req.query);
 		const { rel, abs } = await resolveInsideRoot(row.path, query.path);
-		if (rel === "") throw ApiError.badRequest("path must name a file");
+		if (rel === "") throw ApiError.badRequest(i18nMsg("path must name a file"));
 		refuseGitDir(rel);
 		const info = await stat(abs);
-		if (!info.isFile()) throw ApiError.badRequest(`"${rel}" is not a regular file`);
+		if (!info.isFile()) throw ApiError.badRequest(i18nMsg('"{rel}" is not a regular file', { rel }));
 		return sendFile(req, reply, { abs, size: info.size, name: path.posix.basename(rel), download: query.download === "1" || query.download === "true" });
 	});
 
@@ -43,8 +43,8 @@ export default async function projectFileRoutes(app: FastifyInstance, { ctx }: R
 			const overwrite = query.overwrite === "1" || query.overwrite === "true";
 			const { rel, abs } = await resolveWritableTarget(row.path, query.path);
 			const existing = await lstat(abs).catch(() => null);
-			if (existing?.isDirectory()) throw ApiError.conflict(`"${rel}" is a folder`);
-			if (existing && !overwrite) throw ApiError.conflict(`"${rel}" already exists; send overwrite=1 to replace it`);
+			if (existing?.isDirectory()) throw ApiError.conflict(i18nMsg('"{rel}" is a folder', { rel }));
+			if (existing && !overwrite) throw ApiError.conflict(i18nMsg('"{rel}" already exists; send overwrite=1 to replace it', { rel }));
 			const tmp = path.join(path.dirname(abs), `.clam-upload-${randomBytes(6).toString("hex")}.tmp`);
 			const size = await receiveToFile(req.body, tmp, ATTACHMENT_MAX_BYTES, req.headers["content-length"]);
 			await commitNew(tmp, abs, rel, overwrite);

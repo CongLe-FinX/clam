@@ -1,5 +1,6 @@
 import type { PeerStatus, Task, TaskParty, TaskStatus } from "@clam/contracts";
 import { ArrowDownLeft, ArrowUpRight, Bot, Check, Clock, TriangleAlert } from "lucide-react";
+import { msg, t, tr } from "@/i18n";
 import { PEER_DOT, PEER_STATUS_LABEL } from "@/features/network/format";
 import { useNode, usePeers } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -13,7 +14,7 @@ export function TaskStatusPill({ status, className }: { status: TaskStatus; clas
 	return (
 		<Badge variant={m.variant} className={cn("gap-1", className)}>
 			<Icon className={cn(m.spin && "animate-spin")} aria-hidden />
-			{m.label}
+			{tr(m.label)}
 		</Badge>
 	);
 }
@@ -23,7 +24,7 @@ export function DirectionChip({ direction }: { direction: Task["direction"] }) {
 	return (
 		<Badge variant="outline" className="gap-1">
 			<Icon aria-hidden />
-			{direction === "incoming" ? "Incoming" : "Outgoing"}
+			{direction === "incoming" ? t("Incoming") : t("Outgoing")}
 		</Badge>
 	);
 }
@@ -39,7 +40,7 @@ export function useNodeStatus(nodeId: string): PeerStatus | "self" | "unknown" {
 export function NodeDot({ nodeId, className }: { nodeId: string; className?: string }) {
 	const status = useNodeStatus(nodeId);
 	const dot = status === "self" ? "online" : status === "unknown" ? "offline" : PEER_DOT[status];
-	const label = status === "self" ? "This machine" : status === "unknown" ? "Status unknown" : PEER_STATUS_LABEL[status];
+	const label = status === "self" ? t("This machine") : status === "unknown" ? t("Status unknown") : tr(PEER_STATUS_LABEL[status]);
 	return <StatusDot status={dot} label={label} className={className} />;
 }
 
@@ -50,10 +51,10 @@ export function PartyChip({ party, mine, role = "executor", className }: { party
 			<NodeDot nodeId={party.nodeId} />
 			<Bot className="size-3.5 shrink-0 text-subtle" aria-hidden />
 			<span className="truncate">
-				{party.agentName ? <span className="font-medium text-foreground">{party.agentName}</span> : <span className="italic text-subtle">{role === "sender" ? "a person" : "any agent"}</span>}
+				{party.agentName ? <span className="font-medium text-foreground">{party.agentName}</span> : <span className="italic text-subtle">{role === "sender" ? t("a person") : t("any agent")}</span>}
 				<span className="text-muted-foreground">@{party.nodeName}</span>
 			</span>
-			{mine ? <span className="rounded bg-surface-3 px-1 text-2xs text-subtle">this machine</span> : null}
+			{mine ? <span className="rounded bg-surface-3 px-1 text-2xs text-subtle">{t("this machine")}</span> : null}
 		</span>
 	);
 }
@@ -62,15 +63,15 @@ export function PartyChip({ party, mine, role = "executor", className }: { party
 export function DeliveryMark({ state, className }: { state: "local" | "pending" | "delivered" | "failed"; className?: string }) {
 	if (state === "local") return null;
 	const map = {
-		pending: { icon: Clock, text: "Sending", cls: "text-subtle" },
-		delivered: { icon: Check, text: "Delivered", cls: "text-success" },
-		failed: { icon: TriangleAlert, text: "Failed — retrying", cls: "text-danger" },
+		pending: { icon: Clock, text: msg("Sending"), cls: "text-subtle" },
+		delivered: { icon: Check, text: msg("Delivered"), cls: "text-success" },
+		failed: { icon: TriangleAlert, text: msg("Failed — retrying"), cls: "text-danger" },
 	} as const;
 	const { icon: Icon, text, cls } = map[state];
 	return (
 		<span className={cn("inline-flex items-center gap-1 text-2xs", cls, className)}>
 			<Icon className="size-3" aria-hidden />
-			{text}
+			{tr(text)}
 		</span>
 	);
 }

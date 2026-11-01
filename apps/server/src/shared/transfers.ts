@@ -1,6 +1,6 @@
 import type { wire } from "@clam/agent-network";
 import { NetworkError } from "@clam/agent-network";
-import type { SharedSession, TransferBody } from "@clam/contracts";
+import { i18nMsg, type I18nMessage, type SharedSession, type TransferBody } from "@clam/contracts";
 import type { SharedTransferMeta } from "@clam/database";
 import { ApiError } from "../http/errors.ts";
 import { KeyedLock, errorText } from "../network/util.ts";
@@ -9,6 +9,9 @@ import type { SharedHub, TransferApi } from "./hub.ts";
 import { newTransferId } from "./store.ts";
 
 type Phase = SharedTransferMeta["phase"];
+
+/** The `message` + `i18n` pair of a transfer record. */
+const spread = (m: I18nMessage): { message: string; i18n: SharedTransferMeta["i18n"] } => ({ message: m.text, i18n: m.i18n });
 
 /** Phases in which the hand-over is running. */
 const RUNNING: ReadonlySet<Phase> = new Set(["inviting", "waiting_accept", "stopping", "checkpointing", "delivering", "handing_over"]);
@@ -60,14 +63,14 @@ export class TransferService implements TransferApi {
 	handover(sessionId: string, body: TransferBody): Promise<SharedSession> {
 		return this.lock.run(`session:${sessionId}`, async () => {
 			const session = this.ctx.sessions.get(sessionId);
-			if (session.kind === "mirror" || session.movedTo) throw new ApiError(409, "session_read_only", "Only a session that runs on this node can be handed over");
+			if (session.kind === "mirror" || session.movedTo) throw new ApiError(409, "session_read_only", i18nMsg("Only a session that runs on this node can be handed over"));
 			if (!session.sharedSessionId) {
 				// Nothing is created before the request is known to be valid.
 				this.preflight(sessionId, body);
 				await this.hub.sharing.addParticipant(sessionId, { nodeId: body.toNodeId, ...(body.agentId && { agentId: body.agentId }) });
 			}
 			const sharedId = this.ctx.sessions.get(sessionId).sharedSessionId;
-			if (!sharedId) throw ApiError.conflict("The session could not be shared");
+			if (!sharedId) throw ApiError.conflict(i18nMsg("The session could not be shared"));
 			return this.begin(sharedId, body);
 		});
 	}
@@ -76,9 +79,9 @@ export class TransferService implements TransferApi {
 		return this.lock.run(`begin:${sharedId}`, async () => {
 			const shared = this.store.find(sharedId);
 			if (!shared) throw ApiError.notFound("Shared session");
-			if (shared.state !== "active" || shared.localRole !== "driver" || !shared.localSessionId) throw new ApiError(409, "not_driver", "Only the driver can hand the driver role over");
+			if (shared.state !== "active" || shared.localRole !== "driver" || !shared.localSessionId) throw new ApiError(409, "not_driver", i18nMsg("Only the driver can hand the driver role over"));
 			const running = shared.meta.transfer;
-			if (running && RUNNING.has(running.phase)) throw new ApiError(409, "transfer_in_progress", `A hand-over to ${running.toNodeName} is already in progress; cancel it first.`);
+			if (running && RUNNING.has(running.phase)) throw new ApiError(409, "transfer_in_progress", i18nMsg("A hand-over to {name} is already in progress; cancel it first.", { name: running.toNodeName }));
 			const peer = this.preflight(shared.localSessionId, body);
 			const participant = this.store.participant(sharedId, peer.id);
 			const state = participant?.state;
@@ -94,7 +97,7 @@ export class TransferService implements TransferApi {
 					throw error;
 				}
 			}
-			this.hub.discussion.note(sharedId, `Handing the work over to ${peer.name}${body.stopRunning ? " (stopping the running turn first)" : ""}.`);
+			this.hub.discussion.note(sharedId, body.stopRunning ? i18nMsg("Handing the work over to {name} (stopping the running turn first).", { name: peer.name }) : i18nMsg("Handing the work over to {name}.", { name: peer.name }));
 			const controller = new AbortController();
 			const job: Job = {
 				id: record.id,
@@ -112,13 +115,13 @@ export class TransferService implements TransferApi {
 
 	/** Everything that can be refused synchronously, before anything is created. Returns the target's peer row. */
 	private preflight(sessionId: string, body: TransferBody) {
-		if (body.toNodeId === this.self) throw new ApiError(409, "invalid_target", "Choose another node: this node already drives the session");
+		if (body.toNodeId === this.self) throw new ApiError(409, "invalid_target", i18nMsg("Choose another node: this node already drives the session"));
 		const peer = this.ctx.network.peers.row(body.toNodeId);
 		if (!peer || peer.status === "revoked") throw ApiError.notFound("Peer");
-		if (peer.status !== "online" && peer.status !== "degraded") throw new ApiError(409, "target_offline", `${peer.name} is not reachable right now; a hand-over needs it online`);
+		if (peer.status !== "online" && peer.status !== "degraded") throw new ApiError(409, "target_offline", i18nMsg("{name} is not reachable right now; a hand-over needs it online", { name: peer.name }));
 		this.hub.assertShareable(peer.id);
 		if (!body.stopRunning && this.ctx.sessions.isTurnRunning(sessionId)) {
-			throw new ApiError(409, "session_busy", "The agent is working on a turn right now. Stop the running turn and hand over (stopRunning), or wait until it has finished.");
+			throw new ApiError(409, "session_busy", i18nMsg("The agent is working on a turn right now. Stop the running turn and hand over (stopRunning), or wait until it has finished."));
 		}
 		return peer;
 	}
@@ -131,17 +134,17 @@ export class TransferService implements TransferApi {
 			const interrupted = await this.quiesce(sharedId, id, body.stopRunning === true, signal);
 			const epoch = this.store.get(sharedId).epoch;
 			const checkpoint = await this.finalCheckpoint(sharedId, id, name, signal);
-			this.advance(sharedId, id, "delivering", `Sending the session snapshot to ${name}…`);
+			this.advance(sharedId, id, "delivering", i18nMsg("Sending the session snapshot to {name}…", { name }));
 			await this.hub.checkpoints.waitDelivered(sharedId, checkpoint.seq, body.toNodeId, this.hub.options.transferTimeoutMs);
 			this.ensureLive(signal);
-			this.advance(sharedId, id, "handing_over", `Asking ${name} to take over…`);
+			this.advance(sharedId, id, "handing_over", i18nMsg("Asking {name} to take over…", { name }));
 			const peer = this.ctx.network.peers.row(body.toNodeId);
 			if (!peer) throw ApiError.notFound("Peer");
 			const request: wire.SharedTransferRequest = { epoch, checkpointSeq: checkpoint.seq, sha256: checkpoint.sha256, interrupted };
 			try {
 				await this.ctx.network.client.request(peer.url, { method: "POST", path: `/shared/${sharedId}/transfer`, body: request, retry: false });
 			} catch (error) {
-				if (error instanceof NetworkError) throw new ApiError(409, "transfer_refused", `${name} did not accept the hand-over: ${error.message}`, { code: error.code });
+				if (error instanceof NetworkError) throw new ApiError(409, "transfer_refused", i18nMsg("{name} did not accept the hand-over: {error}", { name, error: error.message }), { code: error.code });
 				throw error;
 			}
 			// The target takes over and announces it; `driverChanged` completes the record when that arrives.
@@ -150,7 +153,7 @@ export class TransferService implements TransferApi {
 				if (this.store.get(sharedId).driverNodeId === body.toNodeId) return;
 				await this.pause(this.hub.options.transferPollMs, signal);
 			}
-			throw new ApiError(409, "transfer_pending", `${name} accepted the hand-over but has not announced taking over yet. Check on ${name}; this node follows as soon as it does.`);
+			throw new ApiError(409, "transfer_pending", i18nMsg("{name} accepted the hand-over but has not announced taking over yet. Check on {name}; this node follows as soon as it does.", { name }));
 		} catch (error) {
 			if (error instanceof TransferCancelled) return;
 			if (this.stopped) return; // the record stays running; the next boot marks it interrupted
@@ -167,14 +170,14 @@ export class TransferService implements TransferApi {
 			const participant = this.store.participant(sharedId, nodeId);
 			if (participant?.state === "active") return;
 			if (!participant || participant.state === "declined" || participant.state === "removed" || participant.state === "left") {
-				throw new ApiError(409, "invite_declined", `${name} ${participant?.state === "left" ? "left" : "declined the invitation"}, so the work cannot be handed over to it.`);
+				throw new ApiError(409, "invite_declined", participant?.state === "left" ? i18nMsg("{name} left, so the work cannot be handed over to it.", { name }) : i18nMsg("{name} declined the invitation, so the work cannot be handed over to it.", { name }));
 			}
 			if (!announced) {
-				this.advance(sharedId, id, "waiting_accept", `Waiting for ${name} to accept the invitation…`);
+				this.advance(sharedId, id, "waiting_accept", i18nMsg("Waiting for {name} to accept the invitation…", { name }));
 				announced = true;
 			}
 			if (Date.now() > deadline) {
-				throw new ApiError(409, "accept_timeout", `${name} has not accepted the invitation yet. It stays open: once ${name} accepted, hand the work over again.`);
+				throw new ApiError(409, "accept_timeout", i18nMsg("{name} has not accepted the invitation yet. It stays open: once {name} accepted, hand the work over again.", { name }));
 			}
 			await this.pause(this.hub.options.transferPollMs, signal);
 		}
@@ -187,7 +190,7 @@ export class TransferService implements TransferApi {
 	private async quiesce(sharedId: string, id: string, stopRunning: boolean, signal: AbortSignal): Promise<boolean> {
 		const sessionId = this.store.get(sharedId).localSessionId;
 		const running = sessionId !== null && this.ctx.sessions.isTurnRunning(sessionId);
-		this.advance(sharedId, id, running ? "stopping" : "checkpointing", running ? (stopRunning ? "Stopping the running turn…" : "Waiting for the running turn to finish…") : "Saving everything…");
+		this.advance(sharedId, id, running ? "stopping" : "checkpointing", running ? (stopRunning ? i18nMsg("Stopping the running turn…") : i18nMsg("Waiting for the running turn to finish…")) : i18nMsg("Saving everything…"));
 		if (sessionId === null) return false;
 		const abort = stopRunning && running;
 		if (abort) await this.ctx.sessions.abort(sessionId).catch((error: unknown) => this.hub.log.warn({ err: errorText(error), sharedId }, "could not abort the running turn"));
@@ -201,7 +204,7 @@ export class TransferService implements TransferApi {
 		while (this.ctx.sessions.isBusy(sessionId)) {
 			this.ensureLive(signal);
 			if (Date.now() > deadline) {
-				throw new ApiError(409, "stop_timeout", stopRunning ? `The running turn did not stop within ${Math.round(limit / 1000)} s.` : `The running turn did not finish within ${Math.round(limit / 1000)} s; stop it to hand over.`);
+				throw new ApiError(409, "stop_timeout", stopRunning ? i18nMsg("The running turn did not stop within {seconds} s.", { seconds: Math.round(limit / 1000) }) : i18nMsg("The running turn did not finish within {seconds} s; stop it to hand over.", { seconds: Math.round(limit / 1000) }));
 			}
 			await this.pause(Math.min(100, this.hub.options.transferPollMs), signal);
 		}
@@ -211,7 +214,7 @@ export class TransferService implements TransferApi {
 	private async finalCheckpoint(sharedId: string, id: string, name: string, signal: AbortSignal): Promise<{ seq: number; sha256: string }> {
 		for (let attempt = 0; ; attempt += 1) {
 			const shared = this.store.get(sharedId);
-			this.advance(sharedId, id, "checkpointing", shared.vcs === "files" ? "Saving everything: bundling the working folder and snapshotting the session…" : `Saving everything: committing the working tree, pushing ${shared.branch} and snapshotting the session…`);
+			this.advance(sharedId, id, "checkpointing", shared.vcs === "files" ? i18nMsg("Saving everything: bundling the working folder and snapshotting the session…") : i18nMsg("Saving everything: committing the working tree, pushing {branch} and snapshotting the session…", { branch: shared.branch ?? "" }));
 			const checkpoint = await this.hub.checkpoints.checkpoint(sharedId, { manual: true, note: `Hand-over to ${name}` });
 			this.ensureLive(signal);
 			// A turn that was already on its way when the session was frozen settled while the checkpoint ran and changed the tree after the commit.
@@ -220,12 +223,12 @@ export class TransferService implements TransferApi {
 				await this.waitIdle(sessionId, true, signal);
 				continue;
 			}
-			if (!checkpoint.snapshot) throw new ApiError(409, "snapshot_failed", `The session could not be snapshotted (${checkpoint.note ?? "no details"}), so nothing was handed over.`);
+			if (!checkpoint.snapshot) throw new ApiError(409, "snapshot_failed", checkpoint.note ? i18nMsg("The session could not be snapshotted ({detail}), so nothing was handed over.", { detail: checkpoint.note }) : i18nMsg("The session could not be snapshotted (no details), so nothing was handed over."));
 			if (shared.vcs === "files") {
-				if (!checkpoint.files) throw new ApiError(409, "files_failed", `The working folder could not be bundled (${checkpoint.note ?? "no details"}), so ${name} would not get the latest files. Nothing was handed over.`);
+				if (!checkpoint.files) throw new ApiError(409, "files_failed", checkpoint.note ? i18nMsg("The working folder could not be bundled ({detail}), so {name} would not get the latest files. Nothing was handed over.", { detail: checkpoint.note, name }) : i18nMsg("The working folder could not be bundled (no details), so {name} would not get the latest files. Nothing was handed over.", { name }));
 				return { seq: checkpoint.seq, sha256: checkpoint.snapshot.sha256 };
 			}
-			if (!checkpoint.pushed) throw new ApiError(409, "push_failed", `The shared branch could not be pushed (${checkpoint.note ?? "no details"}), so ${name} would not get the latest changes. Nothing was handed over.`);
+			if (!checkpoint.pushed) throw new ApiError(409, "push_failed", checkpoint.note ? i18nMsg("The shared branch could not be pushed ({detail}), so {name} would not get the latest changes. Nothing was handed over.", { detail: checkpoint.note, name }) : i18nMsg("The shared branch could not be pushed (no details), so {name} would not get the latest changes. Nothing was handed over.", { name }));
 			return { seq: checkpoint.seq, sha256: checkpoint.snapshot.sha256 };
 		}
 	}
@@ -240,14 +243,15 @@ export class TransferService implements TransferApi {
 		if (change.driverNodeId === current.toNodeId) {
 			this.write(sharedId, current.id, {
 				phase: "continuing",
-				message: `${current.toNodeName} is continuing the work.`,
+				...spread(i18nMsg("{name} is continuing the work.", { name: current.toNodeName })),
 				error: null,
 				newSessionId: change.sessionId,
 				newSessionUrl: sessionUrl(change.uiUrl, change.sessionId),
 			}, false);
 			return;
 		}
-		this.write(sharedId, current.id, { phase: "failed", message: "Another node took over as driver in the meantime.", error: { code: "driver_changed", message: "Another node took over as driver in the meantime." } }, false);
+		const driverChanged = i18nMsg("Another node took over as driver in the meantime.");
+		this.write(sharedId, current.id, { phase: "failed", ...spread(driverChanged), error: { code: "driver_changed", message: driverChanged.text, i18n: driverChanged.i18n } }, false);
 		this.jobs.get(sharedId)?.controller.abort();
 	}
 
@@ -262,10 +266,10 @@ export class TransferService implements TransferApi {
 				this.hub.changed(sharedId);
 				return this.hub.views.shared(this.store.get(sharedId));
 			}
-			if (current.phase === "handing_over") throw new ApiError(409, "not_cancellable", `${current.toNodeName} was already asked to take over; the hand-over cannot be cancelled any more.`);
-			this.write(sharedId, current.id, { phase: "cancelled", message: `The hand-over to ${current.toNodeName} was cancelled.`, error: null });
+			if (current.phase === "handing_over") throw new ApiError(409, "not_cancellable", i18nMsg("{name} was already asked to take over; the hand-over cannot be cancelled any more.", { name: current.toNodeName }));
+			this.write(sharedId, current.id, { phase: "cancelled", ...spread(i18nMsg("The hand-over to {name} was cancelled.", { name: current.toNodeName })), error: null });
 			this.jobs.get(sharedId)?.controller.abort();
-			this.hub.discussion.note(sharedId, `The hand-over to ${current.toNodeName} was cancelled.`);
+			this.hub.discussion.note(sharedId, i18nMsg("The hand-over to {name} was cancelled.", { name: current.toNodeName }));
 			return this.hub.views.shared(this.store.get(sharedId));
 		});
 	}
@@ -275,15 +279,15 @@ export class TransferService implements TransferApi {
 		const shared = this.store.find(row.sharedSessionId);
 		const transfer = shared?.meta.transfer;
 		if (!shared || !transfer || shared.localRole !== "driver" || shared.localSessionId !== row.id || !FROZEN.has(transfer.phase)) return;
-		throw new ApiError(409, "transfer_in_progress", `The work is being handed over to ${transfer.toNodeName}; this session takes no prompts until that finished or was cancelled.`);
+		throw new ApiError(409, "transfer_in_progress", i18nMsg("The work is being handed over to {name}; this session takes no prompts until that finished or was cancelled.", { name: transfer.toNodeName }));
 	}
 
 	recover(): void {
 		for (const shared of this.store.active()) {
 			const transfer = shared.meta.transfer;
 			if (!transfer || !RUNNING.has(transfer.phase)) continue;
-			const text = `The hand-over to ${transfer.toNodeName} was interrupted when this node restarted. Start it again.`;
-			this.write(shared.id, transfer.id, { phase: "failed", message: text, error: { code: "interrupted", message: text } });
+			const text = i18nMsg("The hand-over to {name} was interrupted when this node restarted. Start it again.", { name: transfer.toNodeName });
+			this.write(shared.id, transfer.id, { phase: "failed", ...spread(text), error: { code: "interrupted", message: text.text, i18n: text.i18n } });
 		}
 	}
 
@@ -303,7 +307,7 @@ export class TransferService implements TransferApi {
 			toNodeId: peer.id,
 			toNodeName,
 			phase,
-			message: phase === "inviting" ? `Inviting ${toNodeName}…` : phase === "waiting_accept" ? `Waiting for ${toNodeName} to accept the invitation…` : "Saving everything…",
+			...spread(phase === "inviting" ? i18nMsg("Inviting {name}…", { name: toNodeName }) : phase === "waiting_accept" ? i18nMsg("Waiting for {name} to accept the invitation…", { name: toNodeName }) : i18nMsg("Saving everything…")),
 			stopRunning,
 			error: null,
 			newSessionId: null,
@@ -316,16 +320,17 @@ export class TransferService implements TransferApi {
 		return record;
 	}
 
-	private advance(sharedId: string, id: string, phase: Phase, message: string): void {
-		this.write(sharedId, id, { phase, message });
+	private advance(sharedId: string, id: string, phase: Phase, message: I18nMessage): void {
+		this.write(sharedId, id, { phase, ...spread(message) });
 	}
 
 	private fail(sharedId: string, id: string, error: unknown): void {
 		const code = error instanceof ApiError ? error.code : error instanceof NetworkError ? "transfer_refused" : "transfer_failed";
 		const message = error instanceof ApiError ? error.message : errorText(error, 300);
-		if (this.write(sharedId, id, { phase: "failed", message, error: { code, message } })) {
-			const name = this.store.find(sharedId)?.meta.transfer?.toNodeName ?? "the other node";
-			this.hub.discussion.note(sharedId, `The hand-over to ${name} failed: ${message}`);
+		const twin = error instanceof ApiError ? error.i18n : undefined;
+		if (this.write(sharedId, id, { phase: "failed", message, i18n: twin, error: { code, message, i18n: twin } })) {
+			const name = this.store.find(sharedId)?.meta.transfer?.toNodeName;
+			this.hub.discussion.note(sharedId, name === undefined ? i18nMsg("The hand-over to the other node failed: {error}", { error: message }) : i18nMsg("The hand-over to {name} failed: {error}", { name, error: message }));
 		}
 	}
 

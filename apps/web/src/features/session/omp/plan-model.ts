@@ -1,4 +1,5 @@
 import type { TodoPhase } from "@clam/contracts";
+import { t } from "@/i18n";
 
 export const isDone = (status: string): boolean => status === "completed" || status === "done";
 export const isDropped = (status: string): boolean => status === "abandoned" || status === "cancelled" || status === "dropped";
@@ -71,27 +72,27 @@ export function todoChange(args: unknown, details: unknown): TodoChange {
 		case "init": {
 			const all = (d.phases ?? []).flatMap((p) => p.tasks.map((t) => t.content));
 			const items = (all.length > 0 ? all : [...strings(a.items), ...strings(a.list)]).map((content) => ({ kind: "added" as const, content }));
-			return { title: items.length > 0 ? `Planned ${items.length} ${items.length === 1 ? "task" : "tasks"}` : "Planned the work", items };
+			return { title: items.length > 0 ? t("{count, plural, one {Planned # task} other {Planned # tasks}}", { count: items.length }) : t("Planned the work"), items };
 		}
 		case "append": {
 			const items = strings(a.items).map((content) => ({ kind: "added" as const, content }));
-			return { title: items.length > 0 ? `Added ${items.length} ${items.length === 1 ? "task" : "tasks"}` : "Extended the plan", items };
+			return { title: items.length > 0 ? t("{count, plural, one {Added # task} other {Added # tasks}}", { count: items.length }) : t("Extended the plan"), items };
 		}
 		case "start":
-			return { title: "Started", items: named("started") };
+			return { title: t("Started"), items: named("started") };
 		case "done": {
 			const finished = (d.completedTasks ?? []).map((t) => ({ kind: "completed" as const, content: t.content }));
 			const items = finished.length > 0 ? finished : named("completed");
-			return { title: items.length === 1 ? "Completed" : `Completed ${items.length} tasks`, items };
+			return { title: items.length === 1 ? t("Completed") : t("Completed {count} tasks", { count: items.length }), items };
 		}
 		case "drop":
 		case "rm":
-			return { title: op === "rm" ? "Removed" : "Dropped", items: named("dropped") };
+			return { title: op === "rm" ? t("Removed") : t("Dropped"), items: named("dropped") };
 		case "block":
-			return { title: "Blocked", items: named("blocked") };
+			return { title: t("Blocked"), items: named("blocked") };
 		case "unblock":
-			return { title: "Unblocked", items: named("unblocked") };
+			return { title: t("Unblocked"), items: named("unblocked") };
 		default:
-			return { title: "Looked at the plan", items: [] };
+			return { title: t("Looked at the plan"), items: [] };
 	}
 }

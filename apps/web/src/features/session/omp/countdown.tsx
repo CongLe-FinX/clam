@@ -1,5 +1,6 @@
 import { Timer } from "lucide-react";
 import { useEffect, useState } from "react";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { PendingRequest } from "./omp-store.ts";
 
@@ -32,7 +33,7 @@ export function CountdownPill({ remaining, className }: { remaining: number; cla
 	return (
 		<span
 			role="timer"
-			aria-label={`Answers automatically in ${formatClock(remaining)}`}
+			aria-label={t("Answers automatically in {time}", { time: formatClock(remaining) })}
 			className={cn("tabular inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-2xs transition-colors", urgent ? "bg-warning/14 text-warning" : "bg-surface-3 text-muted-foreground", className)}
 		>
 			<Timer className="size-3" aria-hidden />

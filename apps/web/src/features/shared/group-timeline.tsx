@@ -6,6 +6,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { textOf } from "@/features/session/stream-store";
 import { useKeyboardInset } from "@/features/session/use-keyboard-inset";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { type WorkingAgent } from "./activity.ts";
@@ -49,7 +50,7 @@ const EarlierBubble = memo(function EarlierBubble({ message }: { message: UiMess
 		<div className="flex flex-col gap-1 pt-3">
 			<div className={cn("flex flex-col gap-1", user ? "items-end" : "items-start")}>
 				<span className="text-2xs text-subtle">
-					{user ? "Prompt" : "Agent"} · {clockTime(message.timestamp)}
+					{user ? t("Prompt · {time}", { time: clockTime(message.timestamp) }) : t("Agent · {time}", { time: clockTime(message.timestamp) })}
 				</span>
 				<div className={cn("min-w-0 max-w-[min(100%,72ch)] rounded-2xl px-3.5 py-2 text-sm leading-relaxed opacity-90 shadow-[inset_0_0_0_1px_var(--border)]", user ? "rounded-tr-md bg-surface-3/60" : "rounded-tl-md bg-surface-1")}>
 					<LazyMarkdown text={textOf(message)} />
@@ -136,7 +137,15 @@ const WorkingRow = memo(function WorkingRow({ agents, waiting }: { agents: Worki
 	if (agents.length === 0 && !waiting) return null;
 	const first = agents[0] as WorkingAgent | undefined;
 	// A question or approval that waits for a person: the agents are blocked on the group, not working.
-	const text = waiting ? "Waiting for an answer" : !first ? "" : agents.length === 1 ? `${first.label} is working` : agents.length === 2 ? `${first.label} and ${(agents[1] as WorkingAgent).label} are working` : `${first.label} and ${agents.length - 1} more are working`;
+	const text = waiting
+		? t("Waiting for an answer")
+		: !first
+			? ""
+			: agents.length === 1
+				? t("{name} is working", { name: first.label })
+				: agents.length === 2
+					? t("{first} and {second} are working", { first: first.label, second: (agents[1] as WorkingAgent).label })
+					: t("{first} and {count, plural, one {# more} other {# more}} are working", { first: first.label, count: agents.length - 1 });
 	return (
 		<div role="status" className="flex items-center gap-2.5 pt-3 text-xs text-muted-foreground motion-safe:animate-[clam-slide-up_160ms_var(--ease-out-quint)_both]">
 			{agents.length === 0 ? (
@@ -312,7 +321,7 @@ export function GroupTimeline({
 
 	return (
 		<div className={cn("relative min-h-0 flex-1", className)}>
-			<div ref={parentRef} onScroll={onScroll} role="log" aria-label="Group chat" aria-relevant="additions" className="scrollbar-thin absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-contain [overflow-anchor:none]">
+			<div ref={parentRef} onScroll={onScroll} role="log" aria-label={t("Group chat")} aria-relevant="additions" className="scrollbar-thin absolute inset-0 overflow-y-auto overflow-x-hidden overscroll-contain [overflow-anchor:none]">
 				<div className="relative w-full" style={{ height: v.getTotalSize() }}>
 					{v.getVirtualItems().map((item) => {
 						const row = rows[item.index];
@@ -322,7 +331,7 @@ export function GroupTimeline({
 								<div className="mx-auto w-full max-w-3xl pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))]">
 									{row.type === "earlier-head" ? (
 										<p className="mx-auto w-fit rounded-full bg-surface-2 px-3 py-1 text-center text-2xs text-muted-foreground">
-											Earlier in this session{row.truncated ? " (most recent part)" : ""} — before the group started
+											{row.truncated ? t("Earlier in this session (most recent part) — before the group started") : t("Earlier in this session — before the group started")}
 										</p>
 									) : row.type === "earlier" ? (
 										<EarlierBubble message={row.message} />
@@ -355,7 +364,7 @@ export function GroupTimeline({
 			{loading ? (
 				<div className="pointer-events-none absolute inset-x-0 top-2 flex justify-center">
 					<span role="status" className="animate-pop-in flex items-center gap-1.5 rounded-full bg-overlay px-2.5 py-1 text-2xs text-muted-foreground shadow-pop shadow-[inset_0_0_0_1px_var(--border-strong)]">
-						<Loader2 className="size-3 animate-spin" aria-hidden /> Loading earlier messages
+						<Loader2 className="size-3 animate-spin" aria-hidden /> {t("Loading earlier messages")}
 					</span>
 				</div>
 			) : null}
@@ -366,7 +375,7 @@ export function GroupTimeline({
 						onClick={loadOlder}
 						className="animate-pop-in flex items-center gap-1.5 rounded-full bg-overlay px-3 py-1 text-2xs text-muted-foreground shadow-pop shadow-[inset_0_0_0_1px_var(--border-strong)] outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-11"
 					>
-						<RefreshCw className="size-3" aria-hidden /> Could not load earlier messages — retry
+						<RefreshCw className="size-3" aria-hidden /> {t("Could not load earlier messages — retry")}
 					</button>
 				</div>
 			) : null}
@@ -380,10 +389,10 @@ export function GroupTimeline({
 						<ArrowDown className="size-3.5" aria-hidden />
 						{unseen > 0 ? (
 							<>
-								<span className="tabular rounded-full bg-accent px-1.5 py-px text-2xs text-accent-foreground">{unseen}</span> new {unseen === 1 ? "message" : "messages"}
+								<span className="tabular rounded-full bg-accent px-1.5 py-px text-2xs text-accent-foreground">{unseen}</span> {t("{count, plural, one {new message} other {new messages}}", { count: unseen })}
 							</>
 						) : (
-							"Jump to latest"
+							t("Jump to latest")
 						)}
 					</button>
 				</div>

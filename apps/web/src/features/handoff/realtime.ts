@@ -1,6 +1,7 @@
 import type { Handoff, HandoffTopicEvent } from "@clam/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { t } from "@/i18n";
 import { ws } from "@/lib/ws";
 import { applyTopicEvent, hk } from "./api.ts";
 
@@ -15,11 +16,11 @@ function announce(h: Handoff, open: (id: string) => void): void {
 	if (h.state === "received") {
 		if (!announced[offerId] && !onPage(h.id)) {
 			announced[offerId] = true;
-			toast(`${h.source.nodeName} wants to hand off “${h.title}”`, {
+			toast(t("{name} wants to hand off “{title}”", { name: h.source.nodeName, title: h.title }), {
 				id: offerId,
-				description: "Review it, then accept or reject.",
+				description: t("Review it, then accept or reject."),
 				duration: 30_000,
-				action: { label: "Review", onClick: () => open(h.id) },
+				action: { label: t("Review"), onClick: () => open(h.id) },
 			});
 		}
 	} else {
@@ -33,11 +34,11 @@ function announce(h: Handoff, open: (id: string) => void): void {
 	if (pending.length > 0) {
 		if (!announced[key] && !onPage(h.id)) {
 			announced[key] = true;
-			toast(`${pending.length === 1 ? "A setup command needs" : `${pending.length} setup commands need`} your approval`, {
+			toast(t("{count, plural, one {A setup command needs your approval} other {# setup commands need your approval}}", { count: pending.length }), {
 				id: setupId,
-				description: `Preparing “${h.title}” on this machine.`,
+				description: t("Preparing “{title}” on this machine.", { title: h.title }),
 				duration: 30_000,
-				action: { label: "Review", onClick: () => open(h.id) },
+				action: { label: t("Review"), onClick: () => open(h.id) },
 			});
 		}
 	} else {

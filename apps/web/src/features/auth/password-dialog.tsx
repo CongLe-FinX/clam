@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
-import { ApiError, errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { ApiError, errorText } from "@/lib/api";
 import { Button } from "@/ui/button";
 import { GrabHandle } from "@/ui/grab-handle";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/ui/dialog";
@@ -50,7 +51,7 @@ export function PasswordDialog({
 			await onSubmit(password);
 			onOpenChange(false);
 		} catch (err) {
-			setError(err instanceof ApiError && (err.code === "invalid_credentials" || err.code === "invalid_current_password") ? "That password is not correct." : errorMessage(err));
+			setError(err instanceof ApiError && (err.code === "invalid_credentials" || err.code === "invalid_current_password") ? t("That password is not correct.") : errorText(err));
 			setPending(false);
 		}
 	}
@@ -71,12 +72,12 @@ export function PasswordDialog({
 						</p>
 					) : null}
 					<input type="text" name="username" autoComplete="username" value="owner" readOnly hidden />
-					<Field label="Owner password" error={error}>
+					<Field label={t("Owner password")} error={error}>
 						{(id) => <Input id={id} type="password" autoComplete="current-password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} disabled={pending} aria-invalid={error ? true : undefined} className="text-base sm:text-[13px]" />}
 					</Field>
 					<DialogFooter>
 						<Button variant="ghost" type="button" onClick={() => onOpenChange(false)}>
-							Cancel
+							{t("Cancel")}
 						</Button>
 						<Button variant="primary" type="submit" loading={pending} disabled={!password}>
 							{confirmLabel}

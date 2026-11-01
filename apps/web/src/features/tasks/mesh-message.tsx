@@ -2,6 +2,7 @@ import type { TaskStatus } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Bot, ChevronRight, Network, User } from "lucide-react";
 import { useState } from "react";
+import { t, tr } from "@/i18n";
 import { Badge } from "@/ui/badge";
 import { TaskStatusPill } from "./components.tsx";
 import { KIND_META } from "./format.ts";
@@ -92,11 +93,11 @@ export function MeshMessageBubble({ message }: { message: MeshMessage }) {
 							<span className="truncate">{message.author}</span>
 						</span>
 					) : null}
-					{message.scope === "shared" ? <Badge variant="outline">Team</Badge> : null}
-					{kind ? <Badge variant={kind.variant}>{kind.label}</Badge> : null}
-					{message.brief ? <Badge variant="neutral">{message.scope === "shared" ? "Team brief" : "Task brief"}</Badge> : null}
+					{message.scope === "shared" ? <Badge variant="outline">{t("Team")}</Badge> : null}
+					{kind ? <Badge variant={kind.variant}>{tr(kind.label)}</Badge> : null}
+					{message.brief ? <Badge variant="neutral">{message.scope === "shared" ? t("Team brief") : t("Task brief")}</Badge> : null}
 					{message.status ? <TaskStatusPill status={message.status} /> : null}
-					{message.driverChanged !== undefined ? <Badge variant="warning">Driver changed · epoch {message.driverChanged}</Badge> : null}
+					{message.driverChanged !== undefined ? <Badge variant="warning">{t("Driver changed · epoch {epoch}", { epoch: message.driverChanged })}</Badge> : null}
 					{message.scope === "task" ? (
 						<Link to="/tasks/$taskId" params={{ taskId: message.refId }} className={link}>
 							{title}
@@ -111,7 +112,7 @@ export function MeshMessageBubble({ message }: { message: MeshMessage }) {
 					{message.brief ? (
 						<button type="button" aria-expanded={open} onClick={() => setOpen((v) => !v)} className="flex w-fit items-center gap-1 rounded-md py-0.5 text-xs font-medium text-muted-foreground outline-none hover:text-foreground coarse:py-2">
 							<ChevronRight className={`size-3.5 transition-transform duration-150 ${open ? "rotate-90" : ""}`} aria-hidden />
-							{open ? "Hide the brief" : message.scope === "shared" ? "This agent joined a shared session — show the brief" : "Delegated to this agent — show the brief"}
+							{open ? t("Hide the brief") : message.scope === "shared" ? t("This agent joined a shared session — show the brief") : t("Delegated to this agent — show the brief")}
 						</button>
 					) : null}
 					{message.body && (!message.brief || open) ? <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{message.body}</p> : null}

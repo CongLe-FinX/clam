@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import type { AgentSession, RepositoryRef, SessionLiveState, SessionStats, TaskConstraints, TaskResult, UiMessage } from "@clam/contracts";
+import type { AgentSession, I18nText, RepositoryRef, SessionLiveState, SessionStats, TaskConstraints, TaskResult, UiMessage } from "@clam/contracts";
 
 /**
  * SQLite schema for one CL Agent Mesh node. Every node keeps its own database; no node reads
@@ -494,6 +494,8 @@ export const tasks = sqliteTable(
 		/** Executing agent session on the executor node. */
 		executorSessionId: text("executor_session_id"),
 		reason: text("reason"),
+		/** Structured twin of `reason` when the text is ours (not a user's or a peer's); null = none. */
+		reasonI18n: text("reason_i18n", { mode: "json" }).$type<I18nText>(),
 		result: text("result", { mode: "json" }).$type<TaskResult | null>(),
 		cost: real("cost"),
 		retryOf: text("retry_of"),
@@ -533,6 +535,8 @@ export const taskEvents = sqliteTable(
 		/** status | progress | tool | message | result | note */
 		type: text("type").notNull(),
 		summary: text("summary").notNull(),
+		/** Structured twin of `summary`; null = none. */
+		i18n: text("i18n", { mode: "json" }).$type<I18nText>(),
 		payload: text("payload", { mode: "json" }).$type<unknown>(),
 		createdAt: text("created_at").notNull().default(now),
 	},
@@ -595,6 +599,8 @@ export const outbox = sqliteTable(
 		/** pending | sent | dead | cancelled */
 		state: text("state").notNull().default("pending"),
 		lastError: text("last_error"),
+		/** Structured twin of `last_error` when the text is ours (not a peer/transport error); null = none. */
+		lastErrorI18n: text("last_error_i18n", { mode: "json" }).$type<I18nText>(),
 		lastStatus: integer("last_status"),
 		createdAt: text("created_at").notNull().default(now),
 		sentAt: text("sent_at"),
@@ -652,8 +658,10 @@ export interface SharedTransferMeta {
 	toNodeName: string;
 	phase: "inviting" | "waiting_accept" | "stopping" | "checkpointing" | "delivering" | "handing_over" | "continuing" | "failed" | "cancelled";
 	message: string;
+	/** Structured twin of `message`; absent on records written before it existed. */
+	i18n?: I18nText | undefined;
 	stopRunning: boolean;
-	error: { code: string; message: string } | null;
+	error: { code: string; message: string; i18n?: I18nText | undefined } | null;
 	newSessionId: string | null;
 	newSessionUrl: string | null;
 	startedAt: string;
@@ -796,6 +804,8 @@ export const sharedMessages = sqliteTable(
 		/** Addressing, resolved by the origin (mentions or explicit); `lead` is resolved by each receiver against its driver. */
 		to: text("to", { mode: "json" }).$type<SharedMessageTo>().notNull().default(sql`'{"mode":"lead","agents":[]}'`),
 		text: text("text").notNull(),
+		/** Structured twin of `text` (generated system lines); null = none. */
+		i18n: text("i18n", { mode: "json" }).$type<I18nText>(),
 		/** Epoch the author was at (informational: epochs fence the lead role, never chat). */
 		epoch: integer("epoch").notNull().default(1),
 		createdAt: text("created_at").notNull(),

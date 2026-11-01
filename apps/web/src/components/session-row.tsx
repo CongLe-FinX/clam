@@ -5,7 +5,8 @@ import { memo } from "react";
 import { warmHandlers } from "@/features/session/preload.ts";
 import { cn, formatCompact, formatCost, relativeTime } from "@/lib/utils";
 import { StatusDot } from "@/ui/status-dot";
-import { PendingBadge, SessionKindBadge, sessionDot } from "./session-status.tsx";
+import { PendingBadge, SESSION_STATUS_LABEL, SessionKindBadge, sessionDot } from "./session-status.tsx";
+import { t, tr } from "@/i18n";
 
 /** One session in any list: status dot, title, project, model, tokens, cost, recency. Whole row is a link. */
 export const SessionRow = memo(function SessionRow({ session, projectName, className }: { session: AgentSession; projectName?: string; className?: string }) {
@@ -23,10 +24,10 @@ export const SessionRow = memo(function SessionRow({ session, projectName, class
 				className,
 			)}
 		>
-			<StatusDot status={sessionDot(session.status)} label={session.status} />
+			<StatusDot status={sessionDot(session.status)} label={tr(SESSION_STATUS_LABEL[session.status])} />
 			<div className="flex min-w-0 flex-1 flex-col gap-0.5">
 				<span className="flex min-w-0 items-center gap-2">
-					<span className="truncate text-[13px] font-medium">{session.title || "Untitled session"}</span>
+					<span className="truncate text-[13px] font-medium">{session.title || t("Untitled session")}</span>
 					<SessionKindBadge session={session} className="shrink-0" />
 					<PendingBadge session={session} className="shrink-0" />
 				</span>
@@ -40,7 +41,7 @@ export const SessionRow = memo(function SessionRow({ session, projectName, class
 				<span className="tabular">{relativeTime(session.updatedAt)}</span>
 				{tokens !== undefined ? (
 					<span className="tabular font-mono text-2xs">
-						{formatCompact(tokens)} tok · {formatCost(session.stats?.cost)}
+						{t("{tokens} tok · {cost}", { tokens: formatCompact(tokens), cost: formatCost(session.stats?.cost) })}
 					</span>
 				) : null}
 			</div>

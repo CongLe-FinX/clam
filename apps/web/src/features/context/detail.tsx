@@ -4,8 +4,9 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LazyMarkdown } from "@/components/lazy-markdown";
-import { ApiError, errorMessage } from "@/lib/api";
-import { relativeTime } from "@/lib/utils";
+import { ApiError, errorText } from "@/lib/api";
+import { t, tr } from "@/i18n";
+import { formatDateTime, relativeTime } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { Skeleton } from "@/ui/skeleton";
@@ -27,23 +28,23 @@ function Meta({ label, children }: { label: string; children: React.ReactNode })
 }
 
 function stamp(iso: string): string {
-	return `${relativeTime(iso)} · ${new Date(iso).toLocaleString()}`;
+	return `${relativeTime(iso)} · ${formatDateTime(iso)}`;
 }
 
 function SyncPanel({ context, nodeNames }: { context: Context; nodeNames: Map<string, string> }) {
 	const badge = syncBadge(context, nodeNames);
 	const holders = context.sync.syncedTo.map((nodeId) => ({ nodeId, name: nodeNames.get(nodeId) ?? nodeId.slice(0, 8) }));
 	return (
-		<section aria-label="Sync" className="flex min-w-0 flex-col gap-2 rounded-xl bg-surface-2/60 p-3 shadow-[inset_0_0_0_1px_var(--border)]">
+		<section aria-label={t("Sync")} className="flex min-w-0 flex-col gap-2 rounded-xl bg-surface-2/60 p-3 shadow-[inset_0_0_0_1px_var(--border)]">
 			<div className="flex flex-wrap items-center gap-2">
-				<h3 className="text-2xs font-semibold uppercase tracking-wider text-subtle">Sync</h3>
+				<h3 className="text-2xs font-semibold uppercase tracking-wider text-subtle">{t("Sync")}</h3>
 				<SyncChip context={context} nodeNames={nodeNames} />
 			</div>
 			<p className="text-xs text-muted-foreground">{badge.detail}</p>
 			{context.shareable ? (
 				<>
 					{holders.length > 0 ? (
-						<ul aria-label="Machines holding the current version" className="flex flex-wrap gap-1.5">
+						<ul aria-label={t("Machines holding the current version")} className="flex flex-wrap gap-1.5">
 							{holders.map((h) => (
 								<li key={h.nodeId} className="rounded-md bg-surface-3 px-2 py-1 text-2xs text-muted-foreground">
 									{h.name}
@@ -51,10 +52,10 @@ function SyncPanel({ context, nodeNames }: { context: Context; nodeNames: Map<st
 							))}
 						</ul>
 					) : null}
-					<p className="text-2xs text-subtle">Shareable contexts are sent machine-to-machine to every member of this workspace and may be exported to .clmesh/ in the project's Git repository after the secret scanner. Edits made on two machines at once are never merged automatically.</p>
+					<p className="text-2xs text-subtle">{t("Shareable contexts are sent machine-to-machine to every member of this workspace and may be exported to .clmesh/ in the project's Git repository after the secret scanner. Edits made on two machines at once are never merged automatically.")}</p>
 				</>
 			) : (
-				<p className="text-2xs text-subtle">Turn on “Shareable” when editing to sync this with the other member machines of the workspace.</p>
+				<p className="text-2xs text-subtle">{t("Turn on “Shareable” when editing to sync this with the other member machines of the workspace.")}</p>
 			)}
 			{context.gitPath ? (
 				<p className="flex min-w-0 items-center gap-1.5 text-2xs text-subtle">
@@ -107,7 +108,7 @@ export function ContextDetail({
 	const [confirmDelete, setConfirmDelete] = useState(false);
 
 	const back = (
-		<Button variant="ghost" size="icon" onClick={onBack} aria-label="Back to the list" className="-ml-2 lg:hidden">
+		<Button variant="ghost" size="icon" onClick={onBack} aria-label={t("Back to the list")} className="-ml-2 lg:hidden">
 			<ArrowLeft />
 		</Button>
 	);
@@ -127,16 +128,16 @@ export function ContextDetail({
 				<div className="px-2 pt-2 lg:hidden">{back}</div>
 				<EmptyState
 					icon={FileQuestion}
-					title={gone ? "This context no longer exists" : "Could not load this context"}
-					description={gone ? "It was deleted on this machine or on another member machine." : errorMessage(q.error)}
+					title={gone ? t("This context no longer exists") : t("Could not load this context")}
+					description={gone ? t("It was deleted on this machine or on another member machine.") : errorText(q.error)}
 					action={
 						gone ? (
 							<Button size="sm" variant="outline" onClick={onBack}>
-								Back to the list
+								{t("Back to the list")}
 							</Button>
 						) : (
 							<Button size="sm" variant="outline" onClick={() => void q.refetch()}>
-								<RefreshCw /> Retry
+								<RefreshCw /> {t("Retry")}
 							</Button>
 						)
 					}
@@ -147,7 +148,7 @@ export function ContextDetail({
 
 	const c = q.data;
 	const inConflict = c.sync.state === "conflict";
-	const scope = c.projectId ? (projectNames.get(c.projectId) ?? "Project") : "Workspace-wide";
+	const scope = c.projectId ? (projectNames.get(c.projectId) ?? t("Project")) : t("Workspace-wide");
 
 	return (
 		<div className="scrollbar-thin flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto overscroll-contain">
@@ -163,11 +164,11 @@ export function ContextDetail({
 					</div>
 					{editing ? null : (
 						<div className="flex shrink-0 items-center gap-1.5">
-							<Button size="md" variant="outline" onClick={() => setEditing(true)} disabled={inConflict} title={inConflict ? "Resolve the conflict first" : undefined}>
-								<Pencil /> <span className="max-sm:sr-only">Edit</span>
+							<Button size="md" variant="outline" onClick={() => setEditing(true)} disabled={inConflict} title={inConflict ? t("Resolve the conflict first") : undefined}>
+								<Pencil /> <span className="max-sm:sr-only">{t("Edit")}</span>
 							</Button>
-							<Button size="md" variant="ghost" onClick={() => setConfirmDelete(true)} aria-label="Delete this context" className="text-danger hover:text-danger">
-								<Trash2 /> <span className="max-sm:sr-only">Delete</span>
+							<Button size="md" variant="ghost" onClick={() => setConfirmDelete(true)} aria-label={t("Delete this context")} className="text-danger hover:text-danger">
+								<Trash2 /> <span className="max-sm:sr-only">{t("Delete")}</span>
 							</Button>
 						</div>
 					)}
@@ -187,26 +188,26 @@ export function ContextDetail({
 				) : (
 					<>
 						<dl className="grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
-							<Meta label="Type">{contextTypeInfo(c.type).label}</Meta>
-							<Meta label="Scope">{scope}</Meta>
-							<Meta label="Author">
+							<Meta label={t("Type")}>{tr(contextTypeInfo(c.type).label)}</Meta>
+							<Meta label={t("Scope")}>{scope}</Meta>
+							<Meta label={t("Author")}>
 								<span title={`${authorLabel(c.author)} (${authorKindLabel(c.author)})`}>
 									{authorLabel(c.author)} <span className="text-2xs text-subtle">({authorKindLabel(c.author)})</span>
 								</span>
 							</Meta>
-							<Meta label="Version">v{c.version}</Meta>
-							<Meta label="Created">
-								<span title={new Date(c.createdAt).toLocaleString()}>{relativeTime(c.createdAt)}</span>
+							<Meta label={t("Version")}>v{c.version}</Meta>
+							<Meta label={t("Created")}>
+								<span title={formatDateTime(c.createdAt)}>{relativeTime(c.createdAt)}</span>
 							</Meta>
-							<Meta label="Updated">
+							<Meta label={t("Updated")}>
 								<span title={stamp(c.updatedAt)}>{relativeTime(c.updatedAt)}</span>
 							</Meta>
 						</dl>
 						<SyncPanel context={c} nodeNames={nodeNames} />
 						<Tabs value={tab} onValueChange={setTab} className="flex min-w-0 flex-col gap-3">
 							<TabsList className="w-fit">
-								<TabsTrigger value="content">Content</TabsTrigger>
-								<TabsTrigger value="versions">History · v{c.version}</TabsTrigger>
+								<TabsTrigger value="content">{t("Content")}</TabsTrigger>
+								<TabsTrigger value="versions">{t("History · v{version}", { version: c.version })}</TabsTrigger>
 							</TabsList>
 							<TabsContent value="content" className="min-w-0">
 								{c.body.trim() ? (
@@ -215,11 +216,11 @@ export function ContextDetail({
 									</article>
 								) : (
 									<EmptyState
-										title="No content yet"
-										description="This context only has a title."
+										title={t("No content yet")}
+										description={t("This context only has a title.")}
 										action={
 											<Button size="sm" variant="outline" onClick={() => setEditing(true)} disabled={inConflict}>
-												<Pencil /> Add content
+												<Pencil /> {t("Add content")}
 											</Button>
 										}
 									/>
@@ -235,25 +236,25 @@ export function ContextDetail({
 			<ConfirmDialog
 				open={confirmDelete}
 				onOpenChange={(o) => !remove.isPending && setConfirmDelete(o)}
-				title="Delete this context?"
+				title={t("Delete this context?")}
 				description={
 					c.shareable
-						? "This context is shareable, so it is removed for every member machine of this workspace too, not only on this machine. This cannot be undone."
-						: "This context is private to this machine. It is deleted here and cannot be recovered."
+						? t("This context is shareable, so it is removed for every member machine of this workspace too, not only on this machine. This cannot be undone.")
+						: t("This context is private to this machine. It is deleted here and cannot be recovered.")
 				}
-				confirmLabel="Delete"
+				confirmLabel={t("Delete")}
 				danger
 				loading={remove.isPending}
 				onConfirm={() =>
 					remove.mutate(c.id, {
 						onSuccess: () => {
 							setConfirmDelete(false);
-							toast.success("Context deleted");
+							toast.success(t("Context deleted"));
 							onDeleted();
 						},
 						onError: (e) => {
 							setConfirmDelete(false);
-							toast.error("Could not delete", { description: errorMessage(e) });
+							toast.error(t("Could not delete"), { description: errorText(e) });
 						},
 					})
 				}

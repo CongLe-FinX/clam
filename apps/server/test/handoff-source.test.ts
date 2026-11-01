@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { wire } from "@clam/agent-network";
 import type { Peer, Task } from "@clam/contracts";
+import { plainMsg } from "@clam/contracts";
 import { projects } from "@clam/database";
 import { HandoffManifest, makeFencingToken, sha256OfCanonical } from "@clam/handoff-engine";
 import { eq } from "drizzle-orm";
@@ -346,7 +347,7 @@ describe("source flow on three nodes (vcs none / files, wire paths)", () => {
 		const row = await accepted(task);
 		expectApiError(await rejection(source().reclaim(row.id, false)), 409, "conflict");
 
-		b().ctx.handoffs.transition(row.id, "ack_timeout", { summary: "Deadline passed", from: ["awaiting_ack"] });
+		b().ctx.handoffs.transition(row.id, "ack_timeout", { summary: plainMsg("Deadline passed"), from: ["awaiting_ack"] });
 		const extended = await source().extend(row.id, 10);
 		expect(extended.state).toBe("awaiting_ack");
 		expect(Date.parse(extended.deadlineAt as string)).toBeGreaterThan(Date.parse(row.deadlineAt as string));
@@ -354,7 +355,7 @@ describe("source flow on three nodes (vcs none / files, wire paths)", () => {
 		const sameState = await source().extend(row.id, 5);
 		expect(Date.parse(sameState.deadlineAt as string)).toBeGreaterThan(Date.parse(extended.deadlineAt as string));
 
-		b().ctx.handoffs.transition(row.id, "ack_timeout", { summary: "Deadline passed again", from: ["awaiting_ack"] });
+		b().ctx.handoffs.transition(row.id, "ack_timeout", { summary: plainMsg("Deadline passed again"), from: ["awaiting_ack"] });
 		const sealed = b().ctx.tasks.store.get(task.id);
 		// The target answers `404`: it holds no acknowledgement for this handoff — the proof reclaim needs.
 		const reclaimed = await source().reclaim(row.id, false);
@@ -370,7 +371,7 @@ describe("source flow on three nodes (vcs none / files, wire paths)", () => {
 	it("resume drives persisted rows: accepted → awaiting_ack, acked → released, a dead offer is queued again", async () => {
 		const accepting = await startTask();
 		const first = await offered(accepting);
-		b().ctx.handoffs.transition(first.id, "accepted", { summary: "accepted (test)", from: ["offered"], notify: false });
+		b().ctx.handoffs.transition(first.id, "accepted", { summary: plainMsg("accepted (test)"), from: ["offered"], notify: false });
 		await source().resume(first.id);
 		expect(store().get(first.id)).toMatchObject({ state: "awaiting_ack" });
 		expect(store().get(first.id).deadlineAt).toBeTruthy();
@@ -387,7 +388,7 @@ describe("source flow on three nodes (vcs none / files, wire paths)", () => {
 
 		const releasing = await startTask();
 		const third = await accepted(releasing);
-		b().ctx.handoffs.advance(third.id, "acked", { summary: "acked (test)", patch: { fencingToken: ackBody(third).fencingToken, targetSessionId: "ses_target", ackAt: now() }, notify: false });
+		b().ctx.handoffs.advance(third.id, "acked", { summary: plainMsg("acked (test)"), patch: { fencingToken: ackBody(third).fencingToken, targetSessionId: "ses_target", ackAt: now() }, notify: false });
 		await source().resume(third.id);
 		expect(store().get(third.id).state).toBe("released");
 		expect(b().ctx.tasks.store.get(releasing.id)).toMatchObject({ status: "handed_off", fenced: true });
@@ -399,7 +400,7 @@ describe("source flow on three nodes (vcs none / files, wire paths)", () => {
 	it("an unreachable target needs the user's override to reclaim", async () => {
 		const task = await startTask();
 		const row = await accepted(task);
-		b().ctx.handoffs.transition(row.id, "ack_timeout", { summary: "Deadline passed", from: ["awaiting_ack"] });
+		b().ctx.handoffs.transition(row.id, "ack_timeout", { summary: plainMsg("Deadline passed"), from: ["awaiting_ack"] });
 		await trio.stop("c");
 		const refused = await rejection(source().reclaim(row.id, false));
 		expectApiError(refused, 409, "override_required");

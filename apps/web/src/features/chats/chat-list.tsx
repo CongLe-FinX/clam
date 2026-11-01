@@ -2,6 +2,7 @@ import type { AgentSession } from "@clam/contracts";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useMemo, useRef } from "react";
 import { SessionRow } from "@/components/session-row";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 
 /** Above this many rows (chats plus day headings) the list is virtualized; shorter lists are plain DOM. */
@@ -18,11 +19,11 @@ function startOfDay(ts: number): number {
 
 function bucket(updatedAt: string, today: number): string {
 	const day = startOfDay(Date.parse(updatedAt));
-	if (day >= today) return "Today";
-	if (day >= today - DAY) return "Yesterday";
-	if (day >= today - 6 * DAY) return "Previous 7 days";
-	if (day >= today - 29 * DAY) return "Previous 30 days";
-	return "Earlier";
+	if (day >= today) return t("Today");
+	if (day >= today - DAY) return t("Yesterday");
+	if (day >= today - 6 * DAY) return t("Previous 7 days");
+	if (day >= today - 29 * DAY) return t("Previous 30 days");
+	return t("Earlier");
 }
 
 /** Chats are already sorted by recency; a heading is inserted whenever the day bucket changes. */

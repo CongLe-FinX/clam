@@ -2,7 +2,9 @@ import type { Project, TaskDeliverAs } from "@clam/contracts";
 import { Info, Send } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { PeerStatusBadge } from "@/features/network/components";
-import { errorMessage } from "@/lib/api";
+import { PEER_STATUS_LABEL } from "@/features/network/format";
+import { msg, T, t, tr, type Msg } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { useDirectory, usePeers, useProjects, useWorkspaces } from "@/lib/queries";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -22,12 +24,14 @@ const ANY = "__any__";
 const NO_PROJECT = "__none__";
 const DEFAULT_APPROVAL = "__default__";
 
-const projectKind = (p: Project) => (p.repository ? `${p.repository.owner}/${p.repository.name}` : p.vcs === "git" ? "git · no GitHub repository" : p.managed ? "managed folder" : "folder");
+const AGENT_STATUS_LABEL = { online: msg("Online"), busy: msg("Busy"), offline: msg("Offline") } as const;
 
-const DELIVER_OPTIONS: ReadonlyArray<{ id: TaskDeliverAs; label: string; hint: string }> = [
-	{ id: "branch", label: "Branch", hint: "The executor works on a task branch of the project's GitHub repository and pushes it. You get a compare link." },
-	{ id: "files", label: "Files", hint: "The executor works in its own folder and returns the changed files as a bundle. You preview and apply them." },
-	{ id: "summary", label: "Summary", hint: "The executor answers with a written summary; no files come back." },
+const projectKind = (p: Project) => (p.repository ? `${p.repository.owner}/${p.repository.name}` : p.vcs === "git" ? t("git · no GitHub repository") : p.managed ? t("managed folder") : t("folder"));
+
+const DELIVER_OPTIONS: ReadonlyArray<{ id: TaskDeliverAs; label: Msg; hint: Msg }> = [
+	{ id: "branch", label: msg("Branch"), hint: msg("The executor works on a task branch of the project's GitHub repository and pushes it. You get a compare link.") },
+	{ id: "files", label: msg("Files"), hint: msg("The executor works in its own folder and returns the changed files as a bundle. You preview and apply them.") },
+	{ id: "summary", label: msg("Summary"), hint: msg("The executor answers with a written summary; no files come back.") },
 ];
 
 export interface DelegatePreset {
@@ -112,8 +116,8 @@ export default function DelegateDialog({ preset, onClose }: { preset: DelegatePr
 		<Dialog open onOpenChange={(o) => !o && !create.isPending && onClose()}>
 			<DialogContent sheetOnMobile className="max-w-xl">
 				<DialogHeader>
-					<DialogTitle>Delegate a task</DialogTitle>
-					<DialogDescription>An agent on another machine does the work and reports back. Send it a project's files, or start it in a fresh folder. You can follow and discuss it on the task page.</DialogDescription>
+					<DialogTitle>{t("Delegate a task")}</DialogTitle>
+					<DialogDescription>{t("An agent on another machine does the work and reports back. Send it a project's files, or start it in a fresh folder. You can follow and discuss it on the task page.")}</DialogDescription>
 				</DialogHeader>
 				<form
 					className="scrollbar-thin -mx-1 flex min-h-0 flex-col gap-4 overflow-y-auto px-1"
@@ -125,31 +129,35 @@ export default function DelegateDialog({ preset, onClose }: { preset: DelegatePr
 					{noNodes ? (
 						<div role="status" className="flex items-start gap-2 rounded-lg bg-surface-2 px-3 py-2.5 text-[13px] text-muted-foreground">
 							<Info className="mt-0.5 size-4 shrink-0" aria-hidden />
-							<span>
-								No machine is paired with this one yet.{" "}
-								<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "invite-node" })}>
-									Invite a machine
-								</button>{" "}
-								or{" "}
-								<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "join-node" })}>
-									join one
-								</button>
-								.
-							</span>
+							<T
+								text="No machine is paired with this one yet. <invite>Invite a machine</invite> or <join>join one</join>."
+								tags={{
+									invite: (children) => (
+										<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "invite-node" })}>
+											{children}
+										</button>
+									),
+									join: (children) => (
+										<button type="button" className="text-accent hover:underline" onClick={() => openDialog({ kind: "join-node" })}>
+											{children}
+										</button>
+									),
+								}}
+							/>
 						</div>
 					) : null}
 					<div className="grid gap-3 sm:grid-cols-2">
-						<Field label="Machine">
+						<Field label={t("Machine")}>
 							{() => (
 								<Select value={peerId} onValueChange={setPeerId} disabled={noNodes}>
 									<SelectTrigger>
-										<SelectValue placeholder="Choose a machine" />
+										<SelectValue placeholder={t("Choose a machine")} />
 									</SelectTrigger>
 									<SelectContent>
 										{usablePeers.map((p) => (
 											<SelectItem key={p.id} value={p.id}>
 												<span className="inline-flex items-center gap-2">
-													<StatusDot status={p.status === "online" ? "online" : p.status === "degraded" ? "degraded" : "offline"} label={p.status} />
+													<StatusDot status={p.status === "online" ? "online" : p.status === "degraded" ? "degraded" : "offline"} label={tr(PEER_STATUS_LABEL[p.status])} />
 													{p.name}
 												</span>
 											</SelectItem>
@@ -158,20 +166,20 @@ export default function DelegateDialog({ preset, onClose }: { preset: DelegatePr
 								</Select>
 							)}
 						</Field>
-						<Field label="Agent" hint="Leave on “any” to let the machine pick.">
+						<Field label={t("Agent")} hint={t("Leave on “any” to let the machine pick.")}>
 							{() => (
 								<Select value={agentKey} onValueChange={setAgentKey} disabled={!peer}>
 									<SelectTrigger>
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
-										<SelectItem value={ANY}>Any available agent</SelectItem>
+										<SelectItem value={ANY}>{t("Any available agent")}</SelectItem>
 										{agents.map((a) => (
 											<SelectItem key={a.agentId} value={a.agentId}>
 												<span className="inline-flex items-center gap-2">
-													<StatusDot status={a.status} label={a.status} />
+													<StatusDot status={a.status} label={tr(AGENT_STATUS_LABEL[a.status])} />
 													{a.name}
-													<span className="text-2xs text-subtle">{a.status}</span>
+													<span className="text-2xs text-subtle">{tr(AGENT_STATUS_LABEL[a.status])}</span>
 												</span>
 											</SelectItem>
 										))}
@@ -183,23 +191,23 @@ export default function DelegateDialog({ preset, onClose }: { preset: DelegatePr
 					{peer && peer.status !== "online" ? (
 						<p role="status" className="flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-xs text-warning">
 							<PeerStatusBadge status={peer.status} />
-							{peer.name} is not reachable right now. The task is stored on this machine and will be delivered when it is online.
+							{t("{name} is not reachable right now. The task is stored on this machine and will be delivered when it is online.", { name: peer.name })}
 						</p>
 					) : null}
 					{cannotSend ? (
 						<p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
-							{peer?.name} has not allowed this machine to send tasks. Ask its owner to grant “tasks.send”.
+							{t("{name} has not allowed this machine to send tasks. Ask its owner to grant “tasks.send”.", { name: peer?.name ?? "" })}
 						</p>
 					) : null}
 
-					<Field label="Project" hint="Optional. Any local project works, with or without Git.">
+					<Field label={t("Project")} hint={t("Optional. Any local project works, with or without Git.")}>
 						{() => (
 							<Select value={projectId || NO_PROJECT} onValueChange={changeProject}>
 								<SelectTrigger>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value={NO_PROJECT}>No project — run in a fresh folder on the executor</SelectItem>
+									<SelectItem value={NO_PROJECT}>{t("No project — run in a fresh folder on the executor")}</SelectItem>
 									{sortedProjects.map((p) => (
 										<SelectItem key={p.id} value={p.id}>
 											<span className="inline-flex items-center gap-2">
@@ -214,20 +222,20 @@ export default function DelegateDialog({ preset, onClose }: { preset: DelegatePr
 					</Field>
 					{projects.isError ? (
 						<p role="alert" className="flex items-center gap-2 rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
-							<span className="min-w-0 flex-1">{errorMessage(projects.error)}</span>
+							<span className="min-w-0 flex-1">{errorText(projects.error)}</span>
 							<Button type="button" size="sm" variant="ghost" onClick={() => void projects.refetch()}>
-								Retry
+								{t("Retry")}
 							</Button>
 						</p>
 					) : null}
 					{projectId ? (
 						<div className="flex flex-col gap-1.5">
-							<span className="text-[13px] font-medium">Input files</span>
+							<span className="text-[13px] font-medium">{t("Input files")}</span>
 							<InputFilesPicker projectId={projectId} value={inputPaths} onChange={setInputPaths} />
 						</div>
 					) : null}
 					{!projectId && (workspaces.data?.length ?? 0) > 0 ? (
-						<Field label="Workspace" hint="Where this task is filed on this machine. Without a project there is nothing to infer it from.">
+						<Field label={t("Workspace")} hint={t("Where this task is filed on this machine. Without a project there is nothing to infer it from.")}>
 							{() => (
 								<Select value={workspaceId} onValueChange={setWsPick} disabled={(workspaces.data?.length ?? 0) < 2}>
 									<SelectTrigger>
@@ -245,14 +253,14 @@ export default function DelegateDialog({ preset, onClose }: { preset: DelegatePr
 						</Field>
 					) : null}
 
-					<Field label="Title">{(id) => <Input id={id} value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Add input validation to the signup form" />}</Field>
-					<Field label="Instructions" hint="Markdown supported. Say what “done” looks like.">
-						{(id) => <Textarea id={id} value={description} maxLength={50_000} rows={6} onChange={(e) => setDescription(e.target.value)} placeholder="What should the agent do? Include context, constraints and acceptance criteria." />}
+					<Field label={t("Title")}>{(id) => <Input id={id} value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} placeholder={t("e.g. Add input validation to the signup form")} />}</Field>
+					<Field label={t("Instructions")} hint={t("Markdown supported. Say what “done” looks like.")}>
+						{(id) => <Textarea id={id} value={description} maxLength={50_000} rows={6} onChange={(e) => setDescription(e.target.value)} placeholder={t("What should the agent do? Include context, constraints and acceptance criteria.")} />}
 					</Field>
 
 					<fieldset className="flex flex-col gap-1.5">
-						<legend className="mb-1.5 text-[13px] font-medium">Deliver as</legend>
-						<div role="radiogroup" aria-label="Deliver as" className="grid gap-2 sm:grid-cols-3">
+						<legend className="mb-1.5 text-[13px] font-medium">{t("Deliver as")}</legend>
+						<div role="radiogroup" aria-label={t("Deliver as")} className="grid gap-2 sm:grid-cols-3">
 							{DELIVER_OPTIONS.map((o) => {
 								const disabled = o.id === "branch" && !branchOk;
 								return (
@@ -268,34 +276,34 @@ export default function DelegateDialog({ preset, onClose }: { preset: DelegatePr
 											deliverAs === o.id ? "bg-accent-soft shadow-[inset_0_0_0_1px_var(--accent)]" : "bg-surface-2 shadow-[inset_0_0_0_1px_var(--border)] hover:bg-surface-3",
 										)}
 									>
-										<span className="text-[13px] font-medium">{o.label}</span>
-										<span className="text-xs text-muted-foreground">{disabled ? "Needs a project with a linked GitHub repository." : o.hint}</span>
+										<span className="text-[13px] font-medium">{tr(o.label)}</span>
+										<span className="text-xs text-muted-foreground">{disabled ? t("Needs a project with a linked GitHub repository.") : tr(o.hint)}</span>
 									</button>
 								);
 							})}
 						</div>
 					</fieldset>
 					{deliverAs === "branch" ? (
-						<Field label="Base branch" hint="The task branch starts from here.">
-							{(id) => <Input id={id} value={baseBranch} maxLength={200} onChange={(e) => setBaseBranch(e.target.value)} placeholder={project?.repository?.defaultBranch ?? "repository default"} className="font-mono text-xs" />}
+						<Field label={t("Base branch")} hint={t("The task branch starts from here.")}>
+							{(id) => <Input id={id} value={baseBranch} maxLength={200} onChange={(e) => setBaseBranch(e.target.value)} placeholder={project?.repository?.defaultBranch ?? t("repository default")} className="font-mono text-xs" />}
 						</Field>
 					) : null}
 
 					<div className="grid gap-3 sm:grid-cols-2">
-						<Field label="Max cost (USD)" hint="Optional. The run stops at this spend." error={costInvalid ? "Enter an amount between 0 and 1000." : null}>
-							{(id) => <Input id={id} inputMode="decimal" type="number" min="0" max="1000" step="0.01" value={maxCost} onChange={(e) => setMaxCost(e.target.value)} placeholder="no limit" aria-invalid={costInvalid || undefined} />}
+						<Field label={t("Max cost (USD)")} hint={t("Optional. The run stops at this spend.")} error={costInvalid ? t("Enter an amount between 0 and 1000.") : null}>
+							{(id) => <Input id={id} inputMode="decimal" type="number" min="0" max="1000" step="0.01" value={maxCost} onChange={(e) => setMaxCost(e.target.value)} placeholder={t("no limit")} aria-invalid={costInvalid || undefined} />}
 						</Field>
-						<Field label="Approval mode" hint="The executor may only be stricter than its own setting.">
+						<Field label={t("Approval mode")} hint={t("The executor may only be stricter than its own setting.")}>
 							{() => (
 								<Select value={approval} onValueChange={setApproval}>
 									<SelectTrigger>
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
-										<SelectItem value={DEFAULT_APPROVAL}>Executor's setting</SelectItem>
+										<SelectItem value={DEFAULT_APPROVAL}>{t("Executor's setting")}</SelectItem>
 										{APPROVAL_MODES.map((m) => (
 											<SelectItem key={m.value} value={m.value}>
-												{m.label}
+												{tr(m.label)}
 											</SelectItem>
 										))}
 									</SelectContent>
@@ -306,16 +314,16 @@ export default function DelegateDialog({ preset, onClose }: { preset: DelegatePr
 
 					{create.error ? (
 						<p role="alert" className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">
-							{errorMessage(create.error)}
+							{errorText(create.error)}
 						</p>
 					) : null}
 					<DialogFooter className="sticky bottom-0 -mx-1 bg-overlay px-1 pt-1">
 						<Button variant="ghost" onClick={onClose} disabled={create.isPending}>
-							Cancel
+							{t("Cancel")}
 						</Button>
 						<Button type="submit" variant="primary" loading={create.isPending} disabled={!ready}>
-							<Send /> Delegate
-							{peer && peer.status !== "online" ? <Badge variant="warning">queued</Badge> : null}
+							<Send /> {t("Delegate")}
+							{peer && peer.status !== "online" ? <Badge variant="warning">{t("queued")}</Badge> : null}
 						</Button>
 					</DialogFooter>
 				</form>

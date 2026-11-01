@@ -1,7 +1,7 @@
-import type { TunnelMode, TunnelState, UpdateTunnelConfigBody } from "@clam/contracts";
+import { i18nMsg, type TunnelMode, type TunnelState, type UpdateTunnelConfigBody } from "@clam/contracts";
 import { node, settings } from "@clam/database";
 import type { ClamDb } from "@clam/database";
-import { createTunnelManager, detectCloudflared, type CloudflaredInfo, type TunnelManager, type TunnelRuntimeState } from "@clam/cloudflare-tunnel";
+import { createTunnelManager, detectCloudflared, TunnelConfigError, type CloudflaredInfo, type TunnelManager, type TunnelRuntimeState } from "@clam/cloudflare-tunnel";
 import type { SecretStore } from "@clam/secret-store";
 import { eq } from "drizzle-orm";
 import type { z } from "zod";
@@ -115,6 +115,7 @@ export class TunnelService {
 			pid: runtime.pid,
 			connections: runtime.connections,
 			lastError: runtime.lastError,
+			...(runtime.lastErrorI18n && { lastErrorI18n: runtime.lastErrorI18n }),
 			startedAt: runtime.startedAt,
 			networkListener: this.deps.networkListener(),
 		};
@@ -124,13 +125,13 @@ export class TunnelService {
 		const current = this.config();
 		const hostname = body.mode === "named" ? (body.hostname === undefined ? current.hostname : body.hostname) : null;
 		if (body.mode === "named") {
-			if (!hostname) throw ApiError.badRequest("A named tunnel needs the public hostname you routed to this node in the Cloudflare dashboard");
-			if (!HOSTNAME.test(hostname)) throw ApiError.badRequest(`"${hostname}" is not a valid hostname (use e.g. node-a.example.com, no scheme or path)`);
+			if (!hostname) throw ApiError.badRequest(i18nMsg("A named tunnel needs the public hostname you routed to this node in the Cloudflare dashboard"));
+			if (!HOSTNAME.test(hostname)) throw ApiError.badRequest(i18nMsg('"{hostname}" is not a valid hostname (use e.g. node-a.example.com, no scheme or path)', { hostname }));
 		}
 		if (body.token === null) await this.deps.secrets.delete(TOKEN_SECRET);
 		else if (body.token !== undefined) await this.deps.secrets.set(TOKEN_SECRET, body.token);
 		if (body.mode === "named" && !(await this.hasToken())) {
-			throw ApiError.badRequest("A named tunnel needs the tunnel token from the Cloudflare dashboard");
+			throw ApiError.badRequest(i18nMsg("A named tunnel needs the tunnel token from the Cloudflare dashboard"));
 		}
 		const next: StoredTunnelConfig = { mode: body.mode, hostname: hostname?.toLowerCase() ?? null, autoStart: body.autoStart ?? current.autoStart };
 		const changed = next.mode !== current.mode || next.hostname !== current.hostname || body.token !== undefined;
@@ -146,7 +147,7 @@ export class TunnelService {
 
 	async start(): Promise<TunnelState> {
 		const config = this.config();
-		if (config.mode === "off") throw new ApiError(409, "tunnel_mode_off", "Choose a tunnel mode (quick or named) before starting the tunnel");
+		if (config.mode === "off") throw new ApiError(409, "tunnel_mode_off", i18nMsg("Choose a tunnel mode (quick or named) before starting the tunnel"));
 		await this.startInternal(config);
 		return this.publish();
 	}
@@ -193,7 +194,7 @@ export class TunnelService {
 	private async startInternal(config: StoredTunnelConfig): Promise<void> {
 		const cloudflared = await this.detect();
 		if (!cloudflared.installed && !this.deps.createManager) {
-			throw new ApiError(409, "cloudflared_not_installed", "cloudflared is not installed. Install it (macOS: brew install cloudflared) and try again.");
+			throw new ApiError(409, "cloudflared_not_installed", i18nMsg("cloudflared is not installed. Install it (macOS: brew install cloudflared) and try again."));
 		}
 		const manager = this.ensureManager();
 		try {
@@ -202,11 +203,11 @@ export class TunnelService {
 				return;
 			}
 			const token = await this.deps.secrets.get(TOKEN_SECRET);
-			if (!token || !config.hostname) throw ApiError.badRequest("The named tunnel needs both its token and its public hostname");
+			if (!token || !config.hostname) throw ApiError.badRequest(i18nMsg("The named tunnel needs both its token and its public hostname"));
 			await manager.start({ mode: "named", token, hostname: config.hostname });
 		} catch (error) {
-			// The manager validates the named-tunnel token charset and hostname with TypeError.
-			if (error instanceof TypeError) throw ApiError.badRequest(error.message);
+			// The manager validates the named-tunnel token charset and hostname with `TunnelConfigError`.
+			if (error instanceof TunnelConfigError) throw ApiError.badRequest(error.detail);
 			throw error;
 		}
 	}

@@ -1,4 +1,5 @@
 import { ulid } from "@clam/agent-network";
+import { i18nMsg, plainMsg, type I18nMessage } from "@clam/contracts";
 import type { SessionEvent, TaskResult, TaskStatus } from "@clam/contracts";
 import { agents, projects, workspaceMembers } from "@clam/database";
 import { buildBrief, buildCompletionReminder, buildResumePrompt, formatAuthor, hasPendingQuestion, isTerminalStatus, normalizeRepoUrl, strictestApprovalMode, type MessageKind } from "@clam/task-engine";
@@ -106,24 +107,24 @@ export class TaskExecutor implements ExecutorApi {
 		// No await before the insert: a concurrent duplicate delivery cannot interleave between the lookup and the insert.
 		const existing = this.store.find(request.taskId);
 		if (existing) {
-			if (existing.peerId !== peerId || existing.direction !== "incoming") throw new ApiError(409, "idempotency_conflict", "That task id belongs to another task");
+			if (existing.peerId !== peerId || existing.direction !== "incoming") throw new ApiError(409, "idempotency_conflict", i18nMsg("That task id belongs to another task"));
 			return { row: existing, created: false };
 		}
 		const peer = this.ctx.network.peers.row(peerId);
-		if (!peer || peer.status === "revoked") throw new ApiError(403, "forbidden", "The sender is not a paired peer");
+		if (!peer || peer.status === "revoked") throw new ApiError(403, "forbidden", i18nMsg("The sender is not a paired peer"));
 		const member = this.ctx.db
 			.select()
 			.from(workspaceMembers)
 			.where(and(eq(workspaceMembers.workspaceId, request.workspaceId), eq(workspaceMembers.memberId, peerId), isNull(workspaceMembers.revokedAt)))
 			.get();
-		if (!member) throw new ApiError(403, "forbidden", "The sender is not a member of that workspace on this node");
+		if (!member) throw new ApiError(403, "forbidden", i18nMsg("The sender is not a member of that workspace on this node"));
 		const ref = request.projectRef ?? null;
 		const repo = ref ? normalizeRepoUrl(ref.repoUrl) : null;
-		if (ref && !repo) throw ApiError.badRequest("projectRef.repoUrl is not a GitHub repository URL");
-		if (!ref && request.deliverAs === "branch") throw ApiError.badRequest("A task delivered as a branch needs projectRef (the GitHub repository)");
-		if (request.inputFiles && request.inputFiles.size > MAX_ARTIFACT_BYTES) throw new ApiError(413, "input_too_large", "The input files are larger than this node accepts");
+		if (ref && !repo) throw ApiError.badRequest(i18nMsg("projectRef.repoUrl is not a GitHub repository URL"));
+		if (!ref && request.deliverAs === "branch") throw ApiError.badRequest(i18nMsg("A task delivered as a branch needs projectRef (the GitHub repository)"));
+		if (request.inputFiles && request.inputFiles.size > MAX_ARTIFACT_BYTES) throw new ApiError(413, "input_too_large", i18nMsg("The input files are larger than this node accepts"));
 		const agent = request.targetAgentId ? this.ompAgent(request.targetAgentId) : null;
-		if (request.targetAgentId && !agent) throw new ApiError(400, "unknown_agent", "The requested agent does not exist on this node");
+		if (request.targetAgentId && !agent) throw new ApiError(400, "unknown_agent", i18nMsg("The requested agent does not exist on this node"));
 
 		const row = this.store.insert({
 			id: request.taskId,
@@ -150,7 +151,7 @@ export class TaskExecutor implements ExecutorApi {
 			executorAgentName: agent?.name ?? null,
 			correlationId: request.correlationId,
 		});
-		const event = this.store.appendEvent(row.id, { type: "status", summary: `Offered by ${peer.name}`, payload: { from: null, to: "offered", reason: null } });
+		const event = this.store.appendEvent(row.id, { type: "status", summary: i18nMsg("Offered by {name}", { name: peer.name }), payload: { from: null, to: "offered", reason: null } });
 		const candidates = repo ? this.candidateProjects(repo.key) : [];
 		const onlyCandidate = candidates.length === 1 ? candidates[0] : undefined;
 		// A task without a repository needs no matching project: auto-accepting gives it a folder of its own.
@@ -167,7 +168,7 @@ export class TaskExecutor implements ExecutorApi {
 
 	async decide(taskId: string, body: DecideInput): Promise<TaskRow> {
 		const task = this.store.get(taskId);
-		if (task.direction !== "incoming") throw ApiError.conflict("Only the node that executes a task can accept or reject it");
+		if (task.direction !== "incoming") throw ApiError.conflict(i18nMsg("Only the node that executes a task can accept or reject it"));
 		if (body.decision === "reject") {
 			const { event } = this.store.transition(taskId, "rejected", { reason: body.reason, from: ["offered"] });
 			this.hub.changed(taskId, { events: [event] });
@@ -180,12 +181,12 @@ export class TaskExecutor implements ExecutorApi {
 	private accept(task: TaskRow, choice: { projectId?: string; agentId?: string }): TaskRow {
 		const reaccept = task.status === "blocked";
 		if (task.status !== "offered" && !(reaccept && execState(task).blockedFor === "tree")) {
-			throw ApiError.conflict(`Task is ${task.status}; only an offered task (or one blocked on its working tree) can be accepted`, { status: task.status });
+			throw ApiError.conflict(i18nMsg("Task is {status}; only an offered task (or one blocked on its working tree) can be accepted", { status: task.status }), { status: task.status });
 		}
 		const project = task.repoUrl === null ? this.folderProject(task, choice.projectId) : this.repoProject(task, choice.projectId);
 		const agentId = choice.agentId ?? task.executorAgentId;
 		const agent = agentId ? this.ompAgent(agentId) : this.ctx.db.select().from(agents).where(eq(agents.runtime, "omp")).orderBy(asc(agents.createdAt)).get();
-		if (!agent) throw agentId ? new ApiError(400, "unknown_agent", "The agent does not exist on this node") : ApiError.unavailable("This node has no OMP agent configured");
+		if (!agent) throw agentId ? new ApiError(400, "unknown_agent", i18nMsg("The agent does not exist on this node")) : ApiError.unavailable(i18nMsg("This node has no OMP agent configured"));
 
 		const { event } = this.store.transition(task.id, "accepted", {
 			patch: { projectId: project.id, executorAgentId: agent.id, executorAgentName: agent.name },
@@ -203,14 +204,14 @@ export class TaskExecutor implements ExecutorApi {
 		const candidates = this.candidateProjects(key);
 		const projectId = chosen ?? task.projectId ?? (candidates.length === 1 ? candidates[0]?.id : undefined);
 		if (!projectId) {
-			throw new ApiError(409, "project_required", candidates.length === 0 ? "No local project is linked to this repository; choose a project explicitly" : "Several local projects match this repository; choose one", {
+			throw new ApiError(409, "project_required", candidates.length === 0 ? i18nMsg("No local project is linked to this repository; choose a project explicitly") : i18nMsg("Several local projects match this repository; choose one"), {
 				candidates: candidates.map((p) => p.id),
 			});
 		}
 		const project = this.ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
 		if (!project) throw ApiError.notFound("Project");
 		if (!project.repository || `${project.repository.owner}/${project.repository.name}`.toLowerCase() !== key) {
-			throw new ApiError(409, "project_mismatch", "That project is not linked to the task's repository");
+			throw new ApiError(409, "project_mismatch", i18nMsg("That project is not linked to the task's repository"));
 		}
 		return project;
 	}
@@ -224,7 +225,7 @@ export class TaskExecutor implements ExecutorApi {
 		if (projectId) {
 			const project = this.ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
 			if (!project) throw ApiError.notFound("Project");
-			if (project.workspaceId !== task.workspaceId) throw new ApiError(409, "project_mismatch", "That project belongs to another workspace than the task");
+			if (project.workspaceId !== task.workspaceId) throw new ApiError(409, "project_mismatch", i18nMsg("That project belongs to another workspace than the task"));
 			return project;
 		}
 		return createManagedProject(this.ctx, { workspaceId: task.workspaceId, name: `Task ${task.id.slice(-6)}: ${task.title}`.slice(0, 80) });
@@ -265,7 +266,7 @@ export class TaskExecutor implements ExecutorApi {
 			busy.add(task.projectId);
 			const { row, event } = this.store.transition(task.id, "running", { from: ["accepted"] });
 			this.hub.changed(task.id, { events: [event] });
-			this.track(this.run(row).catch((error: unknown) => this.failTask(task.id, `The task could not be started: ${errorText(error)}`)));
+			this.track(this.run(row).catch((error: unknown) => this.failTask(task.id, i18nMsg("The task could not be started: {error}", { error: errorText(error) }))));
 		}
 	}
 
@@ -275,7 +276,7 @@ export class TaskExecutor implements ExecutorApi {
 		const project = task.projectId ? this.ctx.db.select().from(projects).where(eq(projects.id, task.projectId)).get() : undefined;
 		const agent = task.executorAgentId ? this.ompAgent(task.executorAgentId) : undefined;
 		if (!project || !agent) {
-			await this.failTask(task.id, "The project or agent of this task no longer exists on this node");
+			await this.failTask(task.id, i18nMsg("The project or agent of this task no longer exists on this node"));
 			return;
 		}
 		const ref: ProjectRef = { id: project.id, path: project.path, repository: project.repository ?? null };
@@ -286,7 +287,7 @@ export class TaskExecutor implements ExecutorApi {
 			try {
 				folder = await this.hub.files.prepareFolder(task, project.path);
 			} catch (error) {
-				await this.failTask(task.id, `The task folder could not be prepared: ${errorText(error)}`);
+				await this.failTask(task.id, i18nMsg("The task folder could not be prepared: {error}", { error: errorText(error) }));
 				return;
 			}
 		}
@@ -340,7 +341,7 @@ export class TaskExecutor implements ExecutorApi {
 		// The brief carries the thread so far: those messages have reached the agent and must not be injected a second time.
 		for (const m of thread) if (m.injectedSessionId === null) this.store.markInjected(m.id, sessionId);
 		this.store.patchExecState(task.id, { sessionStarted: true });
-		const event = this.store.appendEvent(task.id, { type: "progress", summary: `Agent session started${prepared ? ` on ${prepared.workBranch}` : ""}` });
+		const event = this.store.appendEvent(task.id, { type: "progress", summary: prepared ? i18nMsg("Agent session started on {branch}", { branch: prepared.workBranch }) : i18nMsg("Agent session started") });
 		this.hub.changed(task.id, { events: [event] });
 	}
 
@@ -351,7 +352,7 @@ export class TaskExecutor implements ExecutorApi {
 	}
 
 	/** Caller holds the task lock (or is the only actor). */
-	private blockIfRunning(taskId: string, blockedFor: BlockedFor, reason: string, patch: Partial<ExecState> = {}): void {
+	private blockIfRunning(taskId: string, blockedFor: BlockedFor, reason: string | I18nMessage, patch: Partial<ExecState> = {}): void {
 		const task = this.store.get(taskId);
 		if (task.status !== "running") return;
 		const { event } = this.store.transition(taskId, "blocked", { reason, from: ["running"] });
@@ -390,7 +391,7 @@ export class TaskExecutor implements ExecutorApi {
 				else if (event.status === "aborted" && !state.cancelling) this.store.patchExecState(taskId, { aborted: true });
 				return;
 			case "ui_request":
-				this.blockIfRunning(taskId, "approval", event.method === "ask" ? `Waiting for an answer on ${this.hub.nodeName()}` : `Waiting for approval on ${this.hub.nodeName()}`);
+				this.blockIfRunning(taskId, "approval", event.method === "ask" ? i18nMsg("Waiting for an answer on {node}", { node: this.hub.nodeName() }) : i18nMsg("Waiting for approval on {node}", { node: this.hub.nodeName() }));
 				return;
 			case "ui_request_resolved": {
 				if (task.status !== "blocked" || state.blockedFor !== "approval") return;
@@ -426,14 +427,14 @@ export class TaskExecutor implements ExecutorApi {
 		if (this.ctx.runtime.get(sessionId)?.status().state === "busy" || this.hasMessageAboutToBeInjected(current.id)) return;
 
 		if (state.completion) return this.finalize(current, state.completion.outcome, state.completion.summary, false);
-		if (state.promptError) return this.failTask(task.id, `The agent run failed: ${state.promptError}`, { holdsLock: true });
+		if (state.promptError) return this.failTask(task.id, i18nMsg("The agent run failed: {error}", { error: state.promptError }), { holdsLock: true });
 		if (state.aborted) {
-			this.blockIfRunning(task.id, "aborted", "The run was aborted on this node; send a message to resume", { aborted: undefined });
+			this.blockIfRunning(task.id, "aborted", i18nMsg("The run was aborted on this node; send a message to resume"), { aborted: undefined });
 			return;
 		}
 		const thread = this.store.messages(task.id).map((m) => ({ id: m.id, kind: m.kind as MessageKind, authorNodeId: m.authorNodeId, createdAt: m.createdAt }));
 		if (hasPendingQuestion(thread, this.ctx.identity.nodeId)) {
-			this.blockIfRunning(task.id, "question", `Waiting for an answer from ${current.senderNodeName}`);
+			this.blockIfRunning(task.id, "question", i18nMsg("Waiting for an answer from {node}", { node: current.senderNodeName }));
 			return;
 		}
 		if (!state.reminderSent) {
@@ -473,9 +474,9 @@ export class TaskExecutor implements ExecutorApi {
 
 	async complete(sessionId: string, input: { taskId?: string; outcome: Completion["outcome"]; summary: string }): Promise<string> {
 		const found = this.store.byExecutorSession(sessionId);
-		if (!found) throw new ApiError(409, "not_a_task_session", "This session is not executing a CL Agent Mesh task, so mesh_complete does not apply");
+		if (!found) throw new ApiError(409, "not_a_task_session", i18nMsg("This session is not executing a CL Agent Mesh task, so mesh_complete does not apply"));
 		if (input.taskId !== undefined && input.taskId !== found.id) {
-			throw new ApiError(409, "wrong_task", `This session executes task ${found.id}, not ${input.taskId}; call mesh_complete with taskId "${found.id}"`);
+			throw new ApiError(409, "wrong_task", i18nMsg('This session executes task {id}, not {taskId}; call mesh_complete with taskId "{id}"', { id: found.id, taskId: input.taskId }));
 		}
 		return this.lock.run(found.id, async () => {
 			const task = this.store.get(found.id);
@@ -485,13 +486,13 @@ export class TaskExecutor implements ExecutorApi {
 				return `Task ${task.id} continues on another node and this node no longer owns it. Your result was stored for review only. End your turn now.`;
 			}
 			const handoffId = execState(task).handoffId;
-			if (handoffId !== undefined) throw new ApiError(409, "handoff_in_progress", `Task ${task.id} is being handed over (handoff ${handoffId}); mesh_complete is refused. End your turn now.`, { handoffId });
+			if (handoffId !== undefined) throw new ApiError(409, "handoff_in_progress", i18nMsg("Task {id} is being handed over (handoff {handoffId}); mesh_complete is refused. End your turn now.", { id: task.id, handoffId }), { handoffId });
 			if (task.status !== "running" && task.status !== "blocked") {
-				throw new ApiError(409, "task_not_active", `Task ${task.id} is ${task.status}; mesh_complete only applies to a running task. Stop working on it and end your turn.`);
+				throw new ApiError(409, "task_not_active", i18nMsg("Task {id} is {status}; mesh_complete only applies to a running task. Stop working on it and end your turn.", { id: task.id, status: task.status }));
 			}
 			const completion: Completion = { outcome: input.outcome, summary: input.summary, at: new Date().toISOString() };
 			this.store.patchExecState(task.id, { completion });
-			const event = this.store.appendEvent(task.id, { type: "note", summary: `Agent reported ${input.outcome}: ${input.summary.replace(/\s+/g, " ").trim().slice(0, 140)}`, payload: { outcome: input.outcome } });
+			const event = this.store.appendEvent(task.id, { type: "note", summary: i18nMsg("Agent reported {outcome}: {summary}", { outcome: input.outcome, summary: input.summary.replace(/\s+/g, " ").trim().slice(0, 140) }), payload: { outcome: input.outcome } });
 			this.hub.changed(task.id, { events: [event] });
 			return `Completion recorded (${input.outcome}). End your turn now; CL Agent Mesh finalises the task.`;
 		});
@@ -532,7 +533,7 @@ export class TaskExecutor implements ExecutorApi {
 		const prepared = execState(task).prepared;
 		const project = task.projectId ? this.ctx.db.select().from(projects).where(eq(projects.id, task.projectId)).get() : undefined;
 		if (!prepared || !project) {
-			await this.failTask(task.id, "The task branch or its project is gone, so the result could not be delivered", { holdsLock: true });
+			await this.failTask(task.id, i18nMsg("The task branch or its project is gone, so the result could not be delivered"), { holdsLock: true });
 			return null;
 		}
 		try {
@@ -541,7 +542,7 @@ export class TaskExecutor implements ExecutorApi {
 			this.hub.changed(task.id, { events: [event] });
 			return { summary, autoCompleted, branch: delivery.branch, commit: delivery.commit, pushed: delivery.pushed, compareUrl: delivery.compareUrl, artifacts: delivery.artifacts, files: null };
 		} catch (error) {
-			await this.failTask(task.id, `Delivering the result failed: ${errorText(error)}`, { holdsLock: true });
+			await this.failTask(task.id, i18nMsg("Delivering the result failed: {error}", { error: errorText(error) }), { holdsLock: true });
 			return null;
 		}
 	}
@@ -550,18 +551,24 @@ export class TaskExecutor implements ExecutorApi {
 	private async deliverFiles(task: TaskRow, summary: string, autoCompleted: boolean): Promise<TaskResult | null> {
 		const project = task.projectId ? this.ctx.db.select().from(projects).where(eq(projects.id, task.projectId)).get() : undefined;
 		if (!project) {
-			await this.failTask(task.id, "The task folder is gone, so the result files could not be delivered", { holdsLock: true });
+			await this.failTask(task.id, i18nMsg("The task folder is gone, so the result files could not be delivered"), { holdsLock: true });
 			return null;
 		}
 		try {
 			const { files, withheld } = await this.hub.files.collectResult(task, project.path);
-			const note = files ? `Result files bundled: ${files.fileCount} file(s).` : "The agent created or changed no files.";
-			const withheldNote = withheld.length > 0 ? ` Not returned: ${withheld.slice(0, 10).map((w) => `${w.path} (${w.reason})`).join("; ")}.` : "";
-			const event = this.store.appendEvent(task.id, { type: "progress", summary: `${note}${withheldNote}`, payload: { files: files?.fileCount ?? 0, withheld: withheld.length } });
+			const notReturned = withheld.slice(0, 10).map((w) => `${w.path} (${w.reason})`).join("; ");
+			const summaryNote = files
+				? withheld.length > 0
+					? i18nMsg("Result files bundled: {count} file(s). Not returned: {withheld}.", { count: files.fileCount, withheld: notReturned })
+					: i18nMsg("Result files bundled: {count} file(s).", { count: files.fileCount })
+				: withheld.length > 0
+					? i18nMsg("The agent created or changed no files. Not returned: {withheld}.", { withheld: notReturned })
+					: i18nMsg("The agent created or changed no files.");
+			const event = this.store.appendEvent(task.id, { type: "progress", summary: summaryNote, payload: { files: files?.fileCount ?? 0, withheld: withheld.length } });
 			this.hub.changed(task.id, { events: [event] });
 			return { summary: withheld.length > 0 ? `${summary}\n\n(Files not returned: ${withheld.map((w) => `${w.path} — ${w.reason}`).join("; ")})` : summary, autoCompleted, branch: null, commit: null, pushed: false, compareUrl: null, artifacts: [], files };
 		} catch (error) {
-			await this.failTask(task.id, `Delivering the result files failed: ${errorText(error)} The files are still in the task folder on ${this.hub.nodeName()}.`, { holdsLock: true });
+			await this.failTask(task.id, i18nMsg("Delivering the result files failed: {error} The files are still in the task folder on {node}.", { error: errorText(error), node: this.hub.nodeName() }), { holdsLock: true });
 			return null;
 		}
 	}
@@ -587,19 +594,21 @@ export class TaskExecutor implements ExecutorApi {
 	 * Fail an active task, recording what it left behind. Takes the task lock itself unless the caller already
 	 * `holdsLock`. A task that already ended is left alone.
 	 */
-	private async failTask(taskId: string, reason: string, o: { holdsLock?: boolean; summary?: string; autoCompleted?: boolean } = {}): Promise<void> {
+	private async failTask(taskId: string, reason: string | I18nMessage, o: { holdsLock?: boolean; summary?: string; autoCompleted?: boolean } = {}): Promise<void> {
+		const say = typeof reason === "string" ? plainMsg(reason) : reason;
 		const body = async () => {
 			const task = this.store.find(taskId);
 			if (!task || (task.status !== "running" && task.status !== "blocked")) return;
 			const left = await this.leftovers(task);
-			const text = left.note ? `${reason}; ${left.note}` : reason;
-			await this.conclude(taskId, "failed", text, { summary: o.summary ?? reason, autoCompleted: o.autoCompleted ?? false, branch: left.branch, commit: null, pushed: false, compareUrl: null, artifacts: [], files: null });
+			// A leftovers note is appended as text, so the combined reason has no structured twin.
+			const text = left.note ? plainMsg(`${say.text}; ${left.note}`) : say;
+			await this.conclude(taskId, "failed", text, { summary: o.summary ?? say.text, autoCompleted: o.autoCompleted ?? false, branch: left.branch, commit: null, pushed: false, compareUrl: null, artifacts: [], files: null });
 		};
 		if (o.holdsLock) await body();
 		else await this.lock.run(taskId, body);
 	}
 
-	private async conclude(taskId: string, to: "succeeded" | "failed", reason: string | null, result: TaskResult): Promise<void> {
+	private async conclude(taskId: string, to: "succeeded" | "failed", reason: I18nMessage | string | null, result: TaskResult): Promise<void> {
 		if (this.lostOwnership(taskId)) {
 			// Fenced while the run finished: the outcome is for human review only, the task's status and result stay as they are.
 			this.recordLateResult(taskId, to, result.summary);
@@ -607,7 +616,7 @@ export class TaskExecutor implements ExecutorApi {
 			return;
 		}
 		const { event } = this.store.transition(taskId, to, { reason, patch: { result }, from: ["running", "blocked"] });
-		const resultEvent = this.store.appendEvent(taskId, { type: "result", summary: `Result: ${result.summary.replace(/\s+/g, " ").trim().slice(0, 300)}`, payload: result });
+		const resultEvent = this.store.appendEvent(taskId, { type: "result", summary: i18nMsg("Result: {summary}", { summary: result.summary.replace(/\s+/g, " ").trim().slice(0, 300) }), payload: result });
 		this.hub.changed(taskId, { events: [event, resultEvent] });
 		// A task that came home has no mirror row polling for its end: the delegating session is told directly.
 		if (this.store.isSelfPeer(this.store.get(taskId))) void this.hub.injector.injectStatusNote(this.store.get(taskId));
@@ -631,11 +640,12 @@ export class TaskExecutor implements ExecutorApi {
 		this.drain();
 	}
 
-	async cancel(taskId: string, options: { reason: string | null; by: "sender" | "local" | "handoff" }): Promise<TaskRow> {
+	async cancel(taskId: string, options: { reason: string | I18nMessage | null; by: "sender" | "local" | "handoff" }): Promise<TaskRow> {
 		const first = this.store.get(taskId);
 		if (isTerminalStatus(first.status as TaskStatus)) return first;
 		if (options.by !== "handoff") this.assertNotMoving(first);
-		const why = options.reason ?? (options.by === "sender" ? `Cancelled by ${first.senderNodeName}` : options.by === "handoff" ? `Cancelled by the handoff of this task on ${this.hub.nodeName()}` : `Cancelled on ${this.hub.nodeName()}`);
+		const why = options.reason ?? (options.by === "sender" ? i18nMsg("Cancelled by {node}", { node: first.senderNodeName }) : options.by === "handoff" ? i18nMsg("Cancelled by the handoff of this task on {node}", { node: this.hub.nodeName() }) : i18nMsg("Cancelled on {node}", { node: this.hub.nodeName() }));
+		const whyText = typeof why === "string" ? why : why.text;
 		return this.lock.run(taskId, async () => {
 			const task = this.store.get(taskId);
 			if (isTerminalStatus(task.status as TaskStatus)) return task;
@@ -654,7 +664,7 @@ export class TaskExecutor implements ExecutorApi {
 				}
 			}
 			const left = await this.leftovers(this.store.get(taskId));
-			const { event } = this.store.transition(taskId, "cancelled", { reason: left.note ? `${why}; ${left.note}` : why, from: ["running", "blocked"] });
+			const { event } = this.store.transition(taskId, "cancelled", { reason: left.note ? `${whyText}; ${left.note}` : why, from: ["running", "blocked"] });
 			this.hub.changed(taskId, { events: [event] });
 			await this.release(taskId);
 			return this.store.get(taskId);
@@ -679,9 +689,9 @@ export class TaskExecutor implements ExecutorApi {
 
 	/** 409 for the sender's or a human's request against a task that a handoff holds or that moved away. */
 	private assertNotMoving(task: TaskRow): void {
-		if (task.fenced) throw new ApiError(409, "task_fenced", `Task ${task.id} continues on another node (epoch ${Math.max(task.highestSeenEpoch, task.epoch)})`, { currentEpoch: Math.max(task.highestSeenEpoch, task.epoch) });
+		if (task.fenced) throw new ApiError(409, "task_fenced", i18nMsg("Task {id} continues on another node (epoch {epoch})", { id: task.id, epoch: Math.max(task.highestSeenEpoch, task.epoch) }), { currentEpoch: Math.max(task.highestSeenEpoch, task.epoch) });
 		const handoffId = execState(task).handoffId;
-		if (handoffId !== undefined) throw new ApiError(409, "handoff_in_progress", `Task ${task.id} is being handed over (handoff ${handoffId}); cancel the handoff first`, { handoffId });
+		if (handoffId !== undefined) throw new ApiError(409, "handoff_in_progress", i18nMsg("Task {id} is being handed over (handoff {handoffId}); cancel the handoff first", { id: task.id, handoffId }), { handoffId });
 	}
 
 	/** The local owner guard (`FenceApi.assertOwner`, re-reads the row): true when this node lost the task. */
@@ -702,7 +712,7 @@ export class TaskExecutor implements ExecutorApi {
 		this.store.patchExecState(taskId, { lateResultAt: new Date().toISOString() });
 		const event = this.store.appendEvent(taskId, {
 			type: "late_result",
-			summary: `Late result (${outcome}) from ${this.hub.nodeName()}, which no longer owns this task: ${summary.replace(/\s+/g, " ").trim().slice(0, 200)}`,
+			summary: i18nMsg("Late result ({outcome}) from {node}, which no longer owns this task: {summary}", { outcome, node: this.hub.nodeName(), summary: summary.replace(/\s+/g, " ").trim().slice(0, 200) }),
 			payload: { outcome, summary, epoch: task.epoch, currentEpoch: Math.max(task.highestSeenEpoch, task.epoch) },
 		});
 		this.hub.changed(taskId, { events: [event], notifyPeer: false });
@@ -723,10 +733,15 @@ export class TaskExecutor implements ExecutorApi {
 
 	adoptHandedOver(taskId: string): void {
 		const task = this.store.get(taskId);
-		if (task.fenced) throw new ApiError(409, "task_fenced", `Task ${taskId} is fenced on this node and cannot be adopted`);
+		if (task.fenced) throw new ApiError(409, "task_fenced", i18nMsg("Task {id} is fenced on this node and cannot be adopted", { id: taskId }));
 		const sessionId = task.executorSessionId;
 		if (task.direction !== "incoming" || task.status !== "running" || !sessionId) {
-			throw ApiError.conflict(`Task ${taskId} is ${task.status}${sessionId ? "" : " without an agent session"}; only a running task with a session can be adopted`, { status: task.status });
+			throw ApiError.conflict(
+				sessionId
+					? i18nMsg("Task {id} is {status}; only a running task with a session can be adopted", { id: taskId, status: task.status })
+					: i18nMsg("Task {id} is {status} without an agent session; only a running task with a session can be adopted", { id: taskId, status: task.status }),
+				{ status: task.status },
+			);
 		}
 		this.registerOverrides(task, sessionId);
 		this.sessionTasks.set(sessionId, taskId);
@@ -754,7 +769,7 @@ export class TaskExecutor implements ExecutorApi {
 				return;
 			}
 			await this.ctx.sessions.prompt(sessionId, { message: buildResumePrompt({ taskId, title: task.title }), clientId: `task_${taskId}_thaw_${handoffId}` });
-			const event = this.store.appendEvent(taskId, { type: "progress", summary: "The handoff ended without moving the task; the agent was asked to continue" });
+			const event = this.store.appendEvent(taskId, { type: "progress", summary: i18nMsg("The handoff ended without moving the task; the agent was asked to continue") });
 			this.hub.changed(taskId, { events: [event] });
 		});
 		void this.hub.injector.retryPending();
@@ -781,7 +796,7 @@ export class TaskExecutor implements ExecutorApi {
 		if (task.fenced || this.fence.isFrozen(task.id)) return;
 		const state = execState(task);
 		if (state.cancelling) {
-			await this.cancel(task.id, { reason: "Cancelled before the node restarted", by: "local" });
+			await this.cancel(task.id, { reason: i18nMsg("Cancelled before the node restarted"), by: "local" });
 			return;
 		}
 		const sessionId = task.executorSessionId;
@@ -796,7 +811,7 @@ export class TaskExecutor implements ExecutorApi {
 			}
 		}
 		if (!sessionId || !sessionExists || !projectExists) {
-			await this.failTask(task.id, "The node restarted and the task's agent session or project no longer exists");
+			await this.failTask(task.id, i18nMsg("The node restarted and the task's agent session or project no longer exists"));
 			return;
 		}
 		this.sessionTasks.set(sessionId, task.id);
@@ -817,7 +832,7 @@ export class TaskExecutor implements ExecutorApi {
 				return;
 			}
 			await this.ctx.sessions.prompt(sessionId, { message: buildResumePrompt({ taskId: task.id, title: task.title }), clientId: `task_${task.id}_resume_${this.bootId}` });
-			const event = this.store.appendEvent(task.id, { type: "progress", summary: "Node restarted; the agent was asked to continue" });
+			const event = this.store.appendEvent(task.id, { type: "progress", summary: i18nMsg("Node restarted; the agent was asked to continue") });
 			this.hub.changed(task.id, { events: [event] });
 		});
 	}

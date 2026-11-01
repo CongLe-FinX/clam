@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowRightLeft, MoreHorizontal, PanelBottom, PanelRight, Terminal, UserPlus, Users } from "lucide-react";
 import { type ReactNode, useRef, useState } from "react";
+import { t } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/ui/sheet";
 
@@ -53,7 +54,7 @@ export function SessionMenu({
 			<SheetTrigger asChild>
 				<button
 					type="button"
-					aria-label={approvals > 0 ? `More actions, ${approvals} approval${approvals === 1 ? "" : "s"} waiting` : "More actions"}
+					aria-label={approvals > 0 ? t("More actions, {count, plural, one {# approval} other {# approvals}} waiting", { count: approvals }) : t("More actions")}
 					className="relative grid size-11 shrink-0 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:bg-surface-2 aria-expanded:bg-surface-3 [&_svg]:size-5"
 				>
 					<MoreHorizontal />
@@ -95,23 +96,23 @@ export function SessionMenu({
 						setDy(0);
 					}}
 				/>
-				<SheetTitle className="sr-only">Session actions</SheetTitle>
-				<SheetDescription className="sr-only">Panels and actions for this session.</SheetDescription>
-				<nav aria-label="Session actions" className="flex flex-col gap-0.5">
-					<Row icon={<PanelRight />} label="Context" onClick={run(onToggleRight)} />
+				<SheetTitle className="sr-only">{t("Session actions")}</SheetTitle>
+				<SheetDescription className="sr-only">{t("Panels and actions for this session.")}</SheetDescription>
+				<nav aria-label={t("Session actions")} className="flex flex-col gap-0.5">
+					<Row icon={<PanelRight />} label={t("Context")} onClick={run(onToggleRight)} />
 					<Row
 						icon={<Users />}
-						label="Team"
+						label={t("Team")}
 						onClick={run(onOpenTeam)}
 						badge={teamUnread > 0 ? <span className="tabular grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 font-mono text-2xs font-semibold text-accent-foreground">{teamUnread}</span> : null}
 					/>
-					<Row icon={<PanelBottom />} label="Runtime log" onClick={run(onToggleLog)} />
-					{canAdd ? <Row icon={<UserPlus />} label="Add agent" onClick={run(onAddAgent)} /> : null}
-					{canAdd ? <Row icon={<ArrowRightLeft />} label="Hand over…" onClick={run(onHandover)} /> : null}
+					<Row icon={<PanelBottom />} label={t("Runtime log")} onClick={run(onToggleLog)} />
+					{canAdd ? <Row icon={<UserPlus />} label={t("Add agent")} onClick={run(onAddAgent)} /> : null}
+					{canAdd ? <Row icon={<ArrowRightLeft />} label={t("Hand over…")} onClick={run(onHandover)} /> : null}
 					{readOnly ? null : (
 						<Link to="/terminal" search={{ project: projectId }} onClick={() => setOpen(false)} className={item}>
 							<Terminal />
-							<span className="flex-1">Open terminal here</span>
+							<span className="flex-1">{t("Open terminal here")}</span>
 						</Link>
 					)}
 				</nav>

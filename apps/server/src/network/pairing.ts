@@ -27,6 +27,7 @@ import {
 	type NodePreview,
 	type OutgoingPairing,
 	type PairingRequest,
+	i18nMsg,
 } from "@clam/contracts";
 import { pairingInvitations, pairingJoins, pairingRequests, workspaceMembers, workspaces } from "@clam/database";
 import type { ClamDb } from "@clam/database";
@@ -51,7 +52,7 @@ const CONFIRM_RETRY_MS = 10_000;
 const JOIN_FIRST_ATTEMPT = { attempts: 3, baseDelayMs: 400, maxDelayMs: 3000 } as const;
 const CONFIRM_ATTEMPTS = { attempts: 3, baseDelayMs: 500, maxDelayMs: 4000 } as const;
 
-const notFound = () => new ApiError(404, "not_found", "Not found");
+const notFound = () => new ApiError(404, "not_found", i18nMsg("Not found"));
 
 export interface PairingServiceDeps {
 	db: ClamDb;
@@ -79,18 +80,18 @@ function isCapability(value: string): value is Capability {
 function capabilitiesOf(values: readonly string[]): Capability[] {
 	const out = [...new Set(values)];
 	const invalid = out.find((v) => !isCapability(v));
-	if (invalid !== undefined) throw ApiError.badRequest(`Unknown capability "${invalid.slice(0, 64)}"`);
+	if (invalid !== undefined) throw ApiError.badRequest(i18nMsg('Unknown capability "{capability}"', { capability: invalid.slice(0, 64) }));
 	return out as Capability[];
 }
 
 /** Maps a failed call to a remote node onto the local API's error envelope. */
 function remoteError(error: unknown, what: string): ApiError {
 	if (error instanceof NetworkError) {
-		if (error.status === 404) return new ApiError(422, "invitation_rejected", "The invitation code is wrong, expired, locked or already used");
+		if (error.status === 404) return new ApiError(422, "invitation_rejected", i18nMsg("The invitation code is wrong, expired, locked or already used"));
 		if (error.code === "invalid_peer_url") return ApiError.badRequest(error.message);
-		return new ApiError(502, "peer_unreachable", `${what}: ${error.message}`, { code: error.code, status: error.status });
+		return new ApiError(502, "peer_unreachable", i18nMsg("{what}: {error}", { what, error: error.message }), { code: error.code, status: error.status });
 	}
-	return error instanceof ApiError ? error : new ApiError(502, "peer_unreachable", `${what}: ${errorText(error)}`);
+	return error instanceof ApiError ? error : new ApiError(502, "peer_unreachable", i18nMsg("{what}: {error}", { what, error: errorText(error) }));
 }
 
 /**
@@ -274,13 +275,13 @@ export class PairingService {
 
 			// From here on the joiner has proven it knows the code, so specific errors are not an oracle.
 			const joinerUrl = normalizePeerUrl(req.node.publicUrl, { allowLoopbackHttp: this.deps.allowLoopbackPeers });
-			if (!joinerUrl) throw ApiError.badRequest("node.publicUrl must be an https:// URL");
+			if (!joinerUrl) throw ApiError.badRequest(i18nMsg("node.publicUrl must be an https:// URL"));
 			const known = this.deps.peers.row(req.node.nodeId);
-			if (known && known.status !== "revoked") throw ApiError.conflict("This node is already paired");
+			if (known && known.status !== "revoked") throw ApiError.conflict(i18nMsg("This node is already paired"));
 			const workspace = db.select().from(workspaces).where(eq(workspaces.id, invitation.workspaceId)).get();
 			if (!workspace) throw notFound();
 			const publicUrl = this.deps.selfUrl();
-			if (!publicUrl) throw ApiError.unavailable("This node has no public URL (start its tunnel) and cannot complete pairing");
+			if (!publicUrl) throw ApiError.unavailable(i18nMsg("This node has no public URL (start its tunnel) and cannot complete pairing"));
 
 			const nonceInviter = generatePairingNonce();
 			const reply = wire.PairHelloResponse.parse({
@@ -341,9 +342,9 @@ export class PairingService {
 		const state = this.requestState(row);
 		if (state === "expired") {
 			this.setRequestState(row.id, "expired", "The invitation expired before it was approved");
-			throw new ApiError(409, "pairing_expired", "This pairing request expired; create a new invitation");
+			throw new ApiError(409, "pairing_expired", i18nMsg("This pairing request expired; create a new invitation"));
 		}
-		if (state !== "awaiting_approval") throw ApiError.conflict(`This pairing request is already ${state}`);
+		if (state !== "awaiting_approval") throw ApiError.conflict(i18nMsg("This pairing request is already {state}", { state }));
 		// Re-pairing a revoked peer: its old row would refuse the peer's very first signed request (see forgetRevoked).
 		this.deps.peers.forgetRevoked(row.remoteNodeId);
 		this.setRequestState(row.id, "confirming", null, { capabilities });
@@ -354,7 +355,7 @@ export class PairingService {
 	async reject(requestId: string): Promise<PairingRequest> {
 		const row = this.requestRow(requestId);
 		const state = this.requestState(row);
-		if (state !== "awaiting_approval") throw ApiError.conflict(`This pairing request is already ${state}`);
+		if (state !== "awaiting_approval") throw ApiError.conflict(i18nMsg("This pairing request is already {state}", { state }));
 		this.setRequestState(row.id, "rejected", null);
 		await this.deps.invitations.finish(row.invitationId, "revoked");
 		void this.notifyRejection(row.id);
@@ -480,9 +481,9 @@ export class PairingService {
 			throw remoteError(error, `Could not reach ${baseUrl}`);
 		}
 		const parsed = wire.NodeInfo.safeParse(body);
-		if (!parsed.success) throw new ApiError(502, "peer_invalid_response", "That address does not look like a CL Agent Mesh node");
+		if (!parsed.success) throw new ApiError(502, "peer_invalid_response", i18nMsg("That address does not look like a CL Agent Mesh node"));
 		if (!parsed.data.protocolVersions.includes(1)) {
-			throw new ApiError(409, "unsupported_version", `That node speaks protocol versions ${parsed.data.protocolVersions.join(", ")}; this node speaks 1`);
+			throw new ApiError(409, "unsupported_version", i18nMsg("That node speaks protocol versions {versions}; this node speaks 1", { versions: parsed.data.protocolVersions.join(", ") }));
 		}
 		return parsed.data;
 	}
@@ -491,7 +492,9 @@ export class PairingService {
 		const origin = normalizePeerUrl(url, { allowLoopbackHttp: this.deps.allowLoopbackPeers });
 		if (!origin) {
 			throw ApiError.badRequest(
-				this.deps.allowLoopbackPeers ? "The node address must be an https:// URL" : "The node address must be an https:// URL (plain http is only allowed for loopback with CLAM_ALLOW_LOOPBACK_PEERS=1)",
+				this.deps.allowLoopbackPeers
+					? i18nMsg("The node address must be an https:// URL")
+					: i18nMsg("The node address must be an https:// URL (plain http is only allowed for loopback with CLAM_ALLOW_LOOPBACK_PEERS=1)"),
 			);
 		}
 		return origin;
@@ -513,24 +516,24 @@ export class PairingService {
 			invitationId = invitationIdFromCode(code);
 			codeKey = deriveCodeKey(code, invitationId);
 		} catch {
-			throw ApiError.badRequest("That is not a valid invitation code (8 letters and digits, e.g. ABCD-EFGH)");
+			throw ApiError.badRequest(i18nMsg("That is not a valid invitation code (8 letters and digits, e.g. ABCD-EFGH)"));
 		}
 		const expected = normalizeFingerprint(body.expectedFingerprint);
-		if (expected.length !== 64) throw ApiError.badRequest("expectedFingerprint must be the inviter's full SHA-256 fingerprint (64 hex characters)");
+		if (expected.length !== 64) throw ApiError.badRequest(i18nMsg("expectedFingerprint must be the inviter's full SHA-256 fingerprint (64 hex characters)"));
 
 		const info = await this.fetchNodeInfo(url);
 		if (info.fingerprint !== expected) {
-			throw new ApiError(409, "fingerprint_mismatch", "The node at that address presented a different fingerprint than the one you verified. Pairing was not attempted.", {
+			throw new ApiError(409, "fingerprint_mismatch", i18nMsg("The node at that address presented a different fingerprint than the one you verified. Pairing was not attempted."), {
 				presented: info.fingerprint,
 			});
 		}
-		if (info.nodeId === identity.nodeId) throw ApiError.badRequest("That address is this node");
+		if (info.nodeId === identity.nodeId) throw ApiError.badRequest(i18nMsg("That address is this node"));
 		const known = this.deps.peers.row(info.nodeId);
-		if (known && known.status !== "revoked") throw ApiError.conflict("This node is already paired");
+		if (known && known.status !== "revoked") throw ApiError.conflict(i18nMsg("This node is already paired"));
 		const publicUrl = this.deps.selfUrl();
-		if (!publicUrl) throw new ApiError(409, "no_public_url", "Start the Cloudflare Tunnel first: the other node must be able to reach this one to finish pairing");
+		if (!publicUrl) throw new ApiError(409, "no_public_url", i18nMsg("Start the Cloudflare Tunnel first: the other node must be able to reach this one to finish pairing"));
 		const active = db.select().from(pairingJoins).where(and(eq(pairingJoins.invitationId, invitationId), inArray(pairingJoins.state, ["hello_sent", "awaiting_remote_approval"]))).get();
-		if (active && Date.parse(active.expiresAt) > this.now()) throw ApiError.conflict("A join with this invitation is already in progress");
+		if (active && Date.parse(active.expiresAt) > this.now()) throw ApiError.conflict(i18nMsg("A join with this invitation is already in progress"));
 
 		const nonceJoiner = generatePairingNonce();
 		const id = `join_${nonceJoiner.slice(0, 16).replace(/[^A-Za-z0-9]/g, "x")}`;
@@ -577,7 +580,7 @@ export class PairingService {
 				retry: JOIN_FIRST_ATTEMPT,
 			});
 			const parsed = wire.PairHelloResponse.safeParse(result.body);
-			if (!parsed.success) throw new ApiError(502, "peer_invalid_response", "The other node answered the pairing request with an unexpected payload");
+			if (!parsed.success) throw new ApiError(502, "peer_invalid_response", i18nMsg("The other node answered the pairing request with an unexpected payload"));
 			reply = parsed.data;
 		} catch (error) {
 			const mapped = remoteError(error, "Pairing request failed");
@@ -596,8 +599,8 @@ export class PairingService {
 				reply.proof,
 			);
 		if (!proofOk) {
-			const message = "The other node could not prove it knows the invitation code. Pairing was aborted: do not retry with this address.";
-			this.failJoin(id, message);
+			const message = i18nMsg("The other node could not prove it knows the invitation code. Pairing was aborted: do not retry with this address.");
+			this.failJoin(id, message.text);
 			throw new ApiError(422, "inviter_proof_invalid", message);
 		}
 		this.setJoinState(id, "awaiting_remote_approval", null, {

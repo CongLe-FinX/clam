@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { t, T, msg, tr, type Msg } from "@/i18n";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { PasswordDialog } from "@/features/auth/password-dialog";
 import { accessKey, useAccess } from "@/features/auth/hooks";
@@ -48,29 +49,33 @@ import { useVisualViewport } from "./use-visual-viewport";
 // xterm.js and its addons live in this lazy chunk, loaded when the first terminal is shown.
 const TerminalView = lazy(() => import("./terminal-view"));
 
-const RISK = (user: string | undefined) => (
-	<>
-		Anyone who signs in to this machine&apos;s domain with the owner password can run commands as{" "}
-		{user ? <strong className="font-semibold">{user}</strong> : "the user that runs this machine"}, with full access to its files and network.
-	</>
-);
+const RISK = (user: string | undefined) =>
+	user ? (
+		<T
+			text="Anyone who signs in to this machine's domain with the owner password can run commands as <b>{user}</b>, with full access to its files and network."
+			params={{ user }}
+			tags={{ b: <strong className="font-semibold" /> }}
+		/>
+	) : (
+		t("Anyone who signs in to this machine's domain with the owner password can run commands as the user that runs this machine, with full access to its files and network.")
+	);
 
 // ───────────────────────────────────────────── connection pill
 
-const PILL: Record<ConnectionState, { label: string; tone: string; dot: "online" | "starting" | "offline" | "crashed" }> = {
-	live: { label: "Live", tone: "text-success", dot: "online" },
-	connecting: { label: "Connecting", tone: "text-muted-foreground", dot: "starting" },
-	reconnecting: { label: "Reconnecting", tone: "text-warning", dot: "starting" },
-	ended: { label: "Closed", tone: "text-muted-foreground", dot: "offline" },
-	denied: { label: "Signed out", tone: "text-danger", dot: "crashed" },
+const PILL: Record<ConnectionState, { label: Msg; tone: string; dot: "online" | "starting" | "offline" | "crashed" }> = {
+	live: { label: msg("Live"), tone: "text-success", dot: "online" },
+	connecting: { label: msg("Connecting"), tone: "text-muted-foreground", dot: "starting" },
+	reconnecting: { label: msg("Reconnecting"), tone: "text-warning", dot: "starting" },
+	ended: { label: msg("Closed"), tone: "text-muted-foreground", dot: "offline" },
+	denied: { label: msg("Signed out"), tone: "text-danger", dot: "crashed" },
 };
 
 function ConnectionPill({ state, exited }: { state: ConnectionState; exited: boolean }) {
-	const p = exited && state === "live" ? { label: "Exited", tone: "text-muted-foreground", dot: "offline" as const } : PILL[state];
+	const p = exited && state === "live" ? { label: msg("Exited"), tone: "text-muted-foreground", dot: "offline" as const } : PILL[state];
 	return (
 		<span className={cn("inline-flex h-7 items-center gap-1.5 rounded-full bg-surface-2 px-2.5 text-xs font-medium shadow-[inset_0_0_0_1px_var(--border)]", p.tone)} role="status">
-			<StatusDot status={p.dot} label={p.label} />
-			{p.label}
+			<StatusDot status={p.dot} label={tr(p.label)} />
+			{tr(p.label)}
 		</span>
 	);
 }
@@ -105,13 +110,13 @@ function TabButton({
 				active ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:bg-surface-2 hover:text-foreground",
 			)}
 		>
-			<StatusDot status={dot} label={s.status === "running" ? "Running" : "Exited"} />
+			<StatusDot status={dot} label={s.status === "running" ? t("Running") : t("Exited")} />
 			{renaming ? (
 				<input
 					autoFocus
 					defaultValue={s.title}
 					maxLength={80}
-					aria-label="Terminal name"
+					aria-label={t("Terminal name")}
 					onFocus={(e) => e.currentTarget.select()}
 					onBlur={(e) => onRenameDone(e.currentTarget.value)}
 					onKeyDown={(e) => {
@@ -127,7 +132,7 @@ function TabButton({
 			)}
 			<button
 				type="button"
-				aria-label={`Close ${s.title}`}
+				aria-label={t("Close {title}", { title: s.title })}
 				onClick={onClose}
 				className={cn(
 					"relative z-10 grid size-6 shrink-0 place-items-center rounded-md text-subtle outline-none transition-[opacity,background-color,color] duration-150 hover:bg-border-strong hover:text-foreground focus-visible:opacity-100 coarse:size-8",
@@ -144,14 +149,14 @@ function TabButton({
 
 function FontSizeControl({ size, onChange }: { size: number; onChange: (n: number) => void }) {
 	return (
-		<div className="flex items-center gap-1" role="group" aria-label="Font size">
-			<Button variant="outline" size="icon" aria-label="Smaller text" disabled={size <= FONT_MIN} onClick={() => onChange(clampFont(size - 1))}>
+		<div className="flex items-center gap-1" role="group" aria-label={t("Font size")}>
+			<Button variant="outline" size="icon" aria-label={t("Smaller text")} disabled={size <= FONT_MIN} onClick={() => onChange(clampFont(size - 1))}>
 				<Minus />
 			</Button>
 			<span className="grid h-8 min-w-12 place-items-center font-mono text-[13px] tabular-nums coarse:h-11" aria-live="polite">
 				{size}px
 			</span>
-			<Button variant="outline" size="icon" aria-label="Larger text" disabled={size >= FONT_MAX} onClick={() => onChange(clampFont(size + 1))}>
+			<Button variant="outline" size="icon" aria-label={t("Larger text")} disabled={size >= FONT_MAX} onClick={() => onChange(clampFont(size + 1))}>
 				<Plus />
 			</Button>
 		</div>
@@ -184,24 +189,24 @@ function RemoteOffCard({ user }: { user: string | undefined }) {
 		<>
 			<GateCard
 				icon={Lock}
-				title="Terminal is off for remote sign-ins"
+				title={t("Terminal is off for remote sign-ins")}
 				tone="warning"
 				action={
 					<Button variant="primary" size="lg" onClick={() => setOpen(true)}>
-						<ShieldAlert /> Turn on remote Terminal…
+						<ShieldAlert /> {t("Turn on remote Terminal…")}
 					</Button>
 				}
 			>
 				<p>{RISK(user)}</p>
-				<p className="mt-2 text-xs text-subtle">It stays off by default. You can also switch it on from this machine&apos;s local UI under Settings → Security.</p>
+				<p className="mt-2 text-xs text-subtle">{t("It stays off by default. You can also switch it on from this machine's local UI under Settings → Security.")}</p>
 			</GateCard>
 			<PasswordDialog
 				open={open}
 				onOpenChange={setOpen}
-				title="Turn on the remote Terminal"
-				description="Confirm with the owner password. You can switch it off again at any time."
+				title={t("Turn on the remote Terminal")}
+				description={t("Confirm with the owner password. You can switch it off again at any time.")}
 				risk={RISK(user)}
-				confirmLabel="Turn on"
+				confirmLabel={t("Turn on")}
 				onSubmit={(password) => enable.mutateAsync(password)}
 			/>
 		</>
@@ -215,10 +220,10 @@ function StepUpOverlay({ onUnlock }: { onUnlock: () => void }) {
 				<div className="grid size-11 place-items-center rounded-xl bg-accent-soft text-accent">
 					<Lock className="size-5" />
 				</div>
-				<h2 className="text-[15px] font-semibold tracking-tight">Confirm it&apos;s you</h2>
-				<p className="text-[13px] text-muted-foreground">A terminal can run anything on this machine, so opening one through the domain asks for your password again. It stays unlocked for 10 minutes.</p>
+				<h2 className="text-[15px] font-semibold tracking-tight">{t("Confirm it's you")}</h2>
+				<p className="text-[13px] text-muted-foreground">{t("A terminal can run anything on this machine, so opening one through the domain asks for your password again. It stays unlocked for 10 minutes.")}</p>
 				<Button variant="primary" size="lg" className="w-full" onClick={onUnlock}>
-					Enter password
+					{t("Enter password")}
 				</Button>
 			</div>
 		</div>
@@ -361,10 +366,10 @@ export default function TerminalPage() {
 
 	const copy = async () => {
 		try {
-			if (await controls.current?.copySelection()) toast.success("Copied");
-			else toast.message("Select some text first");
+			if (await controls.current?.copySelection()) toast.success(t("Copied"));
+			else toast.message(t("Select some text first"));
 		} catch {
-			toast.error("The browser blocked clipboard access.");
+			toast.error(t("The browser blocked clipboard access."));
 		}
 	};
 
@@ -373,17 +378,17 @@ export default function TerminalPage() {
 
 	// ── states before the terminal UI ───────────────────────────────────────────────
 	if (access.isPending) return <PageSkeleton />;
-	if (access.isError) return <GateCard icon={WifiOff} title="Can't reach this machine" action={<Button onClick={() => void access.refetch()}>Try again</Button>}>{errorMessage(access.error)}</GateCard>;
+	if (access.isError) return <GateCard icon={WifiOff} title={t("Can't reach this machine")} action={<Button onClick={() => void access.refetch()}>{t("Try again")}</Button>}>{errorMessage(access.error)}</GateCard>;
 	if (remoteOff) return <RemoteOffCard user={undefined} />;
 	if (info.data && !info.data.available)
 		return (
-			<GateCard icon={TerminalSquare} title="The terminal engine isn't available" tone="warning">
-				{info.data.reason ?? "This machine could not start a terminal."}
+			<GateCard icon={TerminalSquare} title={t("The terminal engine isn't available")} tone="warning">
+				{info.data.reason ?? t("This machine could not start a terminal.")}
 			</GateCard>
 		);
 	if (sessions.isError && !(sessions.error instanceof ApiError && sessions.error.code === "tool_disabled")) {
 		return (
-			<GateCard icon={WifiOff} title="Couldn't load your terminals" action={<Button onClick={() => void sessions.refetch()}>Try again</Button>}>
+			<GateCard icon={WifiOff} title={t("Couldn't load your terminals")} action={<Button onClick={() => void sessions.refetch()}>{t("Try again")}</Button>}>
 				{errorMessage(sessions.error)}
 			</GateCard>
 		);
@@ -391,32 +396,32 @@ export default function TerminalPage() {
 	if (sessions.isPending) return <PageSkeleton />;
 
 	const newButton = (
-		<Button variant="primary" size="md" onClick={() => { setNewFor(undefined); setNewOpen(true); }} aria-label="New terminal" data-testid="new-terminal">
-			<Plus /> <span className="max-sm:sr-only">New terminal</span>
+		<Button variant="primary" size="md" onClick={() => { setNewFor(undefined); setNewOpen(true); }} aria-label={t("New terminal")} data-testid="new-terminal">
+			<Plus /> <span className="max-sm:sr-only">{t("New terminal")}</span>
 		</Button>
 	);
 
 	const toolbar = (
 		<div className="flex items-center gap-1">
-			<Tip label="Find in output" shortcut="⌘F">
-				<Button variant="ghost" size="icon" aria-label="Find in output" onClick={() => controls.current?.toggleSearch()} disabled={!selected}>
+			<Tip label={t("Find in output")} shortcut="⌘F">
+				<Button variant="ghost" size="icon" aria-label={t("Find in output")} onClick={() => controls.current?.toggleSearch()} disabled={!selected}>
 					<Search />
 				</Button>
 			</Tip>
-			<Tip label="Copy selection">
-				<Button variant="ghost" size="icon" aria-label="Copy selection" onClick={() => void copy()} disabled={!selected}>
+			<Tip label={t("Copy selection")}>
+				<Button variant="ghost" size="icon" aria-label={t("Copy selection")} onClick={() => void copy()} disabled={!selected}>
 					<ClipboardCopy />
 				</Button>
 			</Tip>
-			<Tip label="Paste">
-				<Button variant="ghost" size="icon" aria-label="Paste" onClick={() => void controls.current?.paste()} disabled={!selected}>
+			<Tip label={t("Paste")}>
+				<Button variant="ghost" size="icon" aria-label={t("Paste")} onClick={() => void controls.current?.paste()} disabled={!selected}>
 					<ClipboardPaste />
 				</Button>
 			</Tip>
 			<Popover>
-				<Tip label="Text size">
+				<Tip label={t("Text size")}>
 					<PopoverTrigger asChild>
-						<Button variant="ghost" size="icon" aria-label="Text size">
+						<Button variant="ghost" size="icon" aria-label={t("Text size")}>
 							<Type />
 						</Button>
 					</PopoverTrigger>
@@ -425,8 +430,8 @@ export default function TerminalPage() {
 					<FontSizeControl size={fontSize} onChange={setFontSize} />
 				</PopoverContent>
 			</Popover>
-			<Tip label="Clear screen">
-				<Button variant="ghost" size="icon" aria-label="Clear screen" onClick={() => controls.current?.clear()} disabled={!selected}>
+			<Tip label={t("Clear screen")}>
+				<Button variant="ghost" size="icon" aria-label={t("Clear screen")} onClick={() => controls.current?.clear()} disabled={!selected}>
 					<Eraser />
 				</Button>
 			</Tip>
@@ -434,7 +439,7 @@ export default function TerminalPage() {
 	);
 
 	const tabs = (
-		<div role="tablist" aria-label="Terminals" className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+		<div role="tablist" aria-label={t("Terminals")} className="scrollbar-none flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
 			{list.map((s) => (
 				<TabButton
 					key={s.id}
@@ -444,11 +449,11 @@ export default function TerminalPage() {
 					onSelect={() => select(s.id)}
 					onClose={() => (s.status === "running" ? setClosing(s) : void closeTerminal(s))}
 					onRenameStart={() => setRenaming(s.id)}
-					onRenameDone={(t) => commitRename(s, t)}
+					onRenameDone={(title) => commitRename(s, title)}
 				/>
 			))}
-			<Tip label="New terminal">
-				<Button variant="ghost" size="icon" aria-label="New terminal tab" onClick={() => { setNewFor(undefined); setNewOpen(true); }} className="shrink-0">
+			<Tip label={t("New terminal")}>
+				<Button variant="ghost" size="icon" aria-label={t("New terminal tab")} onClick={() => { setNewFor(undefined); setNewOpen(true); }} className="shrink-0">
 					<Plus />
 				</Button>
 			</Tip>
@@ -458,15 +463,15 @@ export default function TerminalPage() {
 	const header = mobile ? (
 		<header className="shrink-0 border-b bg-surface-1 pt-[env(safe-area-inset-top)]">
 			<div className="flex h-12 items-center gap-1 px-2">
-				<Button variant="ghost" size="icon" aria-label="Open navigation" onClick={() => setDrawer(true)}>
+				<Button variant="ghost" size="icon" aria-label={t("Open navigation")} onClick={() => setDrawer(true)}>
 					<Menu />
 				</Button>
 				<div className="flex min-w-0 flex-1 flex-col leading-tight">
-					<span className="truncate text-sm font-semibold">{selected?.title ?? "Terminal"}</span>
+					<span className="truncate text-sm font-semibold">{selected?.title ?? t("Terminal")}</span>
 					{selected ? <span className="truncate font-mono text-2xs text-subtle">{folder}</span> : null}
 				</div>
 				{selected ? <ConnectionPill state={conn} exited={selected.status === "exited"} /> : null}
-				<Button variant="ghost" size="icon" aria-label="Terminal actions" onClick={() => setMenuOpen(true)} disabled={!selected}>
+				<Button variant="ghost" size="icon" aria-label={t("Terminal actions")} onClick={() => setMenuOpen(true)} disabled={!selected}>
 					<MoreHorizontal />
 				</Button>
 			</div>
@@ -491,15 +496,15 @@ export default function TerminalPage() {
 		list.length === 0 || !selected ? (
 			<EmptyState
 				icon={TerminalSquare}
-				title="A shell on this machine"
-				description={a?.via === "remote" ? "Commands you run here run on this machine, not on the device you are using." : "Open a real terminal on this machine. It keeps running when you close the tab."}
+				title={t("A shell on this machine")}
+				description={a?.via === "remote" ? t("Commands you run here run on this machine, not on the device you are using.") : t("Open a real terminal on this machine. It keeps running when you close the tab.")}
 				action={
 					<div className="flex flex-wrap items-center justify-center gap-2">
 						<Button variant="primary" size="lg" loading={create.isPending} onClick={() => void open({})} data-testid="open-first-terminal">
-							<TerminalSquare /> Open terminal
+							<TerminalSquare /> {t("Open terminal")}
 						</Button>
 						<Button variant="outline" size="lg" onClick={() => { setNewFor(undefined); setNewOpen(true); }}>
-							Choose folder…
+							{t("Choose folder…")}
 						</Button>
 					</div>
 				}
@@ -507,7 +512,7 @@ export default function TerminalPage() {
 			/>
 		) : (
 			<div className="relative min-h-0 flex-1" data-terminal-id={selected.id}>
-				<Suspense fallback={<div className="grid h-full place-items-center bg-surface-1 text-subtle"><Loader2 className="size-5 animate-spin" aria-label="Loading terminal" /></div>}>
+				<Suspense fallback={<div className="grid h-full place-items-center bg-surface-1 text-subtle"><Loader2 className="size-5 animate-spin" aria-label={t("Loading terminal")} /></div>}>
 					<TerminalView
 						key={selected.id}
 						session={selected}
@@ -528,13 +533,16 @@ export default function TerminalPage() {
 					<div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-3">
 						<div className="pointer-events-auto flex animate-pop-in flex-wrap items-center justify-center gap-2 rounded-xl bg-overlay py-2 pl-3.5 pr-2 shadow-pop shadow-[inset_0_0_0_1px_var(--border-strong)]">
 							<span className="text-[13px] text-muted-foreground">
-								Shell exited <span className="font-mono tabular-nums text-foreground">{selected.exitCode !== null ? `(code ${selected.exitCode})` : selected.signal !== null ? `(signal ${selected.signal})` : ""}</span>
+								{t("Shell exited")}{" "}
+								<span className="font-mono tabular-nums text-foreground">
+									{selected.exitCode !== null ? t("(code {code})", { code: selected.exitCode }) : selected.signal !== null ? t("(signal {signal})", { signal: selected.signal }) : ""}
+								</span>
 							</span>
 							<Button size="sm" variant="primary" onClick={() => void open(selected.projectId ? { projectId: selected.projectId } : {})}>
-								<RotateCcw /> Start a new shell
+								<RotateCcw /> {t("Start a new shell")}
 							</Button>
 							<Button size="sm" variant="ghost" onClick={() => void closeTerminal(selected)}>
-								Close
+								{t("Close")}
 							</Button>
 						</div>
 					</div>
@@ -542,7 +550,7 @@ export default function TerminalPage() {
 				{conn === "reconnecting" && !needsStepUp ? (
 					<div className="pointer-events-none absolute left-1/2 top-3 z-10 -translate-x-1/2">
 						<span className="inline-flex animate-pop-in items-center gap-2 rounded-full bg-overlay px-3 py-1.5 text-xs font-medium text-warning shadow-pop shadow-[inset_0_0_0_1px_var(--border-strong)]">
-							<Loader2 className="size-3.5 animate-spin" aria-hidden /> Reconnecting… your shell is still running
+							<Loader2 className="size-3.5 animate-spin" aria-hidden /> {t("Reconnecting… your shell is still running")}
 						</span>
 					</div>
 				) : null}
@@ -559,7 +567,7 @@ export default function TerminalPage() {
 				</span>
 				<span className="shrink-0 font-mono tabular-nums">
 					{selected.cols}×{selected.rows}
-					{selected.attached > 1 ? ` · ${selected.attached} browsers` : ""}
+					{selected.attached > 1 ? ` · ${t("{count, plural, one {# browser} other {# browsers}}", { count: selected.attached })}` : ""}
 				</span>
 			</footer>
 		) : null;
@@ -587,9 +595,9 @@ export default function TerminalPage() {
 					setStepUpOpen(o);
 					if (!o) pendingCreate.current = null;
 				}}
-				title="Confirm it's you"
-				description="Opening a terminal through the domain needs your owner password again. It stays unlocked for 10 minutes."
-				confirmLabel="Unlock"
+				title={t("Confirm it's you")}
+				description={t("Opening a terminal through the domain needs your owner password again. It stays unlocked for 10 minutes.")}
+				confirmLabel={t("Unlock")}
 				onSubmit={async (password) => {
 					await stepUp.mutateAsync(password);
 					const body = pendingCreate.current;
@@ -601,27 +609,27 @@ export default function TerminalPage() {
 			<ConfirmDialog
 				open={closing !== null}
 				onOpenChange={(o) => !o && setClosing(null)}
-				title={`Close “${closing?.title ?? ""}”?`}
-				description="The shell and everything running in it will stop. Anything unsaved in a running program is lost."
-				confirmLabel="Close terminal"
+				title={t("Close “{title}”?", { title: closing?.title ?? "" })}
+				description={t("The shell and everything running in it will stop. Anything unsaved in a running program is lost.")}
+				confirmLabel={t("Close terminal")}
 				danger
 				loading={kill.isPending}
 				onConfirm={() => closing && void closeTerminal(closing)}
 			/>
 			<Sheet open={menuOpen} onOpenChange={setMenuOpen}>
 				<SheetContent side="bottom" className="gap-1 p-3">
-					<SheetTitle className="sr-only">Terminal actions</SheetTitle>
+					<SheetTitle className="sr-only">{t("Terminal actions")}</SheetTitle>
 					<div className="grid grid-cols-3 gap-2">
 						{[
-							{ label: "Find", icon: Search, run: () => controls.current?.toggleSearch() },
-							{ label: "Copy", icon: ClipboardCopy, run: () => void copy() },
-							{ label: "Paste", icon: ClipboardPaste, run: () => void controls.current?.paste() },
-							{ label: "Clear", icon: Eraser, run: () => controls.current?.clear() },
-							{ label: "Rename", icon: Pencil, run: () => selected && setRenaming(selected.id) },
-							{ label: "Close", icon: X, run: () => selected && (selected.status === "running" ? setClosing(selected) : void closeTerminal(selected)) },
-						].map((item) => (
+							{ label: msg("Find"), icon: Search, run: () => controls.current?.toggleSearch() },
+							{ label: msg("Copy"), icon: ClipboardCopy, run: () => void copy() },
+							{ label: msg("Paste"), icon: ClipboardPaste, run: () => void controls.current?.paste() },
+							{ label: msg("Clear"), icon: Eraser, run: () => controls.current?.clear() },
+							{ label: msg("Rename"), icon: Pencil, run: () => selected && setRenaming(selected.id) },
+							{ label: msg("Close"), icon: X, run: () => selected && (selected.status === "running" ? setClosing(selected) : void closeTerminal(selected)) },
+						].map((item, i) => (
 							<button
-								key={item.label}
+								key={i}
 								type="button"
 								onClick={() => {
 									setMenuOpen(false);
@@ -630,15 +638,15 @@ export default function TerminalPage() {
 								className="flex h-16 flex-col items-center justify-center gap-1.5 rounded-xl bg-surface-2 text-[13px] outline-none transition-transform active:scale-95"
 							>
 								<item.icon className="size-5 text-muted-foreground" />
-								{item.label}
+								{tr(item.label)}
 							</button>
 						))}
 					</div>
 					<div className="mt-2 flex items-center justify-between rounded-xl bg-surface-2 px-4 py-2">
-						<span className="text-[13px] text-muted-foreground">Text size</span>
+						<span className="text-[13px] text-muted-foreground">{t("Text size")}</span>
 						<FontSizeControl size={fontSize} onChange={setFontSize} />
 					</div>
-					<p className="px-1 pt-1 text-center text-2xs text-subtle">Pinch the terminal to change the text size.</p>
+					<p className="px-1 pt-1 text-center text-2xs text-subtle">{t("Pinch the terminal to change the text size.")}</p>
 				</SheetContent>
 			</Sheet>
 		</>
@@ -647,7 +655,7 @@ export default function TerminalPage() {
 
 function PageSkeleton() {
 	return (
-		<div className="flex h-full flex-col" aria-busy aria-label="Loading terminal">
+		<div className="flex h-full flex-col" aria-busy aria-label={t("Loading terminal")}>
 			<div className="flex h-12 items-center gap-2 border-b px-3">
 				<Skeleton className="h-8 w-28" />
 				<Skeleton className="h-8 w-8" />

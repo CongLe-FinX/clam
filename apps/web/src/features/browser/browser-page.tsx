@@ -4,8 +4,9 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { accessKey } from "@/features/auth/hooks";
+import { t } from "@/i18n";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
-import { api, errorMessage } from "@/lib/api";
+import { api, errorText } from "@/lib/api";
 import { useUi } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { Sheet, SheetContent, SheetTitle } from "@/ui/sheet";
@@ -59,15 +60,15 @@ export default function BrowserPage() {
 	const relaunch = useMutation({
 		mutationFn: () => api.post<BrowserTab>(routes.browserTabs),
 		onSettled: () => void qc.invalidateQueries({ queryKey: bk.all }),
-		onError: (e) => toast.error(errorMessage(e)),
+		onError: (e) => toast.error(errorText(e)),
 	});
 
 	if (status.isPending) return <BrowserSkeleton />;
 	if (isToolDisabled(status.error)) return <RemoteOffCard />;
-	if (status.isError) return <ErrorCard title="Can't reach the Browser" message={errorMessage(status.error)} onRetry={() => void status.refetch()} retrying={status.isFetching} />;
+	if (status.isError) return <ErrorCard title={t("Can't reach the Browser")} message={errorText(status.error)} onRetry={() => void status.refetch()} retrying={status.isFetching} />;
 	const s: BrowserStatus = status.data;
 	if (!s.available) return <InstallCard status={s} />;
-	if (s.state === "failed") return <ErrorCard title="The browser failed to start" message={s.error ?? "Chromium exited unexpectedly."} onRetry={() => relaunch.mutate()} retrying={relaunch.isPending} />;
+	if (s.state === "failed") return <ErrorCard title={t("The browser failed to start")} message={s.error ?? t("Chromium exited unexpectedly.")} onRetry={() => relaunch.mutate()} retrying={relaunch.isPending} />;
 	return <BrowserWorkspace status={s} />;
 }
 
@@ -110,7 +111,7 @@ function BrowserWorkspace({ status }: { status: BrowserStatus }) {
 				void qc.invalidateQueries({ queryKey: bk.status });
 			} catch (e) {
 				if (isToolDisabled(e)) void qc.invalidateQueries({ queryKey: bk.status });
-				else toast.error(errorMessage(e));
+				else toast.error(errorText(e));
 			} finally {
 				creatingRef.current = false;
 				setCreating(false);
@@ -152,7 +153,7 @@ function BrowserWorkspace({ status }: { status: BrowserStatus }) {
 	const events: ConnEvents = {
 		onClosed: handleClosed,
 		onError: (message) => toast.error(message),
-		onDownloadDone: (d) => toast.success(`Downloaded ${d.name}`, { action: { label: "Save", onClick: () => window.location.assign(downloadHref(d.name)) } }),
+		onDownloadDone: (d) => toast.success(t("Downloaded {name}", { name: d.name }), { action: { label: t("Save"), onClick: () => window.location.assign(downloadHref(d.name)) } }),
 	};
 	const { conn, snapshot } = useTabConnection(effectiveId, events, () => ({
 		viewer: sizeRef.current ? { ...sizeRef.current, device } : null,
@@ -180,7 +181,7 @@ function BrowserWorkspace({ status }: { status: BrowserStatus }) {
 			return;
 		}
 		if (conn && live) conn.send({ type: "navigate", url });
-		else api.post(routes.browserNavigate(effectiveId), { url }).catch((e: unknown) => toast.error(errorMessage(e)));
+		else api.post(routes.browserNavigate(effectiveId), { url }).catch((e: unknown) => toast.error(errorText(e)));
 	};
 	const closeTab = (id: string) => {
 		const i = tabs.findIndex((t) => t.id === id);
@@ -188,19 +189,19 @@ function BrowserWorkspace({ status }: { status: BrowserStatus }) {
 		qc.setQueryData<BrowserTab[]>(bk.tabs, (old) => (old ?? []).filter((t) => t.id !== id));
 		if (effectiveId === id) setActiveId(next?.id ?? null);
 		api.delete(routes.browserTab(id)).catch((e: unknown) => {
-			toast.error(errorMessage(e));
+			toast.error(errorText(e));
 			void qc.invalidateQueries({ queryKey: bk.tabs });
 		});
 	};
 	const copyFromPage = () => {
 		if (!conn) return;
-		void copyAnswerToClipboard(conn.copySelection()).then((text) => (text ? toast.success("Copied from the page") : toast.message("Nothing selected on the page")));
+		void copyAnswerToClipboard(conn.copySelection()).then((text) => (text ? toast.success(t("Copied from the page")) : toast.message(t("Nothing selected on the page"))));
 	};
 
 	if (tabsQuery.isError) {
-		return isToolDisabled(tabsQuery.error) ? <RemoteOffCard /> : <ErrorCard title="Can't list the browser's tabs" message={errorMessage(tabsQuery.error)} onRetry={() => void tabsQuery.refetch()} retrying={tabsQuery.isFetching} />;
+		return isToolDisabled(tabsQuery.error) ? <RemoteOffCard /> : <ErrorCard title={t("Can't list the browser's tabs")} message={errorText(tabsQuery.error)} onRetry={() => void tabsQuery.refetch()} retrying={tabsQuery.isFetching} />;
 	}
-	if (tabsQuery.isPending || (tabs.length === 0 && (creating || opening))) return <BrowserSkeleton label={creating || status.state === "starting" ? "Starting the browser on this machine…" : undefined} />;
+	if (tabsQuery.isPending || (tabs.length === 0 && (creating || opening))) return <BrowserSkeleton label={creating || status.state === "starting" ? t("Starting the browser on this machine…") : undefined} />;
 
 	const blank = activeTab !== null && (activeTab.url === "" || activeTab.url === "about:blank");
 	const devtools = (
@@ -252,7 +253,7 @@ function BrowserWorkspace({ status }: { status: BrowserStatus }) {
 				<Sheet open={consoleOpen} onOpenChange={setConsoleOpen}>
 					<SheetContent side="bottom" aria-describedby={undefined} className="h-[60dvh]">
 						<SwipeZone onDismiss={() => setConsoleOpen(false)} />
-						<SheetTitle className="sr-only">Console</SheetTitle>
+						<SheetTitle className="sr-only">{t("Console")}</SheetTitle>
 						{devtools}
 					</SheetContent>
 				</Sheet>

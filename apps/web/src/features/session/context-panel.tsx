@@ -4,9 +4,10 @@ import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "@/components/code-block";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { runtimeDot } from "@/components/session-status";
-import { errorMessage } from "@/lib/api";
-import { cn, formatCompact, formatCost, formatDuration, relativeTime } from "@/lib/utils";
+import { RUNTIME_STATE_LABEL, runtimeDot } from "@/components/session-status";
+import { t, tr } from "@/i18n";
+import { errorText } from "@/lib/api";
+import { cn, formatCompact, formatCost, formatDuration, formatNumber, formatPercent, relativeTime } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Progress } from "@/ui/progress";
 import { StatusDot } from "@/ui/status-dot";
@@ -46,7 +47,7 @@ function IdRow({ label, value }: { label: string; value: string | null | undefin
 					<span className="min-w-0 truncate font-mono text-2xs" title={value}>
 						{value}
 					</span>
-					<CopyButton text={value} label={`Copy ${label}`} className="size-6" />
+					<CopyButton text={value} label={t("Copy {label}", { label })} className="size-6" />
 				</span>
 			) : (
 				<span className="text-subtle">—</span>
@@ -62,15 +63,15 @@ function ToolInspector({ stream, id }: { stream: SessionStream; id: string }) {
 	const call = stream.getCall(id);
 	const running = rec?.status === "running";
 	const now = useNow(running);
-	const name = rec?.name || call?.name || "tool";
+	const name = rec?.name || call?.name || t("tool");
 	const args = rec?.args ?? call?.args;
 	const duration = toolDuration(rec, now);
 	return (
 		<Section
-			title="Tool call"
+			title={t("Tool call")}
 			className="bg-accent-soft/40"
 			actions={
-				<button type="button" aria-label="Close inspector" onClick={() => stream.selectTool(null)} className="grid size-6 place-items-center rounded-md text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-10">
+				<button type="button" aria-label={t("Close inspector")} onClick={() => stream.selectTool(null)} className="grid size-6 place-items-center rounded-md text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-10">
 					<X className="size-3.5" />
 				</button>
 			}
@@ -94,23 +95,23 @@ function ContextMeter({ stream, session }: { stream: SessionStream; session: Age
 	const tps = useStreamMeta(stream, (m) => m.live?.tokensPerSecond ?? null);
 	if (!usage || !usage.contextWindow) {
 		return (
-			<Section title="Context">
-				<p className="text-xs text-muted-foreground">Context usage is not available yet. It appears after the first model response.</p>
+			<Section title={t("Context")}>
+				<p className="text-xs text-muted-foreground">{t("Context usage is not available yet. It appears after the first model response.")}</p>
 			</Section>
 		);
 	}
 	const pct = Math.min(100, (usage.tokens / usage.contextWindow) * 100);
 	const tone = pct >= 90 ? "danger" : pct >= 70 ? "warning" : "accent";
 	return (
-		<Section title="Context">
+		<Section title={t("Context")}>
 			<div className="flex items-baseline justify-between gap-2">
-				<span className={cn("tabular text-2xl font-semibold tracking-tight", tone === "danger" && "text-danger", tone === "warning" && "text-warning")}>{pct.toFixed(pct < 10 ? 1 : 0)}%</span>
+				<span className={cn("tabular text-2xl font-semibold tracking-tight", tone === "danger" && "text-danger", tone === "warning" && "text-warning")}>{formatPercent(pct / 100, pct < 10 ? 1 : 0)}</span>
 				<span className="tabular font-mono text-2xs text-muted-foreground">
 					{formatCompact(usage.tokens)} / {formatCompact(usage.contextWindow)}
 				</span>
 			</div>
 			<Progress value={pct} tone={tone} />
-			{tps !== null ? <Row label="Speed">{tps.toFixed(1)} tok/s</Row> : null}
+			{tps !== null ? <Row label={t("Speed")}>{t("{speed} tok/s", { speed: formatNumber(Math.round(tps * 10) / 10) })}</Row> : null}
 		</Section>
 	);
 }
@@ -119,7 +120,7 @@ function ContextMeter({ stream, session }: { stream: SessionStream; session: Age
 
 function Todos({ phases }: { phases: TodoPhase[] }) {
 	return (
-		<Section title="Plan">
+		<Section title={t("Plan")}>
 			<PlanSection phases={phases} />
 		</Section>
 	);
@@ -131,20 +132,20 @@ function Stats({ session }: { session: AgentSession }) {
 	const s = session.stats;
 	if (!s) {
 		return (
-			<Section title="Session stats">
-				<p className="text-xs text-muted-foreground">No usage recorded yet.</p>
+			<Section title={t("Session stats")}>
+				<p className="text-xs text-muted-foreground">{t("No usage recorded yet.")}</p>
 			</Section>
 		);
 	}
 	return (
-		<Section title="Session stats">
+		<Section title={t("Session stats")}>
 			<div className="grid grid-cols-2 gap-x-4 gap-y-2.5">
 				{(
 					[
-						["Input", formatCompact(s.tokens.input)],
-						["Output", formatCompact(s.tokens.output)],
-						["Cache read", formatCompact(s.tokens.cacheRead)],
-						["Cache write", formatCompact(s.tokens.cacheWrite)],
+						[t("Input"), formatCompact(s.tokens.input)],
+						[t("Output"), formatCompact(s.tokens.output)],
+						[t("Cache read"), formatCompact(s.tokens.cacheRead)],
+						[t("Cache write"), formatCompact(s.tokens.cacheWrite)],
 					] as const
 				).map(([k, v]) => (
 					<div key={k} className="flex flex-col">
@@ -154,16 +155,16 @@ function Stats({ session }: { session: AgentSession }) {
 				))}
 			</div>
 			<div className="flex flex-col gap-1.5 border-t pt-2.5">
-				<Row label="Total tokens" mono>
-					{s.tokens.total.toLocaleString("en-US")}
+				<Row label={t("Total tokens")} mono>
+					{formatNumber(s.tokens.total)}
 				</Row>
-				<Row label="Cost" mono>
+				<Row label={t("Cost")} mono>
 					{formatCost(s.cost)}
 				</Row>
-				<Row label="Messages" mono>
-					{s.userMessages} user · {s.assistantMessages} assistant
+				<Row label={t("Messages")} mono>
+					{t("{user, plural, one {# message from you} other {# messages from you}} · {assistant, plural, one {# reply from the agent} other {# replies from the agent}}", { user: s.userMessages, assistant: s.assistantMessages })}
 				</Row>
-				<Row label="Tool calls" mono>
+				<Row label={t("Tool calls")} mono>
 					{s.toolCalls}
 				</Row>
 			</div>
@@ -182,30 +183,30 @@ function SessionInfo({ stream, session, project }: { stream: SessionStream; sess
 		try {
 			await stream.restartRuntime();
 			setConfirm(false);
-			toast.success("Runtime restarting");
+			toast.success(t("Runtime restarting"));
 		} catch (e) {
-			toast.error(`Could not restart the runtime: ${errorMessage(e)}`);
+			toast.error(t("Could not restart the runtime: {error}", { error: errorText(e) }));
 		} finally {
 			setRestarting(false);
 		}
 	};
 	const viewOnly = session.kind === "mirror" || session.movedTo !== null;
 	return (
-		<Section title="Session info">
+		<Section title={t("Session info")}>
 			<div className="flex flex-col gap-1.5">
-				<IdRow label="Session" value={session.id} />
-				<IdRow label="OMP session" value={session.runtimeSessionId} />
-				<IdRow label="Session file" value={session.runtimeSessionFile} />
-				<IdRow label="Project" value={project?.path} />
-				<Row label="Created">{relativeTime(session.createdAt)}</Row>
+				<IdRow label={t("Session")} value={session.id} />
+				<IdRow label={t("OMP session")} value={session.runtimeSessionId} />
+				<IdRow label={t("Session file")} value={session.runtimeSessionFile} />
+				<IdRow label={t("Project")} value={project?.path} />
+				<Row label={t("Created")}>{relativeTime(session.createdAt)}</Row>
 			</div>
 			<div className="flex flex-col gap-1.5 border-t pt-2.5">
 				<div className="flex items-center justify-between gap-2 text-xs">
-					<span className="text-muted-foreground">Runtime</span>
+					<span className="text-muted-foreground">{t("Runtime")}</span>
 					{runtime ? (
 						<span className="flex items-center gap-1.5">
 							<StatusDot status={runtimeDot(runtime.state)} />
-							<span className="capitalize">{runtime.state}</span>
+							<span className="first-letter:uppercase">{tr(RUNTIME_STATE_LABEL[runtime.state])}</span>
 						</span>
 					) : (
 						<span className="text-subtle">—</span>
@@ -213,14 +214,14 @@ function SessionInfo({ stream, session, project }: { stream: SessionStream; sess
 				</div>
 				{runtime ? (
 					<>
-						<Row label="PID" mono>
+						<Row label={t("PID")} mono>
 							{runtime.pid ?? "—"}
 						</Row>
-						<Row label="Started">{relativeTime(runtime.startedAt)}</Row>
-						<Row label="Restarts" mono>
+						<Row label={t("Started")}>{relativeTime(runtime.startedAt)}</Row>
+						<Row label={t("Restarts")} mono>
 							{runtime.restarts}
 						</Row>
-						<Row label="Last activity">{relativeTime(runtime.lastActivityAt)}</Row>
+						<Row label={t("Last activity")}>{relativeTime(runtime.lastActivityAt)}</Row>
 						{runtime.lastError ? (
 							<p role="alert" className="max-h-28 overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-danger/10 px-2.5 py-1.5 font-mono text-2xs text-danger">
 								{runtime.lastError}
@@ -230,16 +231,16 @@ function SessionInfo({ stream, session, project }: { stream: SessionStream; sess
 				) : null}
 				{viewOnly ? null : (
 					<Button size="sm" variant="outline" className="mt-1 self-start" onClick={() => setConfirm(true)}>
-						<RotateCw /> Restart runtime
+						<RotateCw /> {t("Restart runtime")}
 					</Button>
 				)}
 			</div>
 			<ConfirmDialog
 				open={confirm}
 				onOpenChange={setConfirm}
-				title="Restart the runtime?"
-				description="The OMP process for this session is restarted. A turn in progress is interrupted; the conversation is kept."
-				confirmLabel="Restart"
+				title={t("Restart the runtime?")}
+				description={t("The OMP process for this session is restarted. A turn in progress is interrupted; the conversation is kept.")}
+				confirmLabel={t("Restart")}
 				danger
 				loading={restarting}
 				onConfirm={() => void restart()}
@@ -258,7 +259,7 @@ export function ContextPanel({ stream, session, project, className }: { stream: 
 			{selectedToolId ? <ToolInspector key={selectedToolId} stream={stream} id={selectedToolId} /> : null}
 			<ContextMeter stream={stream} session={session} />
 			{viewOnly ? null : (
-				<Section title="Model">
+				<Section title={t("Model")}>
 					<div className="flex flex-wrap items-center gap-1.5">
 						<ModelPicker stream={stream} />
 						<ThinkingPicker stream={stream} />

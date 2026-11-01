@@ -1,4 +1,4 @@
-import type { HealthCheck, HealthStatus, NodeHealth } from "@clam/contracts";
+import { type HealthCheck, type HealthStatus, type I18nMessage, type NodeHealth, i18nMsg } from "@clam/contracts";
 import type { OmpInstall } from "@clam/contracts";
 import { sql } from "drizzle-orm";
 import type { ServerContext } from "../context.ts";
@@ -6,6 +6,9 @@ import type { ServerContext } from "../context.ts";
 const OMP_CACHE_MS = 60_000;
 const HEALTH_PUBLISH_MS = 30_000;
 const WORST: Record<HealthStatus, number> = { ok: 0, degraded: 1, down: 2 };
+
+/** A check's `message` (English) next to its structured twin. */
+const say = (m: I18nMessage): Pick<HealthCheck, "message" | "i18n"> => ({ message: m.text, ...(m.i18n && { i18n: m.i18n }) });
 
 export type HealthContext = Pick<ServerContext, "db" | "ompCli" | "runtime" | "startedAt" | "bus" | "log">;
 
@@ -48,8 +51,8 @@ export class HealthService {
 		const install = await this.omp();
 		checks.push(
 			install.installed
-				? { name: "omp", status: "ok", message: `${install.version ?? "omp"} at ${install.binaryPath}`, latencyMs: Math.round(performance.now() - ompStart) }
-				: { name: "omp", status: "degraded", message: install.error ?? "OMP is not installed; agents cannot run" },
+				? { name: "omp", status: "ok", ...say(i18nMsg("{version} at {path}", { version: install.version ?? "omp", path: install.binaryPath ?? "" })), latencyMs: Math.round(performance.now() - ompStart) }
+				: { name: "omp", status: "degraded", ...(install.error ? { message: install.error } : say(i18nMsg("OMP is not installed; agents cannot run"))) },
 		);
 
 		const runtimes = this.ctx.runtime.list();
@@ -57,8 +60,8 @@ export class HealthService {
 		const active = runtimes.filter((r) => r.state !== "stopped" && r.state !== "crashed").length;
 		checks.push(
 			crashed.length > 0
-				? { name: "runtime", status: "degraded", message: `${crashed.length} agent runtime${crashed.length === 1 ? "" : "s"} crashed (${active} running)` }
-				: { name: "runtime", status: "ok", message: `${active} agent runtime${active === 1 ? "" : "s"} running` },
+				? { name: "runtime", status: "degraded", ...say(i18nMsg("{crashed, plural, one {# agent runtime} other {# agent runtimes}} crashed ({active} running)", { crashed: crashed.length, active })) }
+				: { name: "runtime", status: "ok", ...say(i18nMsg("{active, plural, one {# agent runtime} other {# agent runtimes}} running", { active })) },
 		);
 
 		const status = checks.reduce<HealthStatus>((worst, c) => (WORST[c.status] > WORST[worst] ? c.status : worst), "ok");

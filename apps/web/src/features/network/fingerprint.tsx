@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { useCopy } from "./components";
 import { formatFingerprint } from "./format";
+import { t } from "@/i18n";
 
 /** Short, easy-to-say words; four of them (24 bits) are a spoken checksum of a fingerprint. */
 /** Well-separated hues so two machines rarely look alike. */
@@ -48,19 +49,19 @@ export function fingerprintTraits(fingerprint: string): FingerprintTraits {
 }
 
 export function FingerprintIcon({ fingerprint, size = 64, className }: { fingerprint: string; size?: number; className?: string }) {
-	const t = useMemo(() => fingerprintTraits(fingerprint), [fingerprint]);
-	const fill = `hsl(${t.hue} 68% 52%)`;
+	const traits = useMemo(() => fingerprintTraits(fingerprint), [fingerprint]);
+	const fill = `hsl(${traits.hue} 68% 52%)`;
 	return (
 		<svg
 			role="img"
-			aria-label={`Fingerprint picture: ${t.words.join(" ")}`}
+			aria-label={t("Fingerprint picture: {words}", { words: traits.words.join(" ") })}
 			viewBox="0 0 50 50"
 			width={size}
 			height={size}
 			className={cn("shrink-0 rounded-xl", className)}
-			style={{ background: `hsl(${(t.hue + 40) % 360} 60% 50% / 0.2)`, boxShadow: `inset 0 0 0 1px hsl(${(t.hue + 40) % 360} 60% 50% / 0.4)` }}
+			style={{ background: `hsl(${(traits.hue + 40) % 360} 60% 50% / 0.2)`, boxShadow: `inset 0 0 0 1px hsl(${(traits.hue + 40) % 360} 60% 50% / 0.4)` }}
 		>
-			{t.cells.map((row, r) =>
+			{traits.cells.map((row, r) =>
 				row.map((on, col) =>
 					on ? (
 						<g key={`${r}-${col}`} fill={fill}>
@@ -80,23 +81,23 @@ export function FingerprintIcon({ fingerprint, size = 64, className }: { fingerp
  */
 export function FingerprintCompare({ label, fingerprint, children, className }: { label: string; fingerprint: string; children?: ReactNode; className?: string }) {
 	const { copied, copy } = useCopy();
-	const t = useMemo(() => fingerprintTraits(fingerprint), [fingerprint]);
+	const traits = useMemo(() => fingerprintTraits(fingerprint), [fingerprint]);
 	const blocks = formatFingerprint(fingerprint).split(" ");
 	return (
 		<div className={cn("flex flex-col gap-3 rounded-xl bg-surface-2 p-3.5 shadow-[inset_0_0_0_1px_var(--border-strong)]", className)}>
 			<div className="flex items-center justify-between gap-2">
 				<span className="text-2xs font-semibold uppercase tracking-wider text-subtle">{label}</span>
-				<Button size="sm" variant="outline" onClick={() => void copy(fingerprint)} aria-label={`Copy ${label.toLowerCase()}`}>
+				<Button size="sm" variant="outline" onClick={() => void copy(fingerprint)} aria-label={t("Copy {label}", { label: label.toLowerCase() })}>
 					{copied ? <Check className="text-success" /> : <Copy />}
-					{copied ? "Copied" : "Copy"}
+					{copied ? t("Copied") : t("Copy")}
 				</Button>
 			</div>
 			<div className="flex items-center gap-3.5">
 				<FingerprintIcon fingerprint={fingerprint} size={72} />
 				<div className="flex min-w-0 flex-col gap-1.5">
-					<span className="text-2xs text-subtle">Quick check — should look and read the same on both screens</span>
+					<span className="text-2xs text-subtle">{t("Quick check — should look and read the same on both screens")}</span>
 					<div className="flex flex-wrap gap-1.5" data-testid="fingerprint-words">
-						{t.words.map((word, i) => (
+						{traits.words.map((word, i) => (
 							<span key={`${word}-${i}`} className="rounded-lg bg-surface-1 px-2 py-1 text-[13px] font-semibold capitalize shadow-[inset_0_0_0_1px_var(--border)]">
 								{word}
 							</span>

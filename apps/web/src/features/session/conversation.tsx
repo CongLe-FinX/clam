@@ -1,7 +1,8 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, Loader2, MessagesSquare, RefreshCw, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
@@ -16,7 +17,7 @@ const LOAD_OLDER_THRESHOLD = 280;
 
 function ConversationSkeleton() {
 	return (
-		<div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6" aria-busy="true" aria-label="Loading conversation">
+		<div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6" aria-busy="true" aria-label={t("Loading conversation")}>
 			<div className="flex justify-end">
 				<Skeleton className="h-9 w-2/5 rounded-2xl" />
 			</div>
@@ -182,11 +183,11 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 			<EmptyState
 				className={cn("flex-1", className)}
 				icon={TriangleAlert}
-				title="Could not load the conversation"
-				description={errorMessage(historyError)}
+				title={t("Could not load the conversation")}
+				description={errorText(historyError)}
 				action={
 					<Button variant="outline" onClick={() => void stream.retry()}>
-						<RefreshCw /> Retry
+						<RefreshCw /> {t("Retry")}
 					</Button>
 				}
 			/>
@@ -197,19 +198,19 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 	if (rows.length === 0 && busy) {
 		return (
 			<div className={cn("flex min-h-0 flex-1 items-center justify-center gap-2 text-[13px] text-muted-foreground", className)} role="status">
-				<Loader2 className="size-4 animate-spin" aria-hidden /> The agent is working…
+				<Loader2 className="size-4 animate-spin" aria-hidden /> {t("The agent is working…")}
 			</div>
 		);
 	}
 
 	if (rows.length === 0 && readOnly) {
-		return <EmptyState icon={MessagesSquare} title="Nothing to show yet" description="This is a read-only copy. Messages appear here as soon as the machine that runs the work sends them." className={cn("flex-1", className)} />;
+		return <EmptyState icon={MessagesSquare} title={t("Nothing to show yet")} description={t("This is a read-only copy. Messages appear here as soon as the machine that runs the work sends them.")} className={cn("flex-1", className)} />;
 	}
 
 	if (rows.length === 0) {
 		return (
 			<div className={cn("flex min-h-0 flex-1 flex-col items-center gap-6 overflow-y-auto px-4 py-8 [&>:first-child]:mt-auto [&>:last-child]:mb-auto", className)}>
-				<EmptyState icon={MessagesSquare} title="Start the conversation" description="Describe a task or pick an example. Anything the agent creates shows up here and in the Files panel." className="py-0" />
+				<EmptyState icon={MessagesSquare} title={t("Start the conversation")} description={t("Describe a task or pick an example. Anything the agent creates shows up here and in the Files panel.")} className="py-0" />
 				<Starters onPick={onPickPrompt} />
 			</div>
 		);
@@ -220,7 +221,7 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 				ref={parentRef}
 				onScroll={onScroll}
 				role="log"
-				aria-label="Conversation"
+				aria-label={t("Conversation")}
 				aria-relevant="additions"
 				className="scrollbar-thin absolute inset-0 overflow-y-auto overscroll-contain [overflow-anchor:none]"
 			>
@@ -244,7 +245,7 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 			{loadingOlder ? (
 				<div className="pointer-events-none absolute inset-x-0 top-2 flex justify-center">
 					<span className="animate-pop-in flex items-center gap-1.5 rounded-full bg-overlay px-2.5 py-1 text-2xs text-muted-foreground shadow-pop shadow-[inset_0_0_0_1px_var(--border-strong)]">
-						<Loader2 className="size-3 animate-spin" /> Loading earlier messages
+						<Loader2 className="size-3 animate-spin" /> {t("Loading earlier messages")}
 					</span>
 				</div>
 			) : null}
@@ -258,10 +259,10 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 						<ArrowDown className="size-3.5" aria-hidden />
 						{unread > 0 ? (
 							<>
-								<span className="tabular rounded-full bg-accent px-1.5 py-px text-2xs text-accent-foreground">{unread}</span> new
+								<span className="tabular rounded-full bg-accent px-1.5 py-px text-2xs text-accent-foreground">{unread}</span> {t("new")}
 							</>
 						) : (
-							"Jump to latest"
+							t("Jump to latest")
 						)}
 					</button>
 				</div>

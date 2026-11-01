@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { FileStrip } from "@/components/rich/file-strip.tsx";
 import { FileTile } from "@/components/rich/file-tile.tsx";
 import { attachmentFile } from "@/components/rich/assets.ts";
-import { api, errorMessage, localUrl } from "@/lib/api";
+import { T, t } from "@/i18n";
+import { api, errorText, localUrl } from "@/lib/api";
 import { previewKind, type PreviewKind } from "@/lib/file-kind";
 import { useProjects } from "@/lib/queries";
 import { isAbort, type UploadHandle, uploadFile } from "@/lib/upload";
@@ -53,7 +54,7 @@ export function useAttachmentUploads(sharedId: string): AttachmentUploads {
 			for (const file of files) {
 				const id = ++seq.current;
 				if (file.size > ATTACHMENT_MAX_BYTES) {
-					setItems((all) => [...all, { id, file, sent: 0, status: "error", error: `Larger than ${formatBytes(ATTACHMENT_MAX_BYTES)}` }]);
+					setItems((all) => [...all, { id, file, sent: 0, status: "error", error: t("Larger than {size}", { size: formatBytes(ATTACHMENT_MAX_BYTES) }) }]);
 					continue;
 				}
 				setItems((all) => [...all, { id, file, sent: 0, status: "uploading" }]);
@@ -63,7 +64,7 @@ export function useAttachmentUploads(sharedId: string): AttachmentUploads {
 					.then((attachment) => patch(id, { status: "ready", attachment, sent: file.size }))
 					.catch((e) => {
 						if (isAbort(e)) setItems((all) => all.filter((i) => i.id !== id));
-						else patch(id, { status: "error", error: errorMessage(e) });
+						else patch(id, { status: "error", error: errorText(e) });
 					})
 					.finally(() => handles.current.delete(id));
 			}
@@ -96,7 +97,7 @@ export function useAttachmentUploads(sharedId: string): AttachmentUploads {
 export function AttachmentTray({ uploads, className }: { uploads: AttachmentUploads; className?: string }) {
 	if (uploads.items.length === 0) return null;
 	return (
-		<ul aria-label="Files to send" className={cn("scrollbar-none mb-2 flex gap-2 overflow-x-auto", className)}>
+		<ul aria-label={t("Files to send")} className={cn("scrollbar-none mb-2 flex gap-2 overflow-x-auto", className)}>
 			{uploads.items.map((i) => (
 				<li key={i.id} className="flex w-52 shrink-0 flex-col gap-1.5 rounded-lg bg-surface-2 p-2 text-xs shadow-[inset_0_0_0_1px_var(--border)]">
 					<div className="flex items-center gap-1.5">
@@ -106,7 +107,7 @@ export function AttachmentTray({ uploads, className }: { uploads: AttachmentUplo
 						</span>
 						<button
 							type="button"
-							aria-label={i.status === "uploading" ? `Cancel upload of ${i.file.name}` : `Remove ${i.file.name}`}
+							aria-label={i.status === "uploading" ? t("Cancel upload of {name}", { name: i.file.name }) : t("Remove {name}", { name: i.file.name })}
 							onClick={() => uploads.cancel(i.id)}
 							className="grid size-5 shrink-0 place-items-center rounded text-subtle outline-none hover:bg-surface-3 hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:size-11"
 						>
@@ -115,7 +116,7 @@ export function AttachmentTray({ uploads, className }: { uploads: AttachmentUplo
 					</div>
 					{i.status === "uploading" ? <Progress value={i.file.size ? (i.sent / i.file.size) * 100 : 0} /> : null}
 					<span className={cn("tabular text-2xs", i.status === "error" ? "text-danger" : "text-subtle")}>
-						{i.status === "uploading" ? `${formatBytes(i.sent)} / ${formatBytes(i.file.size)}` : i.status === "error" ? (i.error ?? "Upload failed") : `${formatBytes(i.file.size)} · ready`}
+						{i.status === "uploading" ? t("{sent} / {total}", { sent: formatBytes(i.sent), total: formatBytes(i.file.size) }) : i.status === "error" ? (i.error ?? t("Upload failed")) : t("{size} · ready", { size: formatBytes(i.file.size) })}
 					</span>
 				</li>
 			))}
@@ -128,7 +129,7 @@ export function AttachButton({ onFiles, disabled }: { onFiles: (files: File[]) =
 	const input = useRef<HTMLInputElement>(null);
 	return (
 		<>
-			<Button variant="ghost" size="lg" aria-label="Attach files" disabled={disabled} onClick={() => input.current?.click()} className="shrink-0 px-3 coarse:min-h-12 coarse:min-w-12">
+			<Button variant="ghost" size="lg" aria-label={t("Attach files")} disabled={disabled} onClick={() => input.current?.click()} className="shrink-0 px-3 coarse:min-h-12 coarse:min-w-12">
 				<Paperclip />
 			</Button>
 			<input
@@ -165,7 +166,7 @@ export const AttachmentCards = memo(function AttachmentCards({ sharedId, attachm
 	return (
 		<div data-attachments className={cn("flex w-full max-w-[min(100%,36rem)] flex-col gap-1.5", align === "end" ? "items-end" : "items-start")}>
 			{files.length === 1 && files[0] ? <FileTile file={files[0]} className="w-full" /> : null}
-			{files.length > 1 ? <FileStrip files={files} title="Shared files" className="w-full" /> : null}
+			{files.length > 1 ? <FileStrip files={files} title={t("Shared files")} className="w-full" /> : null}
 			<SaveMenu attachments={attachments} onPick={setSaving} />
 			{saving ? <SaveToProjectDialog sharedId={sharedId} attachment={saving} onClose={() => setSaving(null)} /> : null}
 		</div>
@@ -179,7 +180,7 @@ function SaveMenu({ attachments, onPick }: { attachments: readonly SharedAttachm
 		const only = attachments[0];
 		return (
 			<button type="button" className={trigger} onClick={() => onPick(only)}>
-				<FolderInput className="size-3" aria-hidden /> Save to project…
+				<FolderInput className="size-3" aria-hidden /> {t("Save to project…")}
 			</button>
 		);
 	}
@@ -187,7 +188,7 @@ function SaveMenu({ attachments, onPick }: { attachments: readonly SharedAttachm
 		<Popover>
 			<PopoverTrigger asChild>
 				<button type="button" className={trigger}>
-					<FolderInput className="size-3" aria-hidden /> Save to project…
+					<FolderInput className="size-3" aria-hidden /> {t("Save to project…")}
 				</button>
 			</PopoverTrigger>
 			<PopoverContent align="start" className="flex w-72 flex-col gap-0.5 p-1">
@@ -217,7 +218,7 @@ function SaveToProjectDialog({ sharedId, attachment, onClose }: { sharedId: stri
 	const save = useMutation({
 		mutationFn: () => api.post<FileEntry>(routes.sharedAttachmentSave(sharedId, attachment.id), { projectId: chosen, path: path.trim() || undefined }),
 		onSuccess: (f) => {
-			toast.success(`Saved ${attachment.name}`, { description: `${projects.data?.find((p) => p.id === chosen)?.name ?? "Project"} · ${f.path}` });
+			toast.success(t("Saved {name}", { name: attachment.name }), { description: `${projects.data?.find((p) => p.id === chosen)?.name ?? t("Project")} · ${f.path}` });
 			onClose();
 		},
 	});
@@ -225,9 +226,9 @@ function SaveToProjectDialog({ sharedId, attachment, onClose }: { sharedId: stri
 		<Dialog open onOpenChange={(o) => !o && onClose()}>
 			<DialogContent sheetOnMobile>
 				<DialogHeader>
-					<DialogTitle>Save to project</DialogTitle>
+					<DialogTitle>{t("Save to project")}</DialogTitle>
 					<DialogDescription>
-						Copies <span className="font-mono">{attachment.name}</span> ({formatBytes(attachment.size)}) into a project folder on this machine. An existing file is never overwritten.
+						<T text="Copies <f>{name}</f> ({size}) into a project folder on this machine. An existing file is never overwritten." params={{ name: attachment.name, size: formatBytes(attachment.size) }} tags={{ f: <span className="font-mono" /> }} />
 					</DialogDescription>
 				</DialogHeader>
 				<form
@@ -237,32 +238,32 @@ function SaveToProjectDialog({ sharedId, attachment, onClose }: { sharedId: stri
 						if (chosen) save.mutate();
 					}}
 				>
-					<Field label="Project">
+					<Field label={t("Project")}>
 						{() => (
 							<Select value={chosen} onValueChange={setProjectId}>
 								<SelectTrigger>
-									<SelectValue placeholder={projects.data?.length === 0 ? "No projects yet" : "Select project"} />
+									<SelectValue placeholder={projects.data?.length === 0 ? t("No projects yet") : t("Select project")} />
 								</SelectTrigger>
 								<SelectContent>
 									{projects.data?.map((p) => (
 										<SelectItem key={p.id} value={p.id}>
 											{p.name}
-											{p.origin === "chat" ? " · chat" : ""}
+											{p.origin === "chat" ? ` · ${t("chat")}` : ""}
 										</SelectItem>
 									))}
 								</SelectContent>
 							</Select>
 						)}
 					</Field>
-					<Field label="Path in the project" hint={`Optional — defaults to attachments/${attachment.name}`} error={save.error ? errorMessage(save.error) : null}>
+					<Field label={t("Path in the project")} hint={t("Optional — defaults to attachments/{name}", { name: attachment.name })} error={save.error ? errorText(save.error) : null}>
 						{(id) => <Input id={id} value={path} onChange={(e) => setPath(e.target.value)} placeholder={`attachments/${attachment.name}`} className="font-mono" />}
 					</Field>
 					<DialogFooter>
 						<Button variant="ghost" onClick={onClose}>
-							Cancel
+							{t("Cancel")}
 						</Button>
 						<Button type="submit" variant="primary" loading={save.isPending} disabled={!chosen}>
-							<FolderInput /> Save
+							<FolderInput /> {t("Save")}
 						</Button>
 					</DialogFooter>
 				</form>

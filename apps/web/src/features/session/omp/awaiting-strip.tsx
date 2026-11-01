@@ -2,6 +2,7 @@ import type { SessionLiveState } from "@clam/contracts";
 import { routes } from "@clam/contracts";
 import { ExternalLink, MessageCircleQuestion } from "lucide-react";
 import { useEffect, useState } from "react";
+import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ws } from "@/lib/ws";
@@ -44,8 +45,8 @@ export function AwaitingStrip({ mirrorSessionId, driverName, driverUrl, classNam
 					<MessageCircleQuestion className="size-4" />
 				</span>
 				<div className="flex min-w-0 flex-1 flex-col">
-					<span className="truncate text-[13px] font-medium">{approval ? "The agent needs an approval" : "The agent asked a question"}</span>
-					<span className="truncate text-xs text-muted-foreground">{awaiting.title || "Waiting for an answer"}</span>
+					<span className="truncate text-[13px] font-medium">{approval ? t("The agent needs an approval") : t("The agent asked a question")}</span>
+					<span className="truncate text-xs text-muted-foreground">{awaiting.title || t("Waiting for an answer")}</span>
 				</div>
 				{driverUrl ? (
 					<a
@@ -54,10 +55,10 @@ export function AwaitingStrip({ mirrorSessionId, driverName, driverUrl, classNam
 						rel="noreferrer"
 						className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 text-xs font-medium text-accent-foreground outline-none transition-colors hover:bg-accent-hover focus-visible:shadow-[0_0_0_2px_var(--ring)] coarse:h-11"
 					>
-						Answer on {driverName} <ExternalLink className="size-3.5" aria-hidden />
+						{t("Answer on {name}", { name: driverName })} <ExternalLink className="size-3.5" aria-hidden />
 					</a>
 				) : (
-					<span className="shrink-0 rounded-md bg-surface-3 px-2 py-1 text-2xs text-muted-foreground">Answer on {driverName}</span>
+					<span className="shrink-0 rounded-md bg-surface-3 px-2 py-1 text-2xs text-muted-foreground">{t("Answer on {name}", { name: driverName })}</span>
 				)}
 			</div>
 		</div>

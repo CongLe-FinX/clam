@@ -6,8 +6,9 @@ import { LazyMarkdown } from "@/components/lazy-markdown";
 import { projectFile, type RichFile } from "@/components/rich/assets";
 import { FileStrip } from "@/components/rich/file-strip";
 import { RichImage } from "@/components/rich/rich-image";
+import { t } from "@/i18n";
 import { MeshMessageBubble, parseMeshMessage } from "@/features/tasks/mesh-message";
-import { cn, formatCompact, formatCost } from "@/lib/utils";
+import { cn, formatCompact, formatCost, formatDate, formatNumber, formatTime } from "@/lib/utils";
 import { useSessionEnv } from "./session-env.ts";
 import { type SessionStream, useMsgRec, useMsgRole, useMsgSlice, useRowOutputs } from "./stream-store.ts";
 import { ToolCard } from "./tool-card.tsx";
@@ -33,11 +34,11 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, streaming, redacted }:
 			>
 				<ChevronRight className={cn("size-3 transition-transform duration-150", open && "rotate-90")} aria-hidden />
 				<Brain className="size-3.5" aria-hidden />
-				{streaming ? <Shimmer>Thinking…</Shimmer> : <span>{redacted ? "Reasoning (redacted)" : words ? `Thought · ${words} words` : "Thought"}</span>}
+				{streaming ? <Shimmer>{t("Thinking…")}</Shimmer> : <span>{redacted ? t("Reasoning (redacted)") : words ? t("Thought · {count, plural, one {# word} other {# words}}", { count: words }) : t("Thought")}</span>}
 			</button>
 			{open ? (
 				<div className="animate-fade-in ml-1.5 border-l pl-3.5">
-					<div className="scrollbar-thin max-h-72 overflow-y-auto whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">{redacted ? "This reasoning is not available." : text || "…"}</div>
+					<div className="scrollbar-thin max-h-72 overflow-y-auto whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">{redacted ? t("This reasoning is not available.") : text || "…"}</div>
 				</div>
 			) : null}
 		</div>
@@ -69,20 +70,18 @@ const BlockView = memo(function BlockView({ stream, block, streaming, last }: { 
 		case "toolCall":
 			return <ToolCard stream={stream} block={{ id: block.id, name: block.name, arguments: block.arguments, intent: block.intent }} />;
 		case "image":
-			return <RichImage src={dataUrl(block)} alt="Image from the agent" className="self-start" />;
+			return <RichImage src={dataUrl(block)} alt={t("Image from the agent")} className="self-start" />;
 	}
 });
-
-const time = new Intl.DateTimeFormat("en", { hour: "2-digit", minute: "2-digit" });
 
 function stopNote(msg: UiMessage): { label: string; tone: "warning" | "danger" } | null {
 	switch (msg.stopReason) {
 		case "aborted":
-			return { label: "Interrupted", tone: "warning" };
+			return { label: t("Interrupted"), tone: "warning" };
 		case "length":
-			return { label: "Cut off at the output limit", tone: "warning" };
+			return { label: t("Cut off at the output limit"), tone: "warning" };
 		case "error":
-			return { label: "Failed", tone: "danger" };
+			return { label: t("Failed"), tone: "danger" };
 		default:
 			return null;
 	}
@@ -92,18 +91,18 @@ function UsageFooter({ msg, copyText }: { msg: UiMessage; copyText: string }) {
 	const u = msg.usage;
 	return (
 		<div className="flex min-h-7 flex-wrap items-center gap-x-2.5 gap-y-0.5 text-2xs text-subtle">
-			<span className="tabular">{time.format(msg.timestamp)}</span>
+			<span className="tabular">{formatTime(msg.timestamp)}</span>
 			{msg.model ? <span className="max-w-[16rem] truncate font-mono">{msg.model}</span> : null}
 			{u ? (
 				<>
-					<span className="tabular font-mono" title={`input ${u.tokens.input} · output ${u.tokens.output} · cache read ${u.tokens.cacheRead} · cache write ${u.tokens.cacheWrite}`}>
+					<span className="tabular font-mono" title={t("input {input} · output {output} · cache read {cacheRead} · cache write {cacheWrite}", { input: formatNumber(u.tokens.input), output: formatNumber(u.tokens.output), cacheRead: formatNumber(u.tokens.cacheRead), cacheWrite: formatNumber(u.tokens.cacheWrite) })}>
 						↑{formatCompact(u.tokens.input)} ↓{formatCompact(u.tokens.output)}
 						{u.tokens.cacheRead ? ` ⚡${formatCompact(u.tokens.cacheRead)}` : ""}
 					</span>
 					<span className="tabular font-mono">{formatCost(u.cost)}</span>
 				</>
 			) : null}
-			{copyText ? <CopyButton text={copyText} label="Copy message" className="size-6 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/msg:opacity-100 coarse:size-11 coarse:opacity-100" /> : null}
+			{copyText ? <CopyButton text={copyText} label={t("Copy message")} className="size-6 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/msg:opacity-100 coarse:size-11 coarse:opacity-100" /> : null}
 		</div>
 	);
 }
@@ -130,7 +129,7 @@ const TurnFiles = memo(function TurnFiles({ stream, rowKey }: { stream: SessionS
 	return (
 		<div className="flex flex-col gap-1.5">
 			<FileStrip files={files} onOpen={onOpen} />
-			{outputs.some((o) => o.truncated) ? <p className="text-2xs text-subtle">+ more files changed. Open the Files panel to see them all.</p> : null}
+			{outputs.some((o) => o.truncated) ? <p className="text-2xs text-subtle">{t("+ more files changed. Open the Files panel to see them all.")}</p> : null}
 		</div>
 	);
 });
@@ -143,7 +142,7 @@ function AssistantRow({ stream, rowKey, first }: { stream: SessionStream; rowKey
 	const blocks = msg.content;
 	const visible = blocks.some((b) => (b.type === "text" ? b.text.length > 0 : true));
 	const note = streaming ? null : stopNote(msg);
-	const error = msg.errorMessage ?? (msg.stopReason === "error" ? "The model returned an error." : null);
+	const error = msg.errorMessage ?? (msg.stopReason === "error" ? t("The model returned an error.") : null);
 	const lastIsThinking = blocks[blocks.length - 1]?.type === "thinking";
 	return (
 		<div className="group/msg flex flex-col gap-2.5">
@@ -225,13 +224,13 @@ function UserRow({ stream, rowKey }: { stream: SessionStream; rowKey: string }) 
 						<UserText key={i} text={b.text} />
 					) : b.type === "image" ? (
 						// biome-ignore lint/suspicious/noArrayIndexKey: user message blocks are immutable
-						<RichImage key={i} src={dataUrl(b)} alt="Image you attached" className="mt-1 max-w-[16rem]" />
+						<RichImage key={i} src={dataUrl(b)} alt={t("Image you attached")} className="mt-1 max-w-[16rem]" />
 					) : null,
 				)}
 			</div>
 			<div className="flex min-h-6 items-center gap-1.5 text-2xs text-subtle">
-				{sending ? <span>Sending…</span> : <span className="tabular">{time.format(msg.timestamp)}</span>}
-				{rec.copyText ? <CopyButton text={rec.copyText} label="Copy prompt" className="size-6 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/msg:opacity-100 coarse:size-11 coarse:opacity-100" /> : null}
+				{sending ? <span>{t("Sending…")}</span> : <span className="tabular">{formatTime(msg.timestamp)}</span>}
+				{rec.copyText ? <CopyButton text={rec.copyText} label={t("Copy prompt")} className="size-6 opacity-0 transition-opacity focus-visible:opacity-100 group-hover/msg:opacity-100 coarse:size-11 coarse:opacity-100" /> : null}
 			</div>
 		</div>
 	);
@@ -249,8 +248,8 @@ function CustomRow({ stream, rowKey }: { stream: SessionStream; rowKey: string }
 	);
 }
 
-const dayLabel = new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric" });
-const dayLabelYear = new Intl.DateTimeFormat("en", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+const DAY_LABEL: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
+const DAY_LABEL_YEAR: Intl.DateTimeFormatOptions = { ...DAY_LABEL, year: "numeric" };
 const GAP_MS = 15 * 60_000;
 
 const startOfDay = (ts: number): number => {
@@ -260,10 +259,10 @@ const startOfDay = (ts: number): number => {
 
 /** Divider text between two rows: a day label for the first row / a new day, a clock time after a quiet gap, else null. Stable primitive. */
 function gapLabel(ts: number, prevTs: number | undefined): string | null {
-	if (prevTs !== undefined && startOfDay(prevTs) === startOfDay(ts)) return ts - prevTs < GAP_MS ? null : time.format(ts);
+	if (prevTs !== undefined && startOfDay(prevTs) === startOfDay(ts)) return ts - prevTs < GAP_MS ? null : formatTime(ts);
 	const day = startOfDay(ts);
-	const rel = day === startOfDay(Date.now()) ? "Today" : day === startOfDay(Date.now() - 86_400_000) ? "Yesterday" : new Date(ts).getFullYear() === new Date().getFullYear() ? dayLabel.format(ts) : dayLabelYear.format(ts);
-	return `${rel} · ${time.format(ts)}`;
+	const rel = day === startOfDay(Date.now()) ? t("Today") : day === startOfDay(Date.now() - 86_400_000) ? t("Yesterday") : new Date(ts).getFullYear() === new Date().getFullYear() ? formatDate(ts, DAY_LABEL) : formatDate(ts, DAY_LABEL_YEAR);
+	return t("{day} · {time}", { day: rel, time: formatTime(ts) });
 }
 
 /** Plays the enter animation for rows that arrived live only; a virtualizer remount of a seen row never replays it. */

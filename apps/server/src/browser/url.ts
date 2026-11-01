@@ -1,13 +1,14 @@
+import { type I18nMessage, i18nMsg } from "@clam/contracts";
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export type UrlVerdict = { ok: true; url: string } | { ok: false; code: "invalid" | "blocked"; message: string };
+export type UrlVerdict = { ok: true; url: string } | { ok: false; code: "invalid" | "blocked"; message: I18nMessage };
 
 const SCHEME = /^[a-z][a-z0-9+.-]*:/i;
 const HOST_PORT = /^[^:/\s]+:\d{1,5}(?:[/?#]|$)/;
 const HAS_AUTHORITY = /^[a-z][a-z0-9+.-]*:\/\//i;
-const BLOCKED_FILE = "file:// is only allowed for files inside a project folder";
+const BLOCKED_FILE = i18nMsg("file:// is only allowed for files inside a project folder");
 
 /** Hosts typed without a scheme that are reached over plain http: loopback, IPs, single-label and local-network names. */
 function isLocalHost(host: string): boolean {
@@ -52,7 +53,7 @@ function fileVerdict(file: string, policy: UrlPolicy): UrlVerdict {
  */
 export function normalizeBrowserUrl(input: string, policy: UrlPolicy): UrlVerdict {
 	const text = input.trim();
-	if (!text) return { ok: false, code: "invalid", message: "Enter a URL, or a host and port such as localhost:3000" };
+	if (!text) return { ok: false, code: "invalid", message: i18nMsg("Enter a URL, or a host and port such as localhost:3000") };
 	if (text.toLowerCase() === "about:blank") return { ok: true, url: "about:blank" };
 
 	if (text.startsWith("/") || text.startsWith("~/")) return fileVerdict(text.startsWith("~/") ? path.join(policy.home, text.slice(2)) : text, policy);
@@ -67,16 +68,16 @@ export function normalizeBrowserUrl(input: string, policy: UrlPolicy): UrlVerdic
 			try {
 				file = fileURLToPath(authority ? text : `file://${text.slice(5).replace(/^\/*/, "/")}`);
 			} catch {
-				return { ok: false, code: "invalid", message: "That file URL is not valid" };
+				return { ok: false, code: "invalid", message: i18nMsg("That file URL is not valid") };
 			}
 			return fileVerdict(file, policy);
 		}
 		if (scheme === "http" || scheme === "https") {
-			if (!authority) return { ok: false, code: "invalid", message: "That URL is not valid" };
+			if (!authority) return { ok: false, code: "invalid", message: i18nMsg("That URL is not valid") };
 		} else if (scheme === "about") {
-			return { ok: false, code: "blocked", message: "Only about:blank can be opened" };
+			return { ok: false, code: "blocked", message: i18nMsg("Only about:blank can be opened") };
 		} else {
-			return { ok: false, code: "blocked", message: `${scheme}: addresses cannot be opened in this browser (only http, https and project files)` };
+			return { ok: false, code: "blocked", message: i18nMsg("{scheme}: addresses cannot be opened in this browser (only http, https and project files)", { scheme }) };
 		}
 	}
 
@@ -84,17 +85,17 @@ export function normalizeBrowserUrl(input: string, policy: UrlPolicy): UrlVerdic
 	let candidate = text;
 	if (candidate.startsWith(":")) candidate = `localhost${candidate}`;
 	if (!SCHEME.test(candidate) || HOST_PORT.test(candidate)) {
-		if (/\s/.test(candidate)) return { ok: false, code: "invalid", message: "Enter a URL, or a host and port such as localhost:3000" };
+		if (/\s/.test(candidate)) return { ok: false, code: "invalid", message: i18nMsg("Enter a URL, or a host and port such as localhost:3000") };
 		const host = /^(\[[^\]]+\]|[^/?#:]+)/.exec(candidate)?.[1] ?? "";
 		candidate = `${isLocalHost(host) ? "http" : "https"}://${candidate}`;
 	}
 	try {
 		const parsed = new URL(candidate);
-		if (!parsed.hostname) return { ok: false, code: "invalid", message: "That URL is not valid" };
-		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return { ok: false, code: "blocked", message: "Only http and https pages can be opened" };
+		if (!parsed.hostname) return { ok: false, code: "invalid", message: i18nMsg("That URL is not valid") };
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return { ok: false, code: "blocked", message: i18nMsg("Only http and https pages can be opened") };
 		return { ok: true, url: parsed.href };
 	} catch {
-		return { ok: false, code: "invalid", message: "That URL is not valid" };
+		return { ok: false, code: "invalid", message: i18nMsg("That URL is not valid") };
 	}
 }
 

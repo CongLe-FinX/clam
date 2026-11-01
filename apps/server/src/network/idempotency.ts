@@ -1,3 +1,4 @@
+import { i18nMsg } from "@clam/contracts";
 import { IDEMPOTENCY_TTL_MS, evaluateIdempotency, requestHash } from "@clam/task-engine";
 import { idempotencyRecords, type ClamDb } from "@clam/database";
 import { and, eq, lte } from "drizzle-orm";
@@ -56,19 +57,19 @@ export async function runIdempotent(
 ): Promise<FastifyReply> {
 	const peerId = request.peer?.id as string;
 	const key = request.headers["idempotency-key"];
-	if (typeof key !== "string" || key === "") throw ApiError.badRequest("Idempotency-Key is required");
+	if (typeof key !== "string" || key === "") throw ApiError.badRequest(i18nMsg("Idempotency-Key is required"));
 	const path = (request.raw.url ?? request.url).split("?")[0] as string;
 	const hash = requestHash(request.method, path, request.rawBody);
 	const existing = deps.store.find(peerId, key);
 	const verdict = evaluateIdempotency(existing, hash);
-	if (verdict === "conflict") throw new ApiError(409, "idempotency_conflict", "That Idempotency-Key was already used for a different request");
+	if (verdict === "conflict") throw new ApiError(409, "idempotency_conflict", i18nMsg("That Idempotency-Key was already used for a different request"));
 	if (existing && verdict === "replay") {
 		return reply.status(existing.status).header("Idempotent-Replay", "true").type("application/json").send(existing.responseBody);
 	}
 	const flight = `${peerId}\n${key}`;
 	if (deps.inFlight.has(flight)) {
 		reply.header("Retry-After", "1");
-		throw ApiError.conflict("A request with this Idempotency-Key is still being processed");
+		throw ApiError.conflict(i18nMsg("A request with this Idempotency-Key is still being processed"));
 	}
 	deps.inFlight.add(flight);
 	try {

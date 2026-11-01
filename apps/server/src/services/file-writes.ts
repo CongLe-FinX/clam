@@ -1,3 +1,4 @@
+import { i18nMsg } from "@clam/contracts";
 import { createWriteStream } from "node:fs";
 import { constants, copyFile, link, lstat, mkdir, realpath, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
@@ -8,7 +9,7 @@ import { normalizeRelativePath } from "./files.ts";
 
 /** The version-control directory is never served or written through the file routes (it can hold remote URLs and credentials). */
 export function refuseGitDir(rel: string): void {
-	if (rel.split("/").some((segment) => segment.toLowerCase() === ".git")) throw new ApiError(403, "path_outside_project", "The .git directory is not available through the file routes");
+	if (rel.split("/").some((segment) => segment.toLowerCase() === ".git")) throw new ApiError(403, "path_outside_project", i18nMsg("The .git directory is not available through the file routes"));
 }
 
 /**
@@ -18,13 +19,13 @@ export function refuseGitDir(rel: string): void {
  */
 export async function resolveWritableTarget(root: string, relInput: string): Promise<{ rel: string; abs: string }> {
 	const rel = normalizeRelativePath(relInput);
-	if (rel === "") throw ApiError.badRequest("path must name a file");
+	if (rel === "") throw ApiError.badRequest(i18nMsg("path must name a file"));
 	refuseGitDir(rel);
 	let realRoot: string;
 	try {
 		realRoot = await realpath(root);
 	} catch {
-		throw new ApiError(404, "project_path_missing", "Project directory no longer exists on this node");
+		throw new ApiError(404, "project_path_missing", i18nMsg("Project directory no longer exists on this node"));
 	}
 	const segments = rel.split("/");
 	const name = segments.pop() as string;
@@ -41,10 +42,10 @@ export async function resolveWritableTarget(root: string, relInput: string): Pro
 			continue;
 		}
 		const real = info.isSymbolicLink() ? await realpath(next).catch(() => null) : next;
-		if (real === null) throw new ApiError(403, "path_outside_project", "Path resolves outside the project root");
+		if (real === null) throw new ApiError(403, "path_outside_project", i18nMsg("Path resolves outside the project root"));
 		const inside = path.relative(realRoot, real);
-		if (inside.startsWith("..") || path.isAbsolute(inside)) throw new ApiError(403, "path_outside_project", "Path resolves outside the project root");
-		if (!(await stat(real)).isDirectory()) throw ApiError.conflict(`"${segment}" is a file, not a folder`);
+		if (inside.startsWith("..") || path.isAbsolute(inside)) throw new ApiError(403, "path_outside_project", i18nMsg("Path resolves outside the project root"));
+		if (!(await stat(real)).isDirectory()) throw ApiError.conflict(i18nMsg('"{segment}" is a file, not a folder', { segment }));
 		dir = real;
 	}
 	return { rel, abs: path.join(dir, name) };
@@ -56,7 +57,7 @@ export function limitBytes(max: number): Transform {
 	return new Transform({
 		transform(chunk: Buffer, _encoding, callback) {
 			seen += chunk.length;
-			if (seen > max) return callback(new ApiError(413, "payload_too_large", `The file is larger than the ${Math.round(max / 1024 / 1024)} MB limit`));
+			if (seen > max) return callback(new ApiError(413, "payload_too_large", i18nMsg("The file is larger than the {mb} MB limit", { mb: Math.round(max / 1024 / 1024) })));
 			callback(null, chunk);
 		},
 	});
@@ -73,7 +74,7 @@ export function bodyStream(body: unknown): Readable {
  */
 export async function receiveToFile(body: unknown, tmp: string, max: number, contentLength: string | undefined): Promise<number> {
 	const declared = contentLength !== undefined && /^\d{1,16}$/.test(contentLength) ? Number(contentLength) : null;
-	if (declared !== null && declared > max) throw new ApiError(413, "payload_too_large", `The file is larger than the ${Math.round(max / 1024 / 1024)} MB limit`);
+	if (declared !== null && declared > max) throw new ApiError(413, "payload_too_large", i18nMsg("The file is larger than the {mb} MB limit", { mb: Math.round(max / 1024 / 1024) }));
 	let size = 0;
 	const meter = new Transform({
 		transform(chunk: Buffer, _encoding, callback) {
@@ -101,7 +102,7 @@ export async function commitNew(tmp: string, abs: string, rel: string, overwrite
 		else await link(tmp, abs).finally(() => rm(tmp, { force: true }));
 	} catch (error) {
 		await rm(tmp, { force: true });
-		if ((error as NodeJS.ErrnoException).code === "EEXIST") throw ApiError.conflict(`"${rel}" already exists; send overwrite=1 to replace it`);
+		if ((error as NodeJS.ErrnoException).code === "EEXIST") throw ApiError.conflict(i18nMsg('"{rel}" already exists; send overwrite=1 to replace it', { rel }));
 		throw error;
 	}
 }
@@ -128,5 +129,5 @@ export async function copyIntoFolder(root: string, rel: string, source: string):
 			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
 		}
 	}
-	throw ApiError.conflict(`Too many files named like "${rel}" in the folder`);
+	throw ApiError.conflict(i18nMsg('Too many files named like "{rel}" in the folder', { rel }));
 }

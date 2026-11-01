@@ -1,16 +1,20 @@
-import { type ApiErrorBody, LOCAL_API_PREFIX } from "@clam/contracts";
+import { type ApiErrorBody, type I18nText, LOCAL_API_PREFIX } from "@clam/contracts";
 import { authGate } from "@/features/auth/gate.ts";
+import { renderServerText, t } from "@/i18n";
 
 export class ApiError extends Error {
 	readonly status: number;
 	readonly code: string;
 	readonly details: unknown;
-	constructor(status: number, code: string, message: string, details?: unknown) {
+	/** Structured twin of `message` from the server (localisable); `message` stays the English text. */
+	readonly i18n: I18nText | undefined;
+	constructor(status: number, code: string, message: string, details?: unknown, i18n?: I18nText) {
 		super(message);
 		this.name = "ApiError";
 		this.status = status;
 		this.code = code;
 		this.details = details;
+		this.i18n = i18n;
 	}
 }
 
@@ -46,7 +50,7 @@ async function request<T>(method: string, path: string, query: Query | undefined
 		});
 	} catch (e) {
 		if (e instanceof DOMException && e.name === "AbortError") throw e;
-		throw new ApiError(0, "network", "Cannot reach the CL Agent Mesh server. Is it running?");
+		throw new ApiError(0, "network", t("Cannot reach the CL Agent Mesh server. Is it running?"));
 	}
 	if (res.status === 204) return undefined as T;
 	const text = await res.text();
@@ -62,7 +66,7 @@ async function request<T>(method: string, path: string, query: Query | undefined
 		const err = (json as ApiErrorBody | undefined)?.error;
 		// Signed out on the public origin: flip the global gate once (root layout shows /login, WS pauses). Never retried here.
 		if (res.status === 401 && err?.code === "auth_required") authGate.require();
-		throw new ApiError(res.status, err?.code ?? `http_${res.status}`, err?.message ?? (res.statusText || `Request failed (${res.status})`), err?.details);
+		throw new ApiError(res.status, err?.code ?? `http_${res.status}`, err?.message ?? (res.statusText || t("Request failed ({status})", { status: res.status })), err?.details, err?.i18n);
 	}
 	return json as T;
 }
@@ -78,5 +82,11 @@ export const api = {
 export function errorMessage(e: unknown): string {
 	if (e instanceof ApiError) return e.message;
 	if (e instanceof Error) return e.message;
-	return typeof e === "string" ? e : "Something went wrong";
+	return typeof e === "string" ? e : t("Something went wrong");
+}
+
+/** User-facing text of any thrown value: API errors are rendered from their structured `i18n` when the server sent it. */
+export function errorText(err: unknown): string {
+	if (err instanceof ApiError) return renderServerText(err.message, err.i18n);
+	return errorMessage(err);
 }

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { type PreviewKind } from "@/lib/file-kind";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/ui/empty-state";
+import { t } from "@/i18n";
 
 /**
  * Renders a file the browser can show natively from its bytes URL: image, video/audio (the server answers Range requests, so seeking works),
@@ -10,7 +11,7 @@ import { EmptyState } from "@/ui/empty-state";
  */
 export default function FilePreview({ kind, src, name, className }: { kind: PreviewKind; src: string; name: string; className?: string }) {
 	const [failed, setFailed] = useState(false);
-	if (failed) return <EmptyState icon={FileQuestion} title="Can’t preview this file" description="Your browser could not play or display it. Use Download to open it in another app." />;
+	if (failed) return <EmptyState icon={FileQuestion} title={t("Can’t preview this file")} description={t("Your browser could not play or display it. Use Download to open it in another app.")} />;
 	switch (kind) {
 		case "image":
 			return (

@@ -1,28 +1,30 @@
 import type { Project, Task, TaskMessage, TaskParty, TaskStatus } from "@clam/contracts";
 import type { LucideIcon } from "lucide-react";
+import { msg, t, type Msg } from "@/i18n";
+import { formatUnit } from "@/lib/utils";
 import { CheckCircle2, CircleDashed, CircleSlash, Clock, Hand, Loader2, OctagonAlert, Send, XCircle } from "lucide-react";
 
 export type BadgeVariant = "neutral" | "accent" | "success" | "warning" | "danger" | "outline";
 
-export const STATUS_META: Record<TaskStatus, { label: string; variant: BadgeVariant; icon: LucideIcon; spin?: boolean }> = {
-	offered: { label: "Offered", variant: "warning", icon: Send },
-	accepted: { label: "Queued", variant: "neutral", icon: Clock },
-	running: { label: "Running", variant: "accent", icon: Loader2, spin: true },
-	blocked: { label: "Blocked", variant: "warning", icon: Hand },
-	succeeded: { label: "Succeeded", variant: "success", icon: CheckCircle2 },
-	failed: { label: "Failed", variant: "danger", icon: XCircle },
-	rejected: { label: "Rejected", variant: "danger", icon: CircleSlash },
-	cancelled: { label: "Cancelled", variant: "neutral", icon: OctagonAlert },
-	handed_off: { label: "Handed off", variant: "neutral", icon: CircleDashed },
+export const STATUS_META: Record<TaskStatus, { label: Msg; variant: BadgeVariant; icon: LucideIcon; spin?: boolean }> = {
+	offered: { label: msg("Offered"), variant: "warning", icon: Send },
+	accepted: { label: msg("Queued"), variant: "neutral", icon: Clock },
+	running: { label: msg("Running"), variant: "accent", icon: Loader2, spin: true },
+	blocked: { label: msg("Blocked"), variant: "warning", icon: Hand },
+	succeeded: { label: msg("Succeeded"), variant: "success", icon: CheckCircle2 },
+	failed: { label: msg("Failed"), variant: "danger", icon: XCircle },
+	rejected: { label: msg("Rejected"), variant: "danger", icon: CircleSlash },
+	cancelled: { label: msg("Cancelled"), variant: "neutral", icon: OctagonAlert },
+	handed_off: { label: msg("Handed off"), variant: "neutral", icon: CircleDashed },
 };
 
 export type BoardColumn = "offered" | "active" | "done" | "closed";
 
-export const COLUMNS: Array<{ id: BoardColumn; label: string; hint: string }> = [
-	{ id: "offered", label: "Offered", hint: "Waiting for a decision" },
-	{ id: "active", label: "In progress", hint: "Queued · running · blocked" },
-	{ id: "done", label: "Done", hint: "Succeeded" },
-	{ id: "closed", label: "Failed & closed", hint: "Failed · rejected · cancelled" },
+export const COLUMNS: Array<{ id: BoardColumn; label: Msg; hint: Msg }> = [
+	{ id: "offered", label: msg("Offered"), hint: msg("Waiting for a decision") },
+	{ id: "active", label: msg("In progress"), hint: msg("Queued · running · blocked") },
+	{ id: "done", label: msg("Done"), hint: msg("Succeeded") },
+	{ id: "closed", label: msg("Failed & closed"), hint: msg("Failed · rejected · cancelled") },
 ];
 
 export function columnOf(status: TaskStatus): BoardColumn {
@@ -68,29 +70,29 @@ export function projectsForRepo(url: string, projects: Project[]): Project[] {
 
 export function formatAge(iso: string, now = Date.now()): string {
 	const s = Math.max(0, (now - Date.parse(iso)) / 1000);
-	if (s < 45) return "now";
-	if (s < 3600) return `${Math.round(s / 60)}m`;
-	if (s < 86_400) return `${Math.round(s / 3600)}h`;
-	return `${Math.round(s / 86_400)}d`;
+	if (s < 45) return t("now");
+	if (s < 3600) return formatUnit(Math.round(s / 60), "minute");
+	if (s < 86_400) return formatUnit(Math.round(s / 3600), "hour");
+	return formatUnit(Math.round(s / 86_400), "day");
 }
 
 /** Author line of a discussion message: `agent@node`, `human@node` or `system`. */
 export function authorLabel(m: { author: TaskMessage["author"] }): string {
-	if (m.author.kind === "system") return "System";
+	if (m.author.kind === "system") return t("System");
 	const who = m.author.kind === "agent" ? (m.author.agentName ?? "agent") : "human";
 	return `${who}@${m.author.nodeName}`;
 }
 
-export const KIND_META: Record<TaskMessage["kind"], { label: string; variant: BadgeVariant }> = {
-	question: { label: "Question", variant: "warning" },
-	answer: { label: "Answer", variant: "success" },
-	instruction: { label: "Instruction", variant: "accent" },
-	note: { label: "Note", variant: "neutral" },
+export const KIND_META: Record<TaskMessage["kind"], { label: Msg; variant: BadgeVariant }> = {
+	question: { label: msg("Question"), variant: "warning" },
+	answer: { label: msg("Answer"), variant: "success" },
+	instruction: { label: msg("Instruction"), variant: "accent" },
+	note: { label: msg("Note"), variant: "neutral" },
 };
 
 export const APPROVAL_MODES = [
-	{ value: "always-ask", label: "Always ask" },
-	{ value: "always-ask-cached", label: "Always ask (remember)" },
-	{ value: "write", label: "Ask for writes" },
-	{ value: "yolo", label: "Auto-approve everything" },
+	{ value: "always-ask", label: msg("Always ask") },
+	{ value: "always-ask-cached", label: msg("Always ask (remember)") },
+	{ value: "write", label: msg("Ask for writes") },
+	{ value: "yolo", label: msg("Auto-approve everything") },
 ] as const;

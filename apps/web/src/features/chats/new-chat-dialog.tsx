@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field } from "@/ui/field";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/ui/select";
 import { Textarea } from "@/ui/textarea";
+import { t } from "@/i18n";
 
 const DEFAULT_MODEL = "__default__";
 
@@ -46,8 +47,8 @@ export default function NewChatDialog({ onClose }: { onClose: () => void }) {
 		<Dialog open onOpenChange={(o) => !o && onClose()}>
 			<DialogContent sheetOnMobile>
 				<DialogHeader>
-					<DialogTitle>New chat</DialogTitle>
-					<DialogDescription>Talk to an agent about anything: research, writing, images, video. You can invite agents on other machines from the chat.</DialogDescription>
+					<DialogTitle>{t("New chat")}</DialogTitle>
+					<DialogDescription>{t("Talk to an agent about anything: research, writing, images, video. You can invite agents on other machines from the chat.")}</DialogDescription>
 				</DialogHeader>
 				<form
 					className="flex flex-col gap-4 overflow-y-auto"
@@ -58,9 +59,9 @@ export default function NewChatDialog({ onClose }: { onClose: () => void }) {
 				>
 					<p className="flex gap-2 rounded-lg bg-surface-2 p-3 text-xs text-muted-foreground">
 						<FolderOpen aria-hidden className="mt-0.5 size-3.5 shrink-0 text-accent" />
-						<span>No repository needed — the agent gets its own folder for notes, reports and media. Browse, preview and download its files from the Files panel.</span>
+						<span>{t("No repository needed — the agent gets its own folder for notes, reports and media. Browse, preview and download its files from the Files panel.")}</span>
 					</p>
-					<Field label="What should the agent do?" hint="Optional — sent as soon as the agent is ready">
+					<Field label={t("What should the agent do?")} hint={t("Optional — sent as soon as the agent is ready")}>
 						{(id) => (
 							<Textarea
 								id={id}
@@ -74,18 +75,18 @@ export default function NewChatDialog({ onClose }: { onClose: () => void }) {
 									}
 								}}
 								rows={4}
-								placeholder="e.g. Research the history of the bicycle and write a one-page report."
+								placeholder={t("e.g. Research the history of the bicycle and write a one-page report.")}
 							/>
 						)}
 					</Field>
-					<Field label="Model">
+					<Field label={t("Model")}>
 						{() => (
 							<Select value={model} onValueChange={setModel}>
 								<SelectTrigger>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
-									<SelectItem value={DEFAULT_MODEL}>OMP default</SelectItem>
+									<SelectItem value={DEFAULT_MODEL}>{t("OMP default")}</SelectItem>
 									{models.data?.map((m) => (
 										<SelectItem key={m.selector} value={m.selector}>
 											<span className={cn("font-mono text-xs")}>{m.selector}</span>
@@ -97,10 +98,10 @@ export default function NewChatDialog({ onClose }: { onClose: () => void }) {
 					</Field>
 					<DialogFooter>
 						<Button variant="ghost" onClick={onClose}>
-							Cancel
+							{t("Cancel")}
 						</Button>
 						<Button type="submit" variant="primary" loading={create.isPending}>
-							<MessageSquarePlus /> Start chat
+							<MessageSquarePlus /> {t("Start chat")}
 						</Button>
 					</DialogFooter>
 				</form>

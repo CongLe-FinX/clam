@@ -1,4 +1,4 @@
-import type { ActivityItem } from "@clam/contracts";
+import { i18nMsg, plainMsg, type ActivityItem } from "@clam/contracts";
 import { nodeEvents, taskEvents, taskMessages, tasks } from "@clam/database";
 import { and, desc, eq, inArray, like, lt } from "drizzle-orm";
 import type { ServerContext } from "../context.ts";
@@ -26,6 +26,7 @@ export function listActivity(ctx: Pick<ServerContext, "db" | "identity">, query:
 			taskId: taskEvents.taskId,
 			seq: taskEvents.seq,
 			summary: taskEvents.summary,
+			i18n: taskEvents.i18n,
 			at: taskEvents.createdAt,
 			title: tasks.title,
 			workspaceId: tasks.workspaceId,
@@ -37,7 +38,7 @@ export function listActivity(ctx: Pick<ServerContext, "db" | "identity">, query:
 		.orderBy(desc(taskEvents.createdAt), desc(taskEvents.seq))
 		.limit(limit)
 		.all()
-		.map((e): ActivityItem => ({ id: `task:${e.taskId}:${e.seq}`, at: e.at, kind: "task", taskId: e.taskId, workspaceId: e.workspaceId, nodeName: e.nodeName, summary: `${e.title}: ${e.summary}` }));
+		.map((e): ActivityItem => ({ id: `task:${e.taskId}:${e.seq}`, at: e.at, kind: "task", taskId: e.taskId, workspaceId: e.workspaceId, nodeName: e.nodeName, summary: `${e.title}: ${e.summary}`, ...(e.i18n && { subject: e.title, i18n: e.i18n }) }));
 
 	const messages = db
 		.select({
@@ -75,7 +76,8 @@ export function listActivity(ctx: Pick<ServerContext, "db" | "identity">, query:
 				.map((e): ActivityItem => {
 					const name = typeof e.payload?.peerName === "string" ? e.payload.peerName : "a peer";
 					const what = e.type.slice("peer.".length);
-					return { id: `node:${e.id}`, at: e.createdAt, kind: "peer", taskId: null, workspaceId: null, nodeName: name, summary: `Peer ${name} ${what}` };
+					const say = what === "added" ? i18nMsg("Peer {name} added", { name }) : what === "revoked" ? i18nMsg("Peer {name} revoked", { name }) : plainMsg(`Peer ${name} ${what}`);
+					return { id: `node:${e.id}`, at: e.createdAt, kind: "peer", taskId: null, workspaceId: null, nodeName: name, summary: say.text, ...(say.i18n && { i18n: say.i18n }) };
 				});
 
 	return [...events, ...messages, ...peers].sort((a, b) => (a.at === b.at ? (a.id < b.id ? 1 : -1) : a.at < b.at ? 1 : -1)).slice(0, limit);

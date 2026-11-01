@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { readFile } from "node:fs/promises";
 import { wire } from "@clam/agent-network";
-import type { Capability } from "@clam/contracts";
+import { i18nMsg, type Capability } from "@clam/contracts";
 import { checkEpoch } from "@clam/task-engine";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { ApiError } from "../http/errors.ts";
@@ -63,7 +63,7 @@ export function registerTaskWireRoutes(api: FastifyInstance, deps: TaskWireDeps)
 		const row = ownTask(request, request.params.id);
 		const { since } = request.query;
 		if (since === undefined) return store.toWireRecord(row);
-		if (!/^\d{1,15}$/.test(since)) throw ApiError.badRequest("since must be a non-negative integer");
+		if (!/^\d{1,15}$/.test(since)) throw ApiError.badRequest(i18nMsg("since must be a non-negative integer"));
 		// A fenced node keeps its own `late_result` notes private: the timeline the sender mirrors ends at the seal.
 		return { ...store.toWireRecord(row), events: store.eventsSince(row.id, Number(since)).filter((e) => e.type !== "late_result").map((e) => store.toEvent(e)) };
 	});
@@ -75,7 +75,7 @@ export function registerTaskWireRoutes(api: FastifyInstance, deps: TaskWireDeps)
 			const body = bodyOf(wire.CancelTaskRequest, request);
 			const epoch = checkEpoch(row.epoch, body.epoch);
 			if (!epoch.ok) {
-				throw new ApiError(409, epoch.reason === "stale" ? "stale_epoch" : "conflict", `The cancel carries epoch ${body.epoch}; the task is at epoch ${row.epoch}`, { currentEpoch: epoch.currentEpoch });
+				throw new ApiError(409, epoch.reason === "stale" ? "stale_epoch" : "conflict", i18nMsg("The cancel carries epoch {received}; the task is at epoch {current}", { received: body.epoch, current: row.epoch }), { currentEpoch: epoch.currentEpoch });
 			}
 			const cancelled = await tasks.executor.cancel(row.id, { reason: body.reason ?? null, by: "sender" });
 			return { status: 200, body: store.toWireRecord(cancelled) satisfies wire.TaskRecord };
@@ -86,7 +86,7 @@ export function registerTaskWireRoutes(api: FastifyInstance, deps: TaskWireDeps)
 		const row = ownTask(request, request.params.id);
 		// The capability depends on our role: the sender of a task instructs the executor, the executor reports back to the sender.
 		const needed: Capability = row.direction === "incoming" ? "tasks.send" : "tasks.receive";
-		if (!request.peer?.capabilities.includes(needed)) throw new ApiError(403, "forbidden", `Missing capability: ${needed}`, { missing: [needed] });
+		if (!request.peer?.capabilities.includes(needed)) throw new ApiError(403, "forbidden", i18nMsg("Missing capability: {capability}", { capability: needed }), { missing: [needed] });
 		return idempotent(request, reply, async () => {
 			refuseWhileMoving(reply, store.get(row.id));
 			const body = bodyOf(wire.TaskMessageRequest, request);

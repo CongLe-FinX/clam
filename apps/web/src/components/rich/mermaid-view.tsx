@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t } from "@/i18n";
 import { useResolvedTheme } from "@/lib/theme";
 
 /** Renders one ```mermaid diagram. Lazy chunk. `securityLevel: "strict"` makes mermaid sanitise labels and the SVG with its own DOMPurify. */
@@ -196,7 +197,7 @@ export default function MermaidView({ code }: { code: string }) {
 		};
 	}, [code, dark]);
 	if (state.error) throw new Error(state.error.split("\n").slice(0, 4).join("\n"));
-	if (!state.svg) return <div className="h-32 animate-pulse rounded-lg bg-surface-2" aria-label="Rendering diagram" role="status" />;
+	if (!state.svg) return <div className="h-32 animate-pulse rounded-lg bg-surface-2" aria-label={t("Rendering diagram")} role="status" />;
 	// The SVG comes from mermaid's strict mode, which sanitises it with DOMPurify before returning.
-	return <div className="clam-mermaid scrollbar-thin overflow-x-auto" role="img" aria-label="Diagram" dangerouslySetInnerHTML={{ __html: state.svg }} />;
+	return <div className="clam-mermaid scrollbar-thin overflow-x-auto" role="img" aria-label={t("Diagram")} dangerouslySetInnerHTML={{ __html: state.svg }} />;
 }

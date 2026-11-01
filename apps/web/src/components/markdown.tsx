@@ -10,6 +10,7 @@ import { hasMath, loadedMath, loadMath, type MathPlugins, protectCurrency } from
 import { RemoteImageCard, RichImage, BrokenImageCard } from "./rich/rich-image.tsx";
 import { RichFence } from "./rich/rich-fence.tsx";
 import { CodeBlock } from "./code-block.tsx";
+import { t } from "@/i18n";
 
 type Plugins = NonNullable<Options["remarkPlugins"]>;
 
@@ -56,7 +57,7 @@ const onlyImages = (n: HastNode): boolean =>
 function Img({ src, alt }: { src?: string | Blob; alt?: string }) {
 	const assets = useContext(AssetsContext);
 	if (typeof src !== "string" || !src) return null;
-	if (DATA_IMAGE.test(src)) return <RichImage src={src} alt={alt} label={alt || "Embedded image"} />;
+	if (DATA_IMAGE.test(src)) return <RichImage src={src} alt={alt} label={alt || t("Embedded image")} />;
 	if (/^https?:\/\//i.test(src) || src.startsWith("//")) return <RemoteImageCard src={src.startsWith("//") ? `https:${src}` : src} alt={alt} />;
 	const file = assets?.resolve(src);
 	if (!file) return <BrokenImageCard label={alt || src} detail={src} />;
@@ -94,7 +95,7 @@ function Code({ className, children, node }: { className?: string; children?: Re
 	const lang = m?.[1] ?? null;
 	if (lang === "mermaid" || lang === "chart") {
 		if (fenceClosed(src, node)) return <RichFence kind={lang} code={code} className="my-3" />;
-		return <CodeBlock code={code} lang={lang === "chart" ? "json" : "text"} hint="rendering when complete" className="my-3" />;
+		return <CodeBlock code={code} lang={lang === "chart" ? "json" : "text"} hint={t("rendering when complete")} className="my-3" />;
 	}
 	return <CodeBlock code={code} lang={lang} className="my-3" />;
 }
@@ -113,7 +114,7 @@ const components: Components = {
 			<table>{children}</table>
 		</div>
 	),
-	input: ({ type, checked }) => (type === "checkbox" ? <input type="checkbox" checked={Boolean(checked)} readOnly disabled aria-label={checked ? "Done" : "Not done"} /> : null),
+	input: ({ type, checked }) => (type === "checkbox" ? <input type="checkbox" checked={Boolean(checked)} readOnly disabled aria-label={checked ? t("Done") : t("Not done")} /> : null),
 };
 
 const REMARK_BASE: Plugins = [remarkGfm];

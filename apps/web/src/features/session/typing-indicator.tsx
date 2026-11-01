@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { t } from "@/i18n";
 import { useOmpStateOptional, useOptionalOmpStore } from "./omp/omp-store.ts";
 import { useSessionEnv } from "./session-env.ts";
 import { isBusy, type SessionStream, useMsgSlice, useOrder, useStreamMeta } from "./stream-store.ts";
@@ -30,7 +31,7 @@ export const TypingIndicator = memo(function TypingIndicator({ stream }: { strea
 							[0, 1, 2].map((i) => <span key={i} className="size-1.5 animate-typing-dot rounded-full bg-accent" style={{ animationDelay: `${i * 160}ms` }} />)
 						)}
 					</span>
-					<span>{aborting ? "Stopping…" : waiting ? "Waiting for your answer" : `${env.agentName} is working…`}</span>
+					<span>{aborting ? t("Stopping…") : waiting ? t("Waiting for your answer") : t("{name} is working…", { name: env.agentName })}</span>
 				</div>
 			) : null}
 		</div>

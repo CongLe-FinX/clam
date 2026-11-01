@@ -5,7 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
-import { errorMessage } from "@/lib/api";
+import { msg, t, tr, type Msg } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { useProject } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -23,7 +24,7 @@ import { discardPaths, setStaged } from "./ops.ts";
 import { CreatePullRequestDialog, PullRequestsPanel } from "./pull-requests.tsx";
 import { RepoPanel } from "./repo-panel.tsx";
 import { useGitUi } from "./store.ts";
-import { type ChangeGroup, splitPath } from "./status-utils.ts";
+import { type ChangeGroup, KIND_LABEL, splitPath } from "./status-utils.ts";
 import { GitToolbar } from "./toolbar.tsx";
 
 type Tab = "changes" | "history" | "prs" | "repo";
@@ -52,7 +53,7 @@ export default function GitWorkbench({ projectId, sessionId, className }: GitWor
 	const status = useGitStatus(projectId, { live: true });
 	if (status.isPending) {
 		return (
-			<div className={cn("flex h-full flex-col gap-3 p-3", className)} aria-busy aria-label="Loading git status">
+			<div className={cn("flex h-full flex-col gap-3 p-3", className)} aria-busy aria-label={t("Loading git status")}>
 				<Skeleton className="h-8 w-2/3" />
 				<Skeleton className="h-6" />
 				<Skeleton className="h-6 w-5/6" />
@@ -65,11 +66,11 @@ export default function GitWorkbench({ projectId, sessionId, className }: GitWor
 			<EmptyState
 				className={cn("h-full", className)}
 				icon={FolderGit2}
-				title="Could not read git status"
-				description={errorMessage(status.error)}
+				title={t("Could not read git status")}
+				description={errorText(status.error)}
 				action={
 					<Button size="sm" variant="outline" onClick={() => void status.refetch()}>
-						<RefreshCw /> Retry
+						<RefreshCw /> {t("Retry")}
 					</Button>
 				}
 			/>
@@ -80,19 +81,19 @@ export default function GitWorkbench({ projectId, sessionId, className }: GitWor
 			<EmptyState
 				className={cn("h-full", className)}
 				icon={FolderGit2}
-				title="Not a Git repository"
-				description="This project is a plain folder — no repository is needed. Sessions, tasks and shared sessions work with its files as they are. To use Git here, initialize a repository in the folder or clone a GitHub repository as a new project."
+				title={t("Not a Git repository")}
+				description={t("This project is a plain folder — no repository is needed. Sessions, tasks and shared sessions work with its files as they are. To use Git here, initialize a repository in the folder or clone a GitHub repository as a new project.")}
 			/>
 		);
 	}
 	return <Workbench projectId={projectId} sessionId={sessionId} status={status.data} className={className} />;
 }
 
-const TABS: Array<{ id: Tab; label: string; icon: typeof History }> = [
-	{ id: "changes", label: "Changes", icon: GitCommitHorizontal },
-	{ id: "history", label: "History", icon: History },
-	{ id: "prs", label: "Pull requests", icon: GitPullRequest },
-	{ id: "repo", label: "Repo", icon: Settings2 },
+const TABS: Array<{ id: Tab; label: Msg; icon: typeof History }> = [
+	{ id: "changes", label: msg("Changes"), icon: GitCommitHorizontal },
+	{ id: "history", label: msg("History"), icon: History },
+	{ id: "prs", label: msg("Pull requests"), icon: GitPullRequest },
+	{ id: "repo", label: msg("Repo"), icon: Settings2 },
 ];
 
 function defaultView(status: GitStatus): DiffView {
@@ -180,7 +181,7 @@ function Workbench({ projectId, sessionId, status, className }: GitWorkbenchProp
 	const changeCount = status.files.length;
 	const list = (
 		<div className="flex h-full min-h-0 flex-col">
-			<div role="tablist" aria-label="Git sections" className="scrollbar-none flex shrink-0 items-center gap-0.5 overflow-x-auto border-b px-1.5 py-1.5">
+			<div role="tablist" aria-label={t("Git sections")} className="scrollbar-none flex shrink-0 items-center gap-0.5 overflow-x-auto border-b px-1.5 py-1.5">
 				{TABS.map(({ id, label, icon: Icon }) => (
 					<button
 						key={id}
@@ -194,7 +195,7 @@ function Workbench({ projectId, sessionId, status, className }: GitWorkbenchProp
 						)}
 					>
 						<Icon className="size-3.5" aria-hidden />
-						{label}
+						{tr(label)}
 						{id === "changes" && changeCount > 0 ? <span className="tabular rounded bg-accent-soft px-1 font-mono text-2xs text-accent">{changeCount}</span> : null}
 					</button>
 				))}
@@ -252,7 +253,7 @@ function Workbench({ projectId, sessionId, status, className }: GitWorkbenchProp
 								<Panel id="git-list" order={1} defaultSize={38} minSize={26} maxSize={60} className="min-w-0">
 									{list}
 								</Panel>
-								<PanelResizeHandle aria-label="Resize git panels" />
+								<PanelResizeHandle aria-label={t("Resize git panels")} />
 								<Panel id="git-diff" order={2} minSize={30} className="min-w-0">
 									{diffPane()}
 								</Panel>
@@ -267,8 +268,8 @@ function Workbench({ projectId, sessionId, status, className }: GitWorkbenchProp
 			{!split && !mobile ? (
 				<Sheet open={detailOpen} onOpenChange={setDetailOpen}>
 					<SheetContent side="right" className="w-[min(96vw,960px)] p-0" aria-describedby={undefined}>
-						<SheetTitle className="sr-only">Diff</SheetTitle>
-						<SheetDescription className="sr-only">Changes for the selected file or commit.</SheetDescription>
+						<SheetTitle className="sr-only">{t("Diff")}</SheetTitle>
+						<SheetDescription className="sr-only">{t("Changes for the selected file or commit.")}</SheetDescription>
 						{detailOpen ? diffPane({ onClose: () => setDetailOpen(false) }) : null}
 					</SheetContent>
 				</Sheet>
@@ -289,26 +290,28 @@ function Workbench({ projectId, sessionId, status, className }: GitWorkbenchProp
 			<ConfirmDialog
 				open={discard !== null}
 				onOpenChange={(o) => !o && !discarding && setDiscard(null)}
-				title={discard?.every((f) => f.kind === "untracked") ? "Delete untracked files?" : "Discard changes?"}
+				title={discard?.every((f) => f.kind === "untracked") ? t("Delete untracked files?") : t("Discard changes?")}
 				danger
 				loading={discarding}
-				confirmLabel={discard?.every((f) => f.kind === "untracked") ? "Delete files" : "Discard changes"}
+				confirmLabel={discard?.every((f) => f.kind === "untracked") ? t("Delete files") : t("Discard changes")}
 				onConfirm={() => void confirmDiscard()}
 				description={
 					discard ? (
 						<span className="flex flex-col gap-2">
 							<span>
-								This permanently {discard.every((f) => f.kind === "untracked") ? "deletes" : "reverts"} {discard.length === 1 ? "this file" : `these ${discard.length} files`} in your working tree. It cannot be undone.
+								{discard.every((f) => f.kind === "untracked")
+									? t("This permanently deletes {count, plural, one {this file} other {these # files}} in your working tree. It cannot be undone.", { count: discard.length })
+									: t("This permanently reverts {count, plural, one {this file} other {these # files}} in your working tree. It cannot be undone.", { count: discard.length })}
 							</span>
 							<span className="scrollbar-thin block max-h-40 overflow-y-auto rounded-lg bg-surface-2 px-2.5 py-2">
 								{discard.slice(0, 40).map((f) => (
 									<span key={f.path} className="block truncate font-mono text-xs text-foreground" title={f.path}>
 										{splitPath(f.path).dir}
 										<span className="font-semibold">{splitPath(f.path).name}</span>
-										<span className="ml-2 font-sans text-2xs text-subtle">{f.kind === "untracked" ? "untracked — will be deleted" : f.kind}</span>
+										<span className="ml-2 font-sans text-2xs text-subtle">{f.kind === "untracked" ? t("untracked — will be deleted") : tr(KIND_LABEL[f.kind])}</span>
 									</span>
 								))}
-								{discard.length > 40 ? <span className="block pt-1 text-2xs text-subtle">and {discard.length - 40} more…</span> : null}
+								{discard.length > 40 ? <span className="block pt-1 text-2xs text-subtle">{t("and {count} more…", { count: discard.length - 40 })}</span> : null}
 							</span>
 						</span>
 					) : null

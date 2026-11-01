@@ -1,5 +1,5 @@
 import type { wire } from "@clam/agent-network";
-import type { SharedInvite, SharedSession } from "@clam/contracts";
+import { i18nMsg, type SharedInvite, type SharedSession } from "@clam/contracts";
 import { agentSessions, agents, peerAgents, projects, workspaceMembers } from "@clam/database";
 import { buildSharedBrief, formatParticipant, normalizeRepoUrl, slugify } from "@clam/task-engine";
 import { and, eq, isNull } from "drizzle-orm";
@@ -42,10 +42,10 @@ export class SharingService implements SharingApi {
 	addParticipant(sessionId: string, input: ShareInput): Promise<SharedSession> {
 		return this.lock.run(`share:${sessionId}`, async () => {
 			const session = this.ctx.sessions.get(sessionId);
-			if (session.kind === "mirror" || session.movedTo) throw new ApiError(409, "session_read_only", "Only a session that runs on this node can be shared");
+			if (session.kind === "mirror" || session.movedTo) throw new ApiError(409, "session_read_only", i18nMsg("Only a session that runs on this node can be shared"));
 			let shared = session.sharedSessionId ? this.store.find(session.sharedSessionId) : undefined;
 			if (shared && (shared.state !== "active" || shared.localRole !== "driver" || shared.localSessionId !== sessionId)) {
-				throw new ApiError(409, "not_driver", "Only the driver of a shared session can add participants");
+				throw new ApiError(409, "not_driver", i18nMsg("Only the driver of a shared session can add participants"));
 			}
 			const peer = this.ctx.network.peers.row(input.nodeId);
 			if (!peer || peer.status === "revoked") throw ApiError.notFound("Peer");
@@ -60,7 +60,7 @@ export class SharingService implements SharingApi {
 				.from(workspaceMembers)
 				.where(and(eq(workspaceMembers.workspaceId, project.workspaceId), eq(workspaceMembers.memberId, peer.id), isNull(workspaceMembers.revokedAt)))
 				.get();
-			if (!member) throw new ApiError(409, "not_in_workspace", `${peer.name} is not a member of this project's workspace`);
+			if (!member) throw new ApiError(409, "not_in_workspace", i18nMsg("{name} is not a member of this project's workspace", { name: peer.name }));
 			let agentName: string | null = null;
 			if (input.agentId) {
 				const agent = this.ctx.db
@@ -68,12 +68,12 @@ export class SharingService implements SharingApi {
 					.from(peerAgents)
 					.where(and(eq(peerAgents.peerId, peer.id), eq(peerAgents.agentId, input.agentId)))
 					.get();
-				if (!agent) throw new ApiError(404, "not_found", `Agent ${input.agentId} is not known on ${peer.name}`);
+				if (!agent) throw new ApiError(404, "not_found", i18nMsg("Agent {agent} is not known on {name}", { agent: input.agentId, name: peer.name }));
 				agentName = agent.name;
 			}
 			const existing = shared ? this.store.participant(shared.id, peer.id) : undefined;
 			if (existing && (existing.state === "active" || existing.state === "invited")) {
-				throw new ApiError(409, "already_participant", `${peer.name} is already ${existing.state === "active" ? "in" : "invited to"} this shared session`);
+				throw new ApiError(409, "already_participant", existing.state === "active" ? i18nMsg("{name} is already in this shared session", { name: peer.name }) : i18nMsg("{name} is already invited to this shared session", { name: peer.name }));
 			}
 			shared ??= repo ? await this.createShared(session, project, repo.url) : await this.createFilesShared(session, project);
 			const inviteId = newInviteId();
@@ -117,8 +117,8 @@ export class SharingService implements SharingApi {
 	private async createShared(session: typeof agentSessions.$inferSelect, project: ProjectRow, repoUrl: string): Promise<SharedRow> {
 		const { gitService } = this.ctx;
 		const status = await gitService.status(project.id);
-		if (!status.isRepo) throw new ApiError(409, "not_a_git_repo", "The session's project directory is not a git repository");
-		if (status.operation) throw new ApiError(409, "git_operation_in_progress", `A ${status.operation} is in progress in the project; finish or abort it first.`);
+		if (!status.isRepo) throw new ApiError(409, "not_a_git_repo", i18nMsg("The session's project directory is not a git repository"));
+		if (status.operation) throw new ApiError(409, "git_operation_in_progress", i18nMsg("A {operation} is in progress in the project; finish or abort it first.", { operation: status.operation }));
 		const suffix = session.id.replace(/[^a-z0-9]/gi, "").toLowerCase().slice(-6) || "shared";
 		const title = session.title === NO_GOAL_TITLE ? "Shared session" : session.title;
 		const branch = `clam/shared/${slugify(title, 40)}-${suffix}`;
@@ -130,7 +130,7 @@ export class SharingService implements SharingApi {
 			}
 			await gitService.push(project.id, { setUpstream: true });
 		} catch (error) {
-			throw new ApiError(409, "shared_branch_failed", `Could not create and push the shared branch ${branch}: ${errorText(error, 300)}`, { branch });
+			throw new ApiError(409, "shared_branch_failed", i18nMsg("Could not create and push the shared branch {branch}: {error}", { branch, error: errorText(error, 300) }), { branch });
 		}
 		const now = new Date().toISOString();
 		const owner = this.ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, session.agentId)).get();
@@ -170,7 +170,7 @@ export class SharingService implements SharingApi {
 			return row;
 		});
 		this.ctx.sessions.setSharedSession(session.id, shared.id);
-		this.hub.discussion.note(shared.id, `Shared session created by ${this.hub.nodeName()} on branch ${branch}.`);
+		this.hub.discussion.note(shared.id, i18nMsg("Shared session created by {node} on branch {branch}.", { node: this.hub.nodeName(), branch }));
 		return shared;
 	}
 
@@ -214,15 +214,15 @@ export class SharingService implements SharingApi {
 			return row;
 		});
 		this.ctx.sessions.setSharedSession(session.id, shared.id);
-		this.hub.discussion.note(shared.id, `Shared session created by ${this.hub.nodeName()} (no git repository: the working folder travels as a bundle with every checkpoint).`);
+		this.hub.discussion.note(shared.id, i18nMsg("Shared session created by {node} (no git repository: the working folder travels as a bundle with every checkpoint).", { node: this.hub.nodeName() }));
 		return shared;
 	}
 
 	removeParticipant(sharedId: string, nodeId: string): Promise<SharedSession> {
 		return this.lock.run(`membership:${sharedId}`, async () => {
 			const shared = this.store.get(sharedId);
-			if (shared.state !== "active" || shared.localRole !== "driver") throw new ApiError(409, "not_driver", "Only the driver can remove participants");
-			if (nodeId === this.self) throw ApiError.conflict("The driver cannot remove itself; transfer the driver role first");
+			if (shared.state !== "active" || shared.localRole !== "driver") throw new ApiError(409, "not_driver", i18nMsg("Only the driver can remove participants"));
+			if (nodeId === this.self) throw ApiError.conflict(i18nMsg("The driver cannot remove itself; transfer the driver role first"));
 			const participant = this.store.participant(sharedId, nodeId);
 			if (!participant || (participant.state !== "active" && participant.state !== "invited")) throw ApiError.notFound("Participant");
 			this.store.updateParticipant(sharedId, nodeId, { state: "removed" });
@@ -232,7 +232,7 @@ export class SharingService implements SharingApi {
 				if (target.nodeId === this.self || (target.state !== "active" && target.nodeId !== nodeId)) continue;
 				this.hub.enqueue({ peerId: target.nodeId, sharedSessionId: sharedId, kind: "shared.membership", refId: `remove:${nodeId}`, path: `/shared/${sharedId}/membership`, body: notice, idempotencyKey: `shared.membership:${sharedId}:remove:${nodeId}:${target.nodeId}:${Date.now()}`.slice(0, 128) });
 			}
-			this.hub.discussion.note(sharedId, `${participant.nodeName} was removed from the shared session.`);
+			this.hub.discussion.note(sharedId, i18nMsg("{name} was removed from the shared session.", { name: participant.nodeName }));
 			this.hub.changed(sharedId);
 			return this.hub.views.shared(this.store.get(sharedId));
 		});
@@ -244,10 +244,10 @@ export class SharingService implements SharingApi {
 		return this.lock.run(`membership:${sharedId}`, async () => {
 			const shared = this.store.get(sharedId);
 			if (shared.state !== "active") return this.hub.views.shared(shared);
-			if (shared.localRole === "driver") throw new ApiError(409, "driver_cannot_leave", "The driver cannot leave: transfer the driver role to a participant, or remove the participants first");
+			if (shared.localRole === "driver") throw new ApiError(409, "driver_cannot_leave", i18nMsg("The driver cannot leave: transfer the driver role to a participant, or remove the participants first"));
 			const notice: wire.SharedMembershipRequest = { epoch: shared.epoch, action: "leave", nodeId: this.self, reason: null };
 			// The group hears it from the leaver itself (replicated, queued ahead of the membership notice); the others do not repeat it.
-			this.hub.discussion.note(sharedId, `${this.hub.nodeName()} left the shared session.`);
+			this.hub.discussion.note(sharedId, i18nMsg("{name} left the shared session.", { name: this.hub.nodeName() }));
 			for (const target of this.store.participants(sharedId)) {
 				if (target.nodeId === this.self || target.state !== "active") continue;
 				this.hub.enqueue({ peerId: target.nodeId, sharedSessionId: sharedId, kind: "shared.membership", refId: `leave:${this.self}`, path: `/shared/${sharedId}/membership`, body: notice, idempotencyKey: `shared.membership:${sharedId}:leave:${this.self}:${target.nodeId}:${Date.now()}`.slice(0, 128) });
@@ -283,7 +283,7 @@ export class SharingService implements SharingApi {
 		if (!shared || shared.state !== "active") return;
 		const self = this.store.participant(shared.id, this.self);
 		const inUse = shared.localSessionId === row.id || shared.mirrorSessionId === row.id || (shared.localRole !== "driver" && self?.agentSessionId === row.id);
-		if (inUse) throw new ApiError(409, "shared_session_active", "This session is part of an active shared session. Leave (or hand over) the shared session first, then delete it.", { sharedSessionId: shared.id });
+		if (inUse) throw new ApiError(409, "shared_session_active", i18nMsg("This session is part of an active shared session. Leave (or hand over) the shared session first, then delete it."), { sharedSessionId: shared.id });
 	}
 
 	// ------------------------------------------------------------------ participant: receiving invitations
@@ -292,24 +292,24 @@ export class SharingService implements SharingApi {
 		// No await before the insert: a concurrent duplicate delivery cannot interleave between the lookup and the insert.
 		const known = this.store.invite(request.inviteId);
 		if (known) {
-			if (known.fromNodeId !== peerId) throw new ApiError(409, "idempotency_conflict", "That invitation id belongs to another sender");
+			if (known.fromNodeId !== peerId) throw new ApiError(409, "idempotency_conflict", i18nMsg("That invitation id belongs to another sender"));
 			return { inviteId: known.id, state: known.state === "accepted" ? "accepted" : known.state === "declined" ? "declined" : "pending", created: false };
 		}
 		const peer = this.ctx.network.peers.row(peerId);
-		if (!peer || peer.status === "revoked") throw new ApiError(403, "forbidden", "The sender is not a paired peer");
+		if (!peer || peer.status === "revoked") throw new ApiError(403, "forbidden", i18nMsg("The sender is not a paired peer"));
 		const member = this.ctx.db
 			.select()
 			.from(workspaceMembers)
 			.where(and(eq(workspaceMembers.workspaceId, request.workspaceId), eq(workspaceMembers.memberId, peerId), isNull(workspaceMembers.revokedAt)))
 			.get();
-		if (!member) throw new ApiError(403, "forbidden", "The sender is not a member of that workspace on this node");
+		if (!member) throw new ApiError(403, "forbidden", i18nMsg("The sender is not a member of that workspace on this node"));
 		const filesMode = request.vcs === "files";
 		const repo = filesMode ? null : request.repo ? normalizeRepoUrl(request.repo.url) : null;
-		if (!filesMode && !repo) throw ApiError.badRequest(request.repo ? "repo.url is not a GitHub repository URL" : "A git shared session needs repo (its GitHub repository and shared branch)");
-		if (request.targetAgentId && !this.ompAgent(request.targetAgentId)) throw new ApiError(400, "unknown_agent", "The requested agent does not exist on this node");
+		if (!filesMode && !repo) throw ApiError.badRequest(request.repo ? i18nMsg("repo.url is not a GitHub repository URL") : i18nMsg("A git shared session needs repo (its GitHub repository and shared branch)"));
+		if (request.targetAgentId && !this.ompAgent(request.targetAgentId)) throw new ApiError(400, "unknown_agent", i18nMsg("The requested agent does not exist on this node"));
 		const local = this.store.find(request.sharedSessionId);
 		if (local && local.state === "active") {
-			if (local.localRole === "driver" || local.driverNodeId !== peerId) throw ApiError.conflict("This node already takes part in that shared session");
+			if (local.localRole === "driver" || local.driverNodeId !== peerId) throw ApiError.conflict(i18nMsg("This node already takes part in that shared session"));
 			return { inviteId: request.inviteId, state: "accepted", created: false };
 		}
 		const { row } = this.store.insertInvite({
@@ -364,7 +364,7 @@ export class SharingService implements SharingApi {
 	decide(inviteId: string, input: DecideInput): Promise<SharedInvite> {
 		return this.lock.run(`invite:${inviteId}`, async () => {
 			const invite = this.store.getInvite(inviteId);
-			if (invite.state !== "pending") throw ApiError.conflict(`This invitation is already ${invite.state}`, { state: invite.state });
+			if (invite.state !== "pending") throw ApiError.conflict(i18nMsg("This invitation is already {state}", { state: invite.state }), { state: invite.state });
 			if (input.decision === "decline") {
 				const updated = this.store.updateInvite(inviteId, { state: "declined", decidedAt: new Date().toISOString() });
 				const body: wire.SharedDecisionRequest = { inviteId, decision: "decline", reason: input.reason ?? null };
@@ -383,14 +383,14 @@ export class SharingService implements SharingApi {
 		const candidates = candidateProjects(this.ctx, key);
 		const projectId = chosen ?? (candidates.length === 1 ? candidates[0]?.id : undefined);
 		if (!projectId) {
-			throw new ApiError(409, "project_required", candidates.length === 0 ? "No local project is linked to this repository; clone it and link it first, or choose a project explicitly" : "Several local projects match this repository; choose one", {
+			throw new ApiError(409, "project_required", candidates.length === 0 ? i18nMsg("No local project is linked to this repository; clone it and link it first, or choose a project explicitly") : i18nMsg("Several local projects match this repository; choose one"), {
 				candidates: candidates.map((p) => p.id),
 			});
 		}
 		const project = this.ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
 		if (!project) throw ApiError.notFound("Project");
 		if (!project.repository || `${project.repository.owner}/${project.repository.name}`.toLowerCase() !== key) {
-			throw new ApiError(409, "project_mismatch", "That project is not linked to the shared session's repository");
+			throw new ApiError(409, "project_mismatch", i18nMsg("That project is not linked to the shared session's repository"));
 		}
 		return project;
 	}
@@ -400,7 +400,7 @@ export class SharingService implements SharingApi {
 		if (chosen) {
 			const project = this.ctx.db.select().from(projects).where(eq(projects.id, chosen)).get();
 			if (!project) throw ApiError.notFound("Project");
-			if (project.workspaceId !== invite.workspaceId) throw new ApiError(409, "project_mismatch", "That project belongs to another workspace than the shared session");
+			if (project.workspaceId !== invite.workspaceId) throw new ApiError(409, "project_mismatch", i18nMsg("That project belongs to another workspace than the shared session"));
 			return project;
 		}
 		return createManagedProject(this.ctx, { workspaceId: invite.workspaceId, name: `Shared: ${invite.title}`.slice(0, 80), origin: "chat" });
@@ -411,7 +411,7 @@ export class SharingService implements SharingApi {
 		const filesMode = invite.vcs === "files";
 		const agentId = choice.agentId ?? invite.agentId;
 		let agent = agentId ? this.ompAgent(agentId) : undefined;
-		if (agentId && !agent) throw new ApiError(400, "unknown_agent", "The agent does not exist on this node");
+		if (agentId && !agent) throw new ApiError(400, "unknown_agent", i18nMsg("The agent does not exist on this node"));
 		agent ??= this.ctx.db.select().from(agents).where(eq(agents.runtime, "omp")).orderBy(agents.createdAt).get();
 		const project = filesMode ? this.folderProject(invite, choice.projectId) : this.cloneProject(invite, choice.projectId);
 
@@ -474,7 +474,7 @@ export class SharingService implements SharingApi {
 		if (request.decision === "decline") {
 			if (participant.state === "invited") {
 				this.store.updateParticipant(sharedId, peerId, { state: "declined" });
-				this.hub.discussion.note(sharedId, `${participant.nodeName} declined the invitation${request.reason ? `: ${request.reason}` : "."}`);
+				this.hub.discussion.note(sharedId, request.reason ? i18nMsg("{name} declined the invitation: {reason}", { name: participant.nodeName, reason: request.reason }) : i18nMsg("{name} declined the invitation.", { name: participant.nodeName }));
 				this.hub.changed(sharedId);
 			}
 			return;
@@ -491,7 +491,7 @@ export class SharingService implements SharingApi {
 		if (!wasActive) {
 			// The newcomer gets the thread so far (stored, not injected), the live conversation and the latest snapshot.
 			for (const message of this.store.messages(sharedId)) this.hub.discussion.enqueue(message, peerId);
-			this.hub.discussion.note(sharedId, `${participant.nodeName} joined the shared session${request.agent ? ` with ${request.agent.agentName}` : ""}.`);
+			this.hub.discussion.note(sharedId, request.agent ? i18nMsg("{name} joined the shared session with {agent}.", { name: participant.nodeName, agent: request.agent.agentName }) : i18nMsg("{name} joined the shared session.", { name: participant.nodeName }));
 		}
 		this.hub.mirror.publish(sharedId);
 		this.hub.mirror.syncPeer(sharedId, peerId);
@@ -503,20 +503,20 @@ export class SharingService implements SharingApi {
 		const shared = this.store.find(sharedId);
 		if (!shared || shared.state !== "active") throw ApiError.notFound("Shared session");
 		const sender = this.store.participant(sharedId, peerId);
-		if (!sender) throw new ApiError(403, "forbidden", "Only participants of the shared session may change its membership");
+		if (!sender) throw new ApiError(403, "forbidden", i18nMsg("Only participants of the shared session may change its membership"));
 		if (request.action === "leave") {
-			if (request.nodeId !== peerId) throw new ApiError(403, "forbidden", "A node can only announce its own departure");
+			if (request.nodeId !== peerId) throw new ApiError(403, "forbidden", i18nMsg("A node can only announce its own departure"));
 			if (sender.state === "active" || sender.state === "invited") {
 				this.store.updateParticipant(sharedId, peerId, { state: "left" });
 				this.hub.changed(sharedId);
 			}
 			return;
 		}
-		if (peerId !== shared.driverNodeId) throw new ApiError(403, "forbidden", "Only the driver may remove a participant");
-		if (request.epoch < shared.epoch) throw new ApiError(409, "stale_epoch", `The notice carries epoch ${request.epoch}; the shared session is at epoch ${shared.epoch}`, { currentEpoch: shared.epoch });
+		if (peerId !== shared.driverNodeId) throw new ApiError(403, "forbidden", i18nMsg("Only the driver may remove a participant"));
+		if (request.epoch < shared.epoch) throw new ApiError(409, "stale_epoch", i18nMsg("The notice carries epoch {epoch}; the shared session is at epoch {current}", { epoch: request.epoch, current: shared.epoch }), { currentEpoch: shared.epoch });
 		if (request.nodeId === this.self) {
 			await this.tearDown(shared, "left");
-			this.hub.discussion.note(sharedId, `${sender.nodeName} removed this node from the shared session.`, { local: true });
+			this.hub.discussion.note(sharedId, i18nMsg("{name} removed this node from the shared session.", { name: sender.nodeName }), { local: true });
 			return;
 		}
 		const removed = this.store.participant(sharedId, request.nodeId);
@@ -531,7 +531,7 @@ export class SharingService implements SharingApi {
 	ensureMirror(shared: SharedRow): string {
 		const current = this.store.get(shared.id);
 		if (current.mirrorSessionId) return current.mirrorSessionId;
-		if (!current.localProjectId) throw ApiError.conflict("No local clone is linked to this shared session");
+		if (!current.localProjectId) throw ApiError.conflict(i18nMsg("No local clone is linked to this shared session"));
 		const self = this.store.participant(shared.id, this.self);
 		const session = this.ctx.sessions.createMirror({
 			projectId: current.localProjectId,

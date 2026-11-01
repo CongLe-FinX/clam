@@ -1,7 +1,8 @@
 import { ChevronDown, MessageCircleQuestion, ShieldQuestion, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { errorMessage } from "@/lib/api";
+import { t } from "@/i18n";
+import { errorText } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Textarea } from "@/ui/textarea";
@@ -15,7 +16,7 @@ const APPROVAL_TITLE = /^(allow|approve|run|permit|confirm)\b|\btool\b/i;
 /** First line is the headline; the rest (a command, a path, a diff) is shown as code. */
 function splitTitle(title: string): { head: string; detail: string } {
 	const lines = title.split("\n");
-	return { head: (lines[0] ?? "").trim() || "The agent needs your input", detail: lines.slice(1).join("\n").trim() };
+	return { head: (lines[0] ?? "").trim() || t("The agent needs your input"), detail: lines.slice(1).join("\n").trim() };
 }
 
 /**
@@ -36,7 +37,7 @@ export function RequestCard({ store, request, onCollapse, className }: { store: 
 		try {
 			await store.respond(request.requestId, value);
 		} catch (e) {
-			toast.error(errorMessage(e));
+			toast.error(errorText(e));
 			setSending(null);
 		}
 	};
@@ -45,20 +46,20 @@ export function RequestCard({ store, request, onCollapse, className }: { store: 
 	const body = request.method === "confirm" ? request.message : undefined;
 
 	return (
-		<section aria-label={approval ? "Approval needed" : "Input needed"} className={cn("flex min-h-0 flex-col overflow-hidden rounded-2xl bg-overlay shadow-pop", className)}>
+		<section aria-label={approval ? t("Approval needed") : t("Input needed")} className={cn("flex min-h-0 flex-col overflow-hidden rounded-2xl bg-overlay shadow-pop", className)}>
 			{remaining !== null && request.timeoutMs !== undefined ? <CountdownBar remaining={remaining} total={request.timeoutMs} /> : null}
 			<div className="flex shrink-0 items-start gap-2.5 px-3.5 pt-3 pb-1.5">
 				<span aria-hidden className={cn("mt-0.5 grid size-6 shrink-0 place-items-center rounded-lg", approval ? "bg-warning/14 text-warning" : "bg-accent-soft text-accent")}>
 					<Icon className="size-3.5" />
 				</span>
 				<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-					<span className="text-2xs font-medium uppercase tracking-wider text-subtle">{approval ? "Approval needed" : request.method === "input" || request.method === "editor" ? "Your input" : "Choose one"}</span>
+					<span className="text-2xs font-medium uppercase tracking-wider text-subtle">{approval ? t("Approval needed") : request.method === "input" || request.method === "editor" ? t("Your input") : t("Choose one")}</span>
 					<p className="break-words text-[15px] font-medium leading-snug">{head}</p>
 				</div>
 				{remaining !== null ? <CountdownPill remaining={remaining} /> : null}
 				{onCollapse ? (
-					<Tip label="Minimise">
-						<Button variant="ghost" size="icon-sm" aria-label="Minimise request" onClick={onCollapse}>
+					<Tip label={t("Minimise")}>
+						<Button variant="ghost" size="icon-sm" aria-label={t("Minimise request")} onClick={onCollapse}>
 							<ChevronDown />
 						</Button>
 					</Tip>
@@ -71,10 +72,10 @@ export function RequestCard({ store, request, onCollapse, className }: { store: 
 				{request.method === "confirm" ? (
 					<div className="flex flex-wrap gap-2">
 						<Button variant="primary" size="lg" loading={sending === "yes"} disabled={locked} onClick={() => void answer(true, "yes")}>
-							Approve
+							{t("Approve")}
 						</Button>
 						<Button variant="outline" size="lg" loading={sending === "no"} disabled={locked} onClick={() => void answer(false, "no")}>
-							Deny
+							{t("Deny")}
 						</Button>
 					</div>
 				) : request.method === "select" ? (
@@ -110,23 +111,23 @@ export function RequestCard({ store, request, onCollapse, className }: { store: 
 							value={text}
 							onChange={(e) => setText(e.target.value)}
 							rows={request.method === "editor" ? 6 : 2}
-							placeholder={request.method === "input" ? (request.message ?? "Type your answer") : "Type your answer"}
+							placeholder={request.method === "input" ? (request.message ?? t("Type your answer")) : t("Type your answer")}
 							aria-label={head}
 							className="text-[13.5px]"
 						/>
 						<div className="flex">
 							<Button variant="primary" loading={sending === "text"} disabled={locked} onClick={() => void answer(text, "text")}>
-								Send
+								{t("Send")}
 							</Button>
 						</div>
 					</div>
 				) : (
-					<p className="text-xs text-muted-foreground">This kind of request ({request.method}) cannot be answered here.</p>
+					<p className="text-xs text-muted-foreground">{t("This kind of request ({method}) cannot be answered here.", { method: request.method })}</p>
 				)}
 			</div>
 			<div className="flex shrink-0 items-center justify-end border-t bg-surface-1 px-3.5 py-1.5">
 				<Button variant="ghost" size="sm" disabled={locked} onClick={() => void answer(null, "dismiss")}>
-					<X /> Dismiss
+					<X /> {t("Dismiss")}
 				</Button>
 			</div>
 		</section>

@@ -3,7 +3,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Check, FileUp, X } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 import { toast } from "sonner";
-import { ApiError, errorMessage, localUrl } from "@/lib/api";
+import { t, T } from "@/i18n";
+import { ApiError, errorText, localUrl } from "@/lib/api";
 import { isAbort, uploadFile, type UploadHandle } from "@/lib/upload";
 import { cn, formatBytes } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -66,8 +67,8 @@ export function useProjectUploads(projectId: string): ProjectUploads {
 				if (isAbort(e)) drop(id);
 				else if (e instanceof ApiError && e.status === 409) patch(id, { status: "conflict" });
 				else {
-					patch(id, { status: "error", error: errorMessage(e) });
-					toast.error(`Could not upload ${item.file.name}`, { description: errorMessage(e) });
+					patch(id, { status: "error", error: errorText(e) });
+					toast.error(t("Could not upload {name}", { name: item.file.name }), { description: errorText(e) });
 				}
 			} finally {
 				handles.current.delete(id);
@@ -144,7 +145,7 @@ export function UploadDock({ uploads, className }: { uploads: ProjectUploads; cl
 	return (
 		<>
 			{visible.length > 0 ? (
-				<ul aria-label="Uploads" className={cn("flex shrink-0 flex-col gap-1.5 border-t bg-surface-1 p-2", className)}>
+				<ul aria-label={t("Uploads")} className={cn("flex shrink-0 flex-col gap-1.5 border-t bg-surface-1 p-2", className)}>
 					{visible.map((i) => (
 						<li key={i.id} className="flex items-center gap-2 text-xs">
 							{i.status === "done" ? <Check className="size-3.5 shrink-0 text-success" aria-hidden /> : i.status === "error" ? <AlertCircle className="size-3.5 shrink-0 text-danger" aria-hidden /> : <FileUp className="size-3.5 shrink-0 text-accent" aria-hidden />}
@@ -153,7 +154,7 @@ export function UploadDock({ uploads, className }: { uploads: ProjectUploads; cl
 									<span className="min-w-0 truncate" title={i.path}>
 										{i.file.name}
 									</span>
-									<span className="tabular shrink-0 font-mono text-2xs text-subtle">{i.status === "error" ? "failed" : i.status === "queued" ? "waiting" : i.status === "done" ? formatBytes(i.file.size) : `${formatBytes(i.sent)} / ${formatBytes(i.file.size)}`}</span>
+									<span className="tabular shrink-0 font-mono text-2xs text-subtle">{i.status === "error" ? t("failed") : i.status === "queued" ? t("waiting") : i.status === "done" ? formatBytes(i.file.size) : t("{sent} / {total}", { sent: formatBytes(i.sent), total: formatBytes(i.file.size) })}</span>
 								</span>
 								{i.status === "uploading" || i.status === "queued" ? <Progress value={i.file.size ? (i.sent / i.file.size) * 100 : 0} /> : null}
 								{i.error ? <span className="truncate text-2xs text-danger">{i.error}</span> : null}
@@ -161,7 +162,7 @@ export function UploadDock({ uploads, className }: { uploads: ProjectUploads; cl
 							{i.status === "done" ? null : (
 								<button
 									type="button"
-									aria-label={i.status === "error" ? `Dismiss ${i.file.name}` : `Cancel upload of ${i.file.name}`}
+									aria-label={i.status === "error" ? t("Dismiss {name}", { name: i.file.name }) : t("Cancel upload of {name}", { name: i.file.name })}
 									onClick={() => (i.status === "error" ? uploads.dismiss(i.id) : uploads.cancel(i.id))}
 									className="grid size-6 shrink-0 place-items-center rounded-md text-subtle outline-none hover:bg-surface-3 hover:text-foreground coarse:size-10"
 								>
@@ -176,20 +177,20 @@ export function UploadDock({ uploads, className }: { uploads: ProjectUploads; cl
 				<Dialog open onOpenChange={(o) => !o && uploads.resolve(conflict.id, "skip")}>
 					<DialogContent sheetOnMobile>
 						<DialogHeader>
-							<DialogTitle>“{conflict.file.name}” already exists</DialogTitle>
+							<DialogTitle>{t("“{name}” already exists", { name: conflict.file.name })}</DialogTitle>
 							<DialogDescription>
-								A file named <span className="font-mono">{conflict.path}</span> is already in this folder. Replace it, keep both files, or skip this upload.
+								<T text="A file named <code>{path}</code> is already in this folder. Replace it, keep both files, or skip this upload." params={{ path: conflict.path }} tags={{ code: <span className="font-mono" /> }} />
 							</DialogDescription>
 						</DialogHeader>
 						<DialogFooter>
 							<Button variant="ghost" onClick={() => uploads.resolve(conflict.id, "skip")}>
-								Skip
+								{t("Skip")}
 							</Button>
 							<Button variant="outline" onClick={() => uploads.resolve(conflict.id, "keep")}>
-								Keep both
+								{t("Keep both")}
 							</Button>
 							<Button variant="danger" onClick={() => uploads.resolve(conflict.id, "replace")}>
-								Replace
+								{t("Replace")}
 							</Button>
 						</DialogFooter>
 					</DialogContent>

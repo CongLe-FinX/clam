@@ -1,8 +1,9 @@
 import { ChevronDown } from "lucide-react";
 import { memo, useMemo, useState } from "react";
-import { cn } from "@/lib/utils";
+import { cn, formatNumber } from "@/lib/utils";
 import { type RichFile } from "./assets.ts";
 import { FileTile, ImageGroupContext } from "./file-tile.tsx";
+import { t } from "@/i18n";
 
 const LIMIT = 12;
 
@@ -14,8 +15,9 @@ export interface FileStripProps {
 }
 
 /** A labelled group of files (turn outputs, message attachments): image thumbnails in a grid, other kinds as cards; long lists collapse. */
-export const FileStrip = memo(function FileStrip({ files, onOpen, title = "Files from this turn", className }: FileStripProps) {
+export const FileStrip = memo(function FileStrip({ files, onOpen, title, className }: FileStripProps) {
 	const [all, setAll] = useState(false);
+	const heading = title ?? t("Files from this turn");
 	const shown = all ? files : files.slice(0, LIMIT);
 	const hidden = files.length - shown.length;
 	const { images, others } = useMemo(
@@ -24,9 +26,9 @@ export const FileStrip = memo(function FileStrip({ files, onOpen, title = "Files
 	);
 	if (files.length === 0) return null;
 	return (
-		<section aria-label={title} className={cn("flex flex-col gap-2", className)}>
+		<section aria-label={heading} className={cn("flex flex-col gap-2", className)}>
 			<h4 className="text-2xs font-medium uppercase tracking-wide text-subtle">
-				{title} <span className="tabular normal-case tracking-normal">· {files.length}</span>
+				{heading} <span className="tabular normal-case tracking-normal">· {files.length}</span>
 			</h4>
 			{images.length > 0 ? (
 				<ImageGroupContext.Provider value={images}>
@@ -50,7 +52,7 @@ export const FileStrip = memo(function FileStrip({ files, onOpen, title = "Files
 					onClick={() => setAll(true)}
 					className="inline-flex h-8 w-fit items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium text-muted-foreground outline-none hover:bg-surface-2 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring coarse:h-11"
 				>
-					<ChevronDown aria-hidden className="size-3.5" /> +{hidden} more
+					<ChevronDown aria-hidden className="size-3.5" /> {t("+{count} more", { count: formatNumber(hidden) })}
 				</button>
 			) : null}
 		</section>

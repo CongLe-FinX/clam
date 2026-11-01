@@ -1,5 +1,6 @@
 import { type BrowserDownload, routes } from "@clam/contracts";
 import { Download } from "lucide-react";
+import { t } from "@/i18n";
 import { useState } from "react";
 import { localUrl } from "@/lib/api";
 import { cn, formatBytes } from "@/lib/utils";
@@ -12,9 +13,16 @@ export function downloadHref(name: string): string {
 	return localUrl(routes.browserDownload(name));
 }
 
+function progressText(d: BrowserDownload): string {
+	if (d.state === "completed") return formatBytes(d.size);
+	if (d.state === "canceled") return t("Canceled");
+	if (d.size > 0) return t("{received} of {size}", { received: formatBytes(d.received), size: formatBytes(d.size) });
+	return formatBytes(d.received);
+}
+
 /** Downloads the machine's browser has made, newest first. Files land on the machine; the link fetches a copy. */
 export function DownloadsList({ downloads, className }: { downloads: BrowserDownload[]; className?: string }) {
-	if (downloads.length === 0) return <p className={cn("px-2 py-6 text-center text-xs text-subtle", className)}>Nothing downloaded yet.</p>;
+	if (downloads.length === 0) return <p className={cn("px-2 py-6 text-center text-xs text-subtle", className)}>{t("Nothing downloaded yet.")}</p>;
 	const sorted = [...downloads].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
 	return (
 		<ul className={cn("scrollbar-thin max-h-80 divide-y overflow-y-auto", className)}>
@@ -28,13 +36,13 @@ export function DownloadsList({ downloads, className }: { downloads: BrowserDown
 									{d.name}
 								</p>
 								<p className="truncate text-2xs text-subtle" title={d.sourceUrl}>
-									{d.state === "completed" ? formatBytes(d.size) : d.state === "canceled" ? "Canceled" : `${formatBytes(d.received)}${d.size > 0 ? ` of ${formatBytes(d.size)}` : ""}`} · {d.sourceUrl}
+									{progressText(d)} · {d.sourceUrl}
 								</p>
 							</div>
 							{d.state === "completed" ? (
 								<Button asChild variant="outline" size="sm">
 									<a href={downloadHref(d.name)} download={d.name}>
-										<Download /> Save
+										<Download /> {t("Save")}
 									</a>
 								</Button>
 							) : null}
@@ -61,9 +69,9 @@ export function DownloadsButton({ downloads }: { downloads: BrowserDownload[] })
 				if (next) setSeen(downloads.length);
 			}}
 		>
-			<Tip label="Downloads">
+			<Tip label={t("Downloads")}>
 				<PopoverTrigger asChild>
-					<Button variant="ghost" size="icon" aria-label={unseen > 0 ? `Downloads (${unseen} new)` : "Downloads"} className="relative">
+					<Button variant="ghost" size="icon" aria-label={unseen > 0 ? t("Downloads ({count} new)", { count: unseen }) : t("Downloads")} className="relative">
 						<Download className={cn(active && "animate-pulse")} />
 						{unseen > 0 ? <span className="absolute right-1 top-1 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 font-mono text-2xs font-semibold text-accent-foreground coarse:right-1.5 coarse:top-1.5">{unseen}</span> : null}
 					</Button>

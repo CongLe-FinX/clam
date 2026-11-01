@@ -4,17 +4,18 @@ import { Link } from "@tanstack/react-router";
 import { ChevronRight, Cpu, RefreshCw, RotateCw, Square } from "lucide-react";
 import { Fragment, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
-import { runtimeDot } from "@/components/session-status";
+import { RUNTIME_STATE_LABEL, runtimeDot } from "@/components/session-status";
 import { useIsMobile } from "@/hooks/use-breakpoint";
 import { api, errorMessage } from "@/lib/api";
 import { qk, useHealth, useRuntime, useSessions } from "@/lib/queries";
-import { cn, formatBytes, formatDuration, relativeTime, shortId } from "@/lib/utils";
+import { renderServerText, t, tr } from "@/i18n";
+import { cn, formatBytes, formatDuration, formatNumber, relativeTime, shortId } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { PageContainer, PageHeader, SectionTitle } from "@/ui/page";
 import { Skeleton } from "@/ui/skeleton";
-import { StatusDot } from "@/ui/status-dot";
+import { DOT_STATUS_LABEL, StatusDot } from "@/ui/status-dot";
 import { Table, TBody, Td, Th, THead, Tr } from "@/ui/table";
 
 // ───────────────────────────── shared 1s ticker (visible tab only) ─────────────────────────────
@@ -53,9 +54,9 @@ const getTick = () => tickNow;
 function Uptime({ since }: { since: string | null }) {
 	const now = useSyncExternalStore(subscribeTick, getTick, getTick);
 	if (!since) return <span className="text-subtle">—</span>;
-	const t = Date.parse(since);
-	if (Number.isNaN(t)) return <span className="text-subtle">—</span>;
-	return <span className="tabular">{formatDuration(Math.max(0, now - t))}</span>;
+	const started = Date.parse(since);
+	if (Number.isNaN(started)) return <span className="text-subtle">—</span>;
+	return <span className="tabular">{formatDuration(Math.max(0, now - started))}</span>;
 }
 
 // ───────────────────────────── helpers ─────────────────────────────
@@ -81,9 +82,9 @@ function useRuntimeActions() {
 		onMutate: (id) => base(id, "stopped"),
 		onError: (e, _id, ctx) => {
 			rollback(ctx?.prev);
-			toast.error("Could not stop runtime", { description: errorMessage(e) });
+			toast.error(t("Could not stop runtime"), { description: errorMessage(e) });
 		},
-		onSuccess: () => toast.success("Runtime stopped"),
+		onSuccess: () => toast.success(t("Runtime stopped")),
 		onSettled: () => void qc.invalidateQueries({ queryKey: qk.runtime }),
 	});
 	const restart = useMutation({
@@ -91,11 +92,11 @@ function useRuntimeActions() {
 		onMutate: (id) => base(id, "restarting"),
 		onError: (e, _id, ctx) => {
 			rollback(ctx?.prev);
-			toast.error("Could not restart runtime", { description: errorMessage(e) });
+			toast.error(t("Could not restart runtime"), { description: errorMessage(e) });
 		},
 		onSuccess: (status) => {
 			if (status) qc.setQueryData<RuntimeStatus[]>(qk.runtime, (d) => d?.map((r) => (r.sessionId === status.sessionId ? status : r)));
-			toast.success("Runtime restarted");
+			toast.success(t("Runtime restarted"));
 		},
 		onSettled: () => void qc.invalidateQueries({ queryKey: qk.runtime }),
 	});
@@ -110,11 +111,11 @@ function Actions({ r }: { r: RuntimeStatus }) {
 		<div className="flex items-center gap-1.5">
 			{ACTIVE.has(r.state) ? (
 				<Button size="sm" variant="outline" loading={stopping} disabled={restarting} onClick={() => stop.mutate(r.sessionId)}>
-					<Square /> Stop
+					<Square /> {t("Stop")}
 				</Button>
 			) : null}
 			<Button size="sm" variant="secondary" loading={restarting} disabled={stopping} onClick={() => restart.mutate(r.sessionId)}>
-				<RotateCw /> Restart
+				<RotateCw /> {t("Restart")}
 			</Button>
 		</div>
 	);
@@ -126,7 +127,7 @@ export default function NodeRuntimePage() {
 	const runtime = useRuntime();
 	const sessions = useSessions();
 	const mobile = useIsMobile();
-	const titles = useMemo(() => new Map((sessions.data ?? []).map((s) => [s.id, s.title || "Untitled session"] as const)), [sessions.data]);
+	const titles = useMemo(() => new Map((sessions.data ?? []).map((s) => [s.id, s.title || t("Untitled session")] as const)), [sessions.data]);
 	const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
 	const toggle = (id: string) =>
 		setOpen((prev) => {
@@ -144,12 +145,12 @@ export default function NodeRuntimePage() {
 
 	return (
 		<PageContainer wide>
-			<PageHeader title="Runtime" description="OMP processes backing your sessions. They start on demand and stop when idle." />
+			<PageHeader title={t("Runtime")} description={t("OMP processes backing your sessions. They start on demand and stop when idle.")} />
 
 			<NodeSummary active={runtime.data ? activeCount : null} crashed={runtime.data ? crashedCount : null} />
 
 			<section className="flex flex-col gap-2.5">
-				<SectionTitle>Processes</SectionTitle>
+				<SectionTitle>{t("Processes")}</SectionTitle>
 				{runtime.isPending ? (
 					<div aria-busy className="flex flex-col gap-2">
 						{Array.from({ length: 3 }, (_, i) => (
@@ -159,16 +160,16 @@ export default function NodeRuntimePage() {
 				) : runtime.error ? (
 					<EmptyState
 						icon={Cpu}
-						title="Could not load runtime status"
+						title={t("Could not load runtime status")}
 						description={errorMessage(runtime.error)}
 						action={
 							<Button size="sm" variant="outline" onClick={() => void runtime.refetch()}>
-								<RefreshCw /> Retry
+								<RefreshCw /> {t("Retry")}
 							</Button>
 						}
 					/>
 				) : rows.length === 0 ? (
-					<EmptyState icon={Cpu} title="No runtimes" description="Runtimes start on demand when you open a session." className="rounded-xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border)]" />
+					<EmptyState icon={Cpu} title={t("No runtimes")} description={t("Runtimes start on demand when you open a session.")} className="rounded-xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border)]" />
 				) : mobile ? (
 					<ul className="flex flex-col gap-2">
 						{rows.map((r) => (
@@ -176,7 +177,7 @@ export default function NodeRuntimePage() {
 								<div className="flex items-start justify-between gap-2">
 									<div className="flex min-w-0 flex-col gap-0.5">
 										<Link to="/sessions/$sessionId" params={{ sessionId: r.sessionId }} className="truncate text-[13px] font-medium hover:underline">
-											{titles.get(r.sessionId) ?? `Session ${shortId(r.sessionId)}`}
+											{titles.get(r.sessionId) ?? t("Session {id}", { id: shortId(r.sessionId) })}
 										</Link>
 										<span className="font-mono text-2xs text-subtle">{shortId(r.sessionId, 12)}</span>
 									</div>
@@ -184,9 +185,9 @@ export default function NodeRuntimePage() {
 								</div>
 								<dl className="grid grid-cols-4 gap-2 text-xs">
 									<Meta label="PID" value={r.pid ?? "—"} mono />
-									<Meta label="Uptime" value={ACTIVE.has(r.state) ? <Uptime since={r.startedAt} /> : "—"} />
-									<Meta label="Restarts" value={r.restarts} />
-									<Meta label="Active" value={relativeTime(r.lastActivityAt)} />
+									<Meta label={t("Uptime")} value={ACTIVE.has(r.state) ? <Uptime since={r.startedAt} /> : "—"} />
+									<Meta label={t("Restarts")} value={formatNumber(r.restarts)} />
+									<Meta label={t("Active")} value={relativeTime(r.lastActivityAt)} />
 								</dl>
 								{r.lastError ? <ErrorText text={r.lastError} /> : null}
 								<Actions r={r} />
@@ -199,13 +200,13 @@ export default function NodeRuntimePage() {
 							<THead>
 								<tr>
 									<Th className="w-8" />
-									<Th>Session</Th>
-									<Th>State</Th>
+									<Th>{t("Session")}</Th>
+									<Th>{t("State")}</Th>
 									<Th>PID</Th>
-									<Th>Uptime</Th>
-									<Th>Restarts</Th>
-									<Th>Last activity</Th>
-									<Th className="text-right">Actions</Th>
+									<Th>{t("Uptime")}</Th>
+									<Th>{t("Restarts")}</Th>
+									<Th>{t("Last activity")}</Th>
+									<Th className="text-right">{t("Actions")}</Th>
 								</tr>
 							</THead>
 							<TBody>
@@ -218,7 +219,7 @@ export default function NodeRuntimePage() {
 													{r.lastError ? (
 														<button
 															type="button"
-															aria-label={expanded ? "Hide last error" : "Show last error"}
+															aria-label={expanded ? t("Hide last error") : t("Show last error")}
 															aria-expanded={expanded}
 															onClick={() => toggle(r.sessionId)}
 															className="grid size-6 place-items-center rounded text-danger hover:bg-surface-3"
@@ -229,7 +230,7 @@ export default function NodeRuntimePage() {
 												</Td>
 												<Td className="max-w-72">
 													<Link to="/sessions/$sessionId" params={{ sessionId: r.sessionId }} className="block truncate font-medium hover:underline">
-														{titles.get(r.sessionId) ?? `Session ${shortId(r.sessionId)}`}
+														{titles.get(r.sessionId) ?? t("Session {id}", { id: shortId(r.sessionId) })}
 													</Link>
 													<span className="font-mono text-2xs text-subtle">{shortId(r.sessionId, 12)}</span>
 												</Td>
@@ -238,7 +239,7 @@ export default function NodeRuntimePage() {
 												</Td>
 												<Td className="font-mono text-xs">{r.pid ?? "—"}</Td>
 												<Td className="text-xs">{ACTIVE.has(r.state) ? <Uptime since={r.startedAt} /> : <span className="text-subtle">—</span>}</Td>
-												<Td className="tabular text-xs">{r.restarts}</Td>
+												<Td className="tabular text-xs">{formatNumber(r.restarts)}</Td>
 												<Td className="whitespace-nowrap text-xs text-muted-foreground">{relativeTime(r.lastActivityAt)}</Td>
 												<Td className="text-right">
 													<div className="flex justify-end">
@@ -268,8 +269,8 @@ export default function NodeRuntimePage() {
 function StateBadge({ state }: { state: RuntimeState }) {
 	return (
 		<Badge variant={stateVariant(state)} className="gap-1.5">
-			<StatusDot status={runtimeDot(state)} label={state} className="size-1.5 [&>span]:size-1.5" />
-			{state}
+			<StatusDot status={runtimeDot(state)} label={tr(RUNTIME_STATE_LABEL[state])} className="size-1.5 [&>span]:size-1.5" />
+			{tr(RUNTIME_STATE_LABEL[state])}
 		</Badge>
 	);
 }
@@ -299,18 +300,18 @@ function NodeSummary({ active, crashed }: { active: number | null; crashed: numb
 	return (
 		<section className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]">
 			<dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl bg-border shadow-[inset_0_0_0_1px_var(--border)]">
-				<Tile label="Active" value={active === null ? null : String(active)} hint={s ? `of ${s.maxConcurrentRuntimes} max` : undefined} accent={(active ?? 0) > 0} />
-				<Tile label="Crashed" value={crashed === null ? null : String(crashed)} danger={(crashed ?? 0) > 0} />
-				<Tile label="Idle timeout" value={settings.isPending ? null : s ? `${s.runtimeIdleTimeoutMin} min` : "—"} />
-				<Tile label="Machine memory" value={health.isPending ? null : h ? formatBytes(h.memory.rss) : "—"} hint={h ? "RSS" : undefined} />
+				<Tile label={t("Active")} value={active === null ? null : formatNumber(active)} hint={s ? t("of {max} max", { max: s.maxConcurrentRuntimes }) : undefined} accent={(active ?? 0) > 0} />
+				<Tile label={t("Crashed")} value={crashed === null ? null : formatNumber(crashed)} danger={(crashed ?? 0) > 0} />
+				<Tile label={t("Idle timeout")} value={settings.isPending ? null : s ? t("{count} min", { count: s.runtimeIdleTimeoutMin }) : "—"} />
+				<Tile label={t("Machine memory")} value={health.isPending ? null : h ? formatBytes(h.memory.rss) : "—"} hint={h ? "RSS" : undefined} />
 			</dl>
 			<div className="flex flex-col gap-2 rounded-xl bg-surface-1 p-3.5 shadow-[inset_0_0_0_1px_var(--border)]">
 				<div className="flex items-center justify-between gap-2">
-					<span className="text-2xs font-semibold uppercase tracking-wider text-subtle">Machine health</span>
+					<span className="text-2xs font-semibold uppercase tracking-wider text-subtle">{t("Machine health")}</span>
 					{h ? (
 						<span className="inline-flex items-center gap-1.5 text-xs">
-							<StatusDot status={h.status} label={h.status} />
-							<span className="capitalize">{h.status}</span>
+							<StatusDot status={h.status} label={tr(DOT_STATUS_LABEL[h.status])} />
+							<span>{tr(DOT_STATUS_LABEL[h.status])}</span>
 						</span>
 					) : null}
 				</div>
@@ -323,23 +324,23 @@ function NodeSummary({ active, crashed }: { active: number | null; crashed: numb
 					<p className="text-xs text-danger">
 						{errorMessage(health.error)}{" "}
 						<button type="button" className="font-medium text-accent hover:underline" onClick={() => void health.refetch()}>
-							Retry
+							{t("Retry")}
 						</button>
 					</p>
 				) : h && h.checks.length > 0 ? (
 					<ul className="flex flex-col divide-y">
 						{h.checks.map((c) => (
 							<li key={c.name} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 py-1.5 text-xs first:pt-0 last:pb-0">
-								<StatusDot status={c.status} label={c.status} />
+								<StatusDot status={c.status} label={tr(DOT_STATUS_LABEL[c.status])} />
 								<span className="font-mono">{c.name}</span>
-								<Badge variant={checkVariant(c.status)}>{c.status}</Badge>
-								{c.latencyMs !== undefined ? <span className="font-mono text-2xs text-subtle tabular">{Math.round(c.latencyMs)} ms</span> : null}
-								{c.message ? <span className="min-w-0 basis-full truncate text-muted-foreground sm:basis-auto">{c.message}</span> : null}
+								<Badge variant={checkVariant(c.status)}>{tr(DOT_STATUS_LABEL[c.status])}</Badge>
+								{c.latencyMs !== undefined ? <span className="font-mono text-2xs text-subtle tabular">{`${formatNumber(Math.round(c.latencyMs))} ms`}</span> : null}
+								{c.message ? <span className="min-w-0 basis-full truncate text-muted-foreground sm:basis-auto">{renderServerText(c.message, c.i18n)}</span> : null}
 							</li>
 						))}
 					</ul>
 				) : (
-					<p className="text-xs text-subtle">No health checks reported.</p>
+					<p className="text-xs text-subtle">{t("No health checks reported.")}</p>
 				)}
 			</div>
 		</section>
