@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, Loader2, MessageCircleQuestion, RefreshCw } from "lucide-react";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { RELEASE_TAIL } from "@/components/collapsible-text";
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { textOf } from "@/features/session/stream-store";
 import { useKeyboardInset } from "@/features/session/use-keyboard-inset";
@@ -53,7 +54,7 @@ const EarlierBubble = memo(function EarlierBubble({ message }: { message: UiMess
 					{user ? t("Prompt · {time}", { time: clockTime(message.timestamp) }) : t("Agent · {time}", { time: clockTime(message.timestamp) })}
 				</span>
 				<div className={cn("min-w-0 max-w-[min(100%,72ch)] rounded-2xl px-3.5 py-2 text-sm leading-relaxed opacity-90 shadow-[inset_0_0_0_1px_var(--border)]", user ? "rounded-tr-md bg-surface-3/60" : "rounded-tl-md bg-surface-1")}>
-					<LazyMarkdown text={textOf(message)} />
+					<LazyMarkdown text={textOf(message)} breaks={user} />
 				</div>
 			</div>
 		</div>
@@ -278,6 +279,17 @@ export function GroupTimeline({
 		lastLen.current = rows.length;
 		remember();
 	});
+
+	// The user expands or collapses a long message: stop following the tail so the page does not jump away from it.
+	useEffect(() => {
+		const scroller = parentRef.current;
+		if (!scroller) return;
+		const release = () => {
+			stick.current = false;
+		};
+		scroller.addEventListener(RELEASE_TAIL, release);
+		return () => scroller.removeEventListener(RELEASE_TAIL, release);
+	}, []);
 
 	// Rows appended at the tail while the user is reading further up.
 	const prevLast = useRef<string | undefined>(undefined);

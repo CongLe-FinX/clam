@@ -62,12 +62,13 @@ function Plain({ text }: { text: string }) {
 
 /**
  * Markdown renderer loaded on demand; shows the text with its code fences boxed until the chunk arrives. `assets` resolves
- * relative paths in images/links; pass a stable (memoized) resolver or the message re-renders on every parent render.
+ * relative paths in images/links; pass a stable (memoized) resolver or the message re-renders on every parent render. `breaks`: every
+ * single newline is a line break (text a person typed); agent text keeps standard markdown paragraphs.
  */
-export const LazyMarkdown = memo(function LazyMarkdown({ text, assets }: { text: string; assets?: AssetResolver }) {
+export const LazyMarkdown = memo(function LazyMarkdown({ text, assets, breaks = false }: { text: string; assets?: AssetResolver; breaks?: boolean }) {
 	return (
 		<Suspense fallback={<Plain text={text} />}>
-			<Markdown text={text} assets={assets} />
+			<Markdown text={text} assets={assets} breaks={breaks} />
 		</Suspense>
 	);
 });

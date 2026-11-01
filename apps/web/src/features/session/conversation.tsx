@@ -1,6 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, Loader2, MessagesSquare, RefreshCw, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { RELEASE_TAIL } from "@/components/collapsible-text";
 import { t } from "@/i18n";
 import { errorText } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -136,6 +137,17 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 		lastKey.current = last;
 		lastLen.current = rows.length;
 	});
+
+	// The user expands or collapses a long message: stop following the tail so the page does not jump away from it.
+	useEffect(() => {
+		const scroller = parentRef.current;
+		if (!hasRows || !scroller) return;
+		const release = () => {
+			stick.current = false;
+		};
+		scroller.addEventListener(RELEASE_TAIL, release);
+		return () => scroller.removeEventListener(RELEASE_TAIL, release);
+	}, [hasRows]);
 
 	// Anything that changes the scrollable height or the viewport while the user is at the bottom keeps the tail in view: streamed
 	// text, an image/video that finished loading, a measured row replacing its estimate, the typing indicator, the mobile keyboard

@@ -116,6 +116,7 @@ const vi: Catalog = {
 	"unknown tunnel mode": "chế độ tunnel không hợp lệ",
 	"invalid tunnel token": "token tunnel không hợp lệ",
 	"invalid tunnel hostname": "hostname tunnel không hợp lệ",
+	"Image {number} is not a valid {type} file": "Ảnh {number} không phải tệp {type} hợp lệ",
 };
 
 export default vi;

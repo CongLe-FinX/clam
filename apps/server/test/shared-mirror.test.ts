@@ -241,3 +241,75 @@ describe("long conversations", () => {
 		expect(session.status).not.toBe("error");
 	});
 });
+
+/** The driver's publisher of a shared session, to see whether it has handed over everything it was given. */
+function publisherOf(node: FullHarness, sharedId: string): { buffer: unknown[]; timer: unknown } | undefined {
+	// White-box on purpose: the publisher is private to the mirror service and only it knows whether everything has been handed over.
+	const internals = node.ctx.shared.mirror as unknown as { publishers: Map<string, { buffer: unknown[]; timer: unknown }> };
+	return internals.publishers.get(sharedId);
+}
+
+describe("a driver whose agent keeps working while its mirror is read or sent", () => {
+	it("the messages of a turn that runs while a fresh publisher is still reading the session are on B too (not lost between the read and the first sync)", async () => {
+		const { shared, mirrorId, sessionId } = await mirrored();
+		// a new publisher run, as after a restart of the driver, whose read of the session state is held back until the agent has answered
+		const sessions = pair.a.ctx.sessions;
+		const original = sessions.state.bind(sessions);
+		const reading = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		sessions.state = async (id: string) => {
+			if (id === sessionId) {
+				reading.resolve();
+				await release.promise;
+			}
+			return original(id);
+		};
+		try {
+			pair.a.ctx.shared.mirror.unpublish(shared.id);
+			pair.a.ctx.shared.mirror.publish(shared.id);
+			await reading.promise; // the transcript is read; the publisher is not loaded yet
+			const prompted = await api(pair.a).post(`/sessions/${sessionId}/prompt`, { message: "typed while the mirror loads", clientId: "during-load" });
+			expect(prompted.status).toBe(202);
+			await eventually(async () => (await transcript(pair.a, sessionId)).some((m) => textOf(m) === "FAKE: typed while the mirror loads"), "the agent to answer while the publisher waits");
+		} finally {
+			release.resolve();
+			sessions.state = original;
+		}
+		await eventually(() => mirrorEquals(pair.b, mirrorId, pair.a, sessionId), "B's mirror to hold the turn that ran during the load", 15_000);
+		expect((await transcript(pair.b, mirrorId)).map(textOf)).toEqual(expect.arrayContaining(["typed while the mirror loads", "FAKE: typed while the mirror loads"]));
+	});
+
+	it("a question the agent raises while a full sync is on its way reaches B as soon as the sync has arrived (the batch numbered after the snapshot is not dropped)", async () => {
+		const { shared, mirrorId, sessionId } = await mirrored();
+		// hold the last chunk of the next full sync on its way to B
+		const client = pair.a.ctx.network.client;
+		const original = client.request.bind(client);
+		const sending = Promise.withResolvers<void>();
+		const release = Promise.withResolvers<void>();
+		client.request = (async (url: string, options: Parameters<typeof original>[1]) => {
+			const body = options.body as { type?: string; final?: boolean } | undefined;
+			if (options.path === `/shared/${shared.id}/mirror` && body?.type === "sync" && body.final === true) {
+				sending.resolve();
+				await release.promise;
+			}
+			return original(url, options);
+		}) as typeof client.request;
+		try {
+			pair.a.ctx.shared.mirror.syncPeer(shared.id, pair.bId);
+			await sending.promise; // the snapshot is taken, B has not got it
+			const prompted = await api(pair.a).post(`/sessions/${sessionId}/prompt`, { message: "__ask__", clientId: "ask-during-sync" });
+			expect(prompted.status).toBe(202);
+			const asked = await eventually(async () => (await api(pair.a).get<Array<{ requestId: string }>>(`/sessions/${sessionId}/ui-requests`)).body[0], "the question on the driver");
+			// everything the driver published is numbered (and, before the fix, dropped for B) by now
+			await eventually(() => {
+				const publisher = publisherOf(pair.a, shared.id);
+				return publisher !== undefined && publisher.buffer.length === 0 && publisher.timer === null;
+			}, "the driver to hand over the batch with the question");
+			release.resolve();
+			await eventually(async () => (await api(pair.b).get<Array<{ requestId: string }>>(`/sessions/${mirrorId}/ui-requests`)).body.some((r) => r.requestId === asked.requestId), "the question to reach B");
+		} finally {
+			release.resolve();
+			client.request = original;
+		}
+	});
+});

@@ -96,6 +96,11 @@ export interface PromptInput {
 	clientId: string;
 	/** How to deliver while the agent is busy. Ignored when idle. */
 	streamingBehavior?: "steer" | "followUp";
+	/**
+	 * Images the model sees next to the text (vision input; OMP `ImageContent`). The caller validates type and size
+	 * (`PromptImages` in `@clam/contracts`); the runtime refuses a prompt that cannot fit one OMP frame (`invalid_argument`).
+	 */
+	images?: ReadonlyArray<{ mimeType: string; data: string }>;
 }
 
 export interface MessagesQuery {

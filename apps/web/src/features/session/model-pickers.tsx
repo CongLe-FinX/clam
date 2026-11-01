@@ -18,7 +18,7 @@ import { type SessionStream, useStreamMeta } from "./stream-store.ts";
 const chip =
 	"inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg bg-surface-2 px-2 text-xs font-medium text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] outline-none transition-[background-color,color] hover:bg-surface-3 hover:text-foreground focus-visible:text-foreground disabled:pointer-events-none disabled:opacity-50 coarse:h-10 coarse:px-3 [&_svg]:size-3.5 [&_svg]:shrink-0";
 
-function useModels() {
+export function useModels() {
 	return useQuery({
 		queryKey: qk.ompModels,
 		queryFn: ({ signal }) => api.get<ModelInfo[]>(routes.ompModels, undefined, { signal }),
@@ -274,4 +274,13 @@ export function ModelSettings({ stream, className }: { stream: SessionStream; cl
 			</SheetContent>
 		</Sheet>
 	);
+}
+
+/** Whether the session's current model takes pictures as input (unknown models and a model list that has not loaded yet count as yes), and its display name. */
+export function useVisionInput(stream: SessionStream): { supported: boolean; modelName: string | null } {
+	const model = useStreamMeta(stream, (m) => m.live?.model ?? null);
+	const models = useModels();
+	if (!model) return { supported: true, modelName: null };
+	const info = models.data?.find((m) => m.provider === model.provider && m.id === model.id);
+	return { supported: info ? info.input.includes("image") : true, modelName: model.name ?? info?.name ?? model.id };
 }

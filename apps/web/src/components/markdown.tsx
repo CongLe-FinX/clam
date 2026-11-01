@@ -119,6 +119,34 @@ const components: Components = {
 
 const REMARK_BASE: Plugins = [remarkGfm];
 
+interface MdNode {
+	type: string;
+	value?: string;
+	children?: MdNode[];
+}
+
+/** Every single newline inside running text becomes a hard break (what remark-breaks does): text a person typed keeps its lines exactly. Code, inline code and fences are untouched. */
+function remarkHardBreaks() {
+	const walk = (node: MdNode): void => {
+		if (!node.children) return;
+		const out: MdNode[] = [];
+		for (const child of node.children) {
+			if (child.type === "text" && child.value?.includes("\n")) {
+				child.value.split("\n").forEach((line, i) => {
+					if (i > 0) out.push({ type: "break" });
+					if (line) out.push({ type: "text", value: line });
+				});
+			} else {
+				walk(child);
+				out.push(child);
+			}
+		}
+		node.children = out;
+	};
+	return (tree: MdNode) => walk(tree);
+}
+const REMARK_BREAKS: Plugins = [remarkGfm, remarkHardBreaks];
+
 /**
  * Split into top-level blocks so settled blocks keep memoized output while the tail streams. A text with footnote or link-reference
  * definitions (`[^1]: …`, `[id]: url`) stays whole: definitions and their references must be parsed in one document.
@@ -164,9 +192,9 @@ function useMath(needed: boolean): MathPlugins | null {
 	return needed ? math : null;
 }
 
-const Block = memo(function Block({ text }: { text: string }) {
+const Block = memo(function Block({ text, breaks }: { text: string; breaks: boolean }) {
 	const math = useMath(useMemo(() => hasMath(text), [text]));
-	const remark = useMemo(() => (math ? [...REMARK_BASE, ...math.remark] : REMARK_BASE), [math]);
+	const remark = useMemo(() => (math ? [...(breaks ? REMARK_BREAKS : REMARK_BASE), ...math.remark] : breaks ? REMARK_BREAKS : REMARK_BASE), [math, breaks]);
 	const source = useMemo(() => (math ? protectCurrency(text) : text), [math, text]);
 	return (
 		<SourceContext.Provider value={text}>
@@ -177,13 +205,13 @@ const Block = memo(function Block({ text }: { text: string }) {
 	);
 });
 
-function Markdown({ text, assets }: { text: string; assets?: AssetResolver }) {
+function Markdown({ text, assets, breaks = false }: { text: string; assets?: AssetResolver; breaks?: boolean }) {
 	const blocks = useMemo(() => splitBlocks(text), [text]);
 	return (
 		<AssetsContext.Provider value={assets}>
 			<div className="prose-clam">
 				{blocks.map((b, i) => (
-					<Block key={i} text={b} />
+					<Block key={i} text={b} breaks={breaks} />
 				))}
 			</div>
 		</AssetsContext.Provider>

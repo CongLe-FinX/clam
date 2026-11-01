@@ -15,6 +15,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { RoutePluginOptions } from "../context.ts";
+import { assertPromptImages } from "../services/prompt-images.ts";
 import { createChatProject, deleteManagedFolder } from "../services/project-folders.ts";
 
 const ListQuery = z.object({
@@ -85,6 +86,7 @@ export default async function sessionRoutes(app: FastifyInstance, { ctx }: Route
 	app.post(routes.sessionPrompt(":id"), async (req, reply) => {
 		const { id } = IdParams.parse(req.params);
 		const body = PromptBody.parse(req.body);
+		assertPromptImages(body.images);
 		const accepted = await sessions.prompt(id, body);
 		return reply.status(202).send({ promptId: accepted.promptId, clientId: body.clientId });
 	});

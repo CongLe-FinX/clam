@@ -1,6 +1,6 @@
 import { NetworkError, wire as wireSchemas } from "@clam/agent-network";
 import type { wire } from "@clam/agent-network";
-import { ATTACHMENT_EAGER_MAX_BYTES, type I18nMessage, type I18nText, i18nMsg, type MentionCandidate, type SessionEvent, type SharedMessage, type TurnOutputFile } from "@clam/contracts";
+import { ATTACHMENT_EAGER_MAX_BYTES, type I18nMessage, type I18nText, i18nMsg, type MentionCandidate, type PromptImage, type SessionEvent, type SharedMessage, type TurnOutputFile } from "@clam/contracts";
 import { agents, agentSessions } from "@clam/database";
 import {
 	buildSharedMessageInjection,
@@ -520,7 +520,7 @@ export class DiscussionService implements DiscussionApi {
 		const buffered = pending.slice(0, last).map((p) => p.row);
 		try {
 			this.ctx.sessions.get(sessionId);
-			const files = await this.describeFiles(sessionId, [...buffered, trigger]);
+			const { blocks: files, images } = await this.describeFiles(sessionId, [...buffered, trigger]);
 			const withFiles = (row: SharedMessageRow): string => [row.text, files.get(row.id)].filter((part) => part !== undefined && part !== "").join("\n\n");
 			const text = buildSharedMessageInjection({
 				sharedSessionId: sharedId,
@@ -534,7 +534,7 @@ export class DiscussionService implements DiscussionApi {
 					buffered.map((row) => ({ author: { kind: row.authorKind as "human" | "agent" | "system", agentName: row.authorAgentName, nodeName: row.authorNodeName }, kind: row.kind as GroupMessageKind, text: withFiles(row) })),
 				),
 			});
-			await injectIntoSession(this.ctx, { sessionId, clientId: `shared_msg_${trigger.id}`, text, kind: DELIVERY_KIND[trigger.kind as GroupMessageKind] });
+			await injectIntoSession(this.ctx, { sessionId, clientId: `shared_msg_${trigger.id}`, text, kind: DELIVERY_KIND[trigger.kind as GroupMessageKind], images });
 		} catch (error) {
 			this.hub.log.warn({ err: errorText(error), sharedId, messageId: trigger.id, sessionId }, "could not inject a group message into the session");
 			this.scheduleRetry(sharedId);
@@ -548,23 +548,27 @@ export class DiscussionService implements DiscussionApi {
 
 	/**
 	 * The files of these messages, copied into the agent's working folder (`attachments/<name>`, never overwriting) and described
-	 * for the prompt: one block per message that has files, with the folder-relative paths the agent can read.
+	 * for the prompt: one block per message that has files, with the folder-relative paths the agent can read. Images whose bytes
+	 * are on this node go to the model as vision input as well (`images`, within the prompt's size caps); the block says so, and the
+	 * rest stay readable by path only.
 	 */
-	private async describeFiles(sessionId: string, rows: readonly SharedMessageRow[]): Promise<Map<string, string>> {
+	private async describeFiles(sessionId: string, rows: readonly SharedMessageRow[]): Promise<{ blocks: Map<string, string>; images: PromptImage[] }> {
 		const blocks = new Map<string, string>();
 		const files = rows.flatMap((row) => this.store.attachmentsOfMessage(row.id));
-		if (files.length === 0) return blocks;
+		if (files.length === 0) return { blocks, images: [] };
 		const placed = await this.hub.attachments.placeInFolder(sessionId, files);
+		const seen = await this.hub.attachments.promptImages(placed.filter((p) => p.relativePath !== null).map((p) => p.file));
 		for (const row of rows) {
 			const mine = placed.filter((p) => p.file.messageId === row.id);
 			if (mine.length === 0) continue;
 			const lines = mine.map(({ file, relativePath }) => {
 				const what = `${file.mimeType}, ${formatBytes(file.size)}`;
-				return relativePath ? `- ${relativePath} (${what})` : `- ${file.name} (${what}) — NOT available on this node: no member node that holds it could be reached; ask the group to post it again`;
+				const shown = seen.has(file.id) ? "; also attached to this message as an image you can see" : "";
+				return relativePath ? `- ${relativePath} (${what}${shown})` : `- ${file.name} (${what}) — NOT available on this node: no member node that holds it could be reached; ask the group to post it again`;
 			});
 			blocks.set(row.id, `Attached files, copied into your working folder (paths relative to it):\n${lines.join("\n")}\nTo send a file you produced back to the group, call mesh_share_file.`);
 		}
-		return blocks;
+		return { blocks, images: [...seen.values()] };
 	}
 
 	private scheduleRetry(sharedId: string): void {

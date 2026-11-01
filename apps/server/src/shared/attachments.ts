@@ -1,11 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync, statSync } from "node:fs";
-import { chmod, mkdir, rename, rm, stat } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat } from "node:fs/promises";
 import path from "node:path";
 import { PassThrough, Transform, type Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { wire } from "@clam/agent-network";
-import { ATTACHMENT_MAX_BYTES, type FileEntry, i18nMsg, type SaveAttachmentBody, type SharedAttachment } from "@clam/contracts";
+import { ATTACHMENT_MAX_BYTES, type FileEntry, i18nMsg, PROMPT_IMAGES_MAX_BASE64_BYTES, PROMPT_IMAGES_MAX_COUNT, type PromptImage, type SaveAttachmentBody, type SharedAttachment } from "@clam/contracts";
 import type { z } from "zod";
 import { agentSessions, projects } from "@clam/database";
 import { eq } from "drizzle-orm";
@@ -13,6 +13,7 @@ import type { FastifyReply, FastifyRequest } from "fastify";
 import { ApiError } from "../http/errors.ts";
 import { contentTypeFor, parseRange, safeFileName, sendFile } from "../http/file-response.ts";
 import { errorText } from "../network/util.ts";
+import { sniffImageMime } from "../services/prompt-images.ts";
 import { copyIntoFolder, bodyStream, limitBytes, refuseGitDir } from "../services/file-writes.ts";
 import { resolveInsideRoot } from "../services/files.ts";
 import type { AttachmentApi, SharedHub } from "./hub.ts";
@@ -364,6 +365,27 @@ export class AttachmentService implements AttachmentApi {
 		const rel = await copyIntoFolder(project.path, body.path ?? `attachments/${safeFileName(row.name)}`, this.blobPath(row.sha256));
 		const info = await stat((await resolveInsideRoot(project.path, rel)).abs);
 		return { name: path.posix.basename(rel), path: rel, kind: "file", size: info.size, modifiedAt: info.mtime.toISOString() };
+	}
+
+	async promptImages(files: readonly AttachmentRow[]): Promise<Map<string, PromptImage>> {
+		const images = new Map<string, PromptImage>();
+		let budget = PROMPT_IMAGES_MAX_BASE64_BYTES;
+		for (const file of files) {
+			if (images.size >= PROMPT_IMAGES_MAX_COUNT) break;
+			const base64Length = Math.ceil(file.size / 3) * 4;
+			if (base64Length > budget || !this.hasBlob(file)) continue;
+			try {
+				const bytes = await readFile(this.blobPath(file.sha256));
+				// The announced type is the sender's word; what the bytes are decides (a provider fails the whole turn on a mislabelled image).
+				const mimeType = sniffImageMime(bytes.subarray(0, 16));
+				if (!mimeType || bytes.length !== file.size) continue;
+				images.set(file.id, { mimeType, data: bytes.toString("base64") });
+				budget -= base64Length;
+			} catch (error) {
+				this.hub.log.debug({ err: errorText(error), attachmentId: file.id }, "could not read a group chat image for the agent");
+			}
+		}
+		return images;
 	}
 
 	async placeInFolder(sessionId: string, files: readonly AttachmentRow[]): Promise<Array<{ file: AttachmentRow; relativePath: string | null }>> {

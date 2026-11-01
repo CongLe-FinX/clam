@@ -1,7 +1,10 @@
 import { type MentionCandidate, mentionTokens, parseMentions, type Participant, type SharedSession, type SharedSessionDetail } from "@clam/contracts";
-import { AtSign, Bot, CornerDownRight, Send, Users } from "lucide-react";
+import { AtSign, Bot, CornerDownRight, Loader2, Send, TriangleAlert, Users } from "lucide-react";
 import { type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { LargePasteBar } from "@/components/composer/large-paste-bar.tsx";
 import { t } from "@/i18n";
+import { readDraft, writeDraft } from "@/lib/draft-store.ts";
+import { type LargePaste, measurePaste, pasteAsFile } from "@/lib/large-paste.ts";
 import { filesFromClipboard } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
@@ -14,6 +17,7 @@ import { usePostSharedMessage } from "./hooks.ts";
 
 const coarsePointer = typeof matchMedia === "function" ? matchMedia("(pointer: coarse)") : null;
 const MAX_ROWS = 8;
+const MAX_CHARS = 20_000;
 
 interface MentionOption {
 	key: string;
@@ -110,7 +114,8 @@ export function GroupComposer({
 }) {
 	const { shared } = detail;
 	const post = usePostSharedMessage(shared.id);
-	const [text, setText] = useState("");
+	const [text, setText] = useState(() => readDraft("group", detail.shared.id).text);
+	const [paste, setPaste] = useState<{ start: number; text: string; stats: LargePaste; forced: boolean } | null>(null);
 	const members = useMemo(() => addressable(shared), [shared]);
 	const candidates = useMemo<MentionCandidate[]>(() => members.map((p) => ({ nodeId: p.nodeId, nodeName: p.nodeName, agentId: p.agentId, agentName: p.agentName })), [members]);
 	// Exactly who the server will address for this text (it parses the same way): the chip shows it, send passes it as `to`.
@@ -158,6 +163,25 @@ export function GroupComposer({
 		});
 	}, [fill]);
 
+	// Draft: the text and the files already uploaded, kept per group chat (debounced; flushed on unmount).
+	const latest = useRef({ text, files: uploads.draftFiles });
+	latest.current = { text, files: uploads.draftFiles };
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `latest` carries both
+	useEffect(() => {
+		const timer = setTimeout(() => writeDraft("group", shared.id, latest.current), 250);
+		return () => clearTimeout(timer);
+	}, [text, uploads.draftFiles, shared.id]);
+	useEffect(() => () => writeDraft("group", shared.id, latest.current), [shared.id]);
+
+	const pasted = paste && (paste.forced || text.slice(paste.start, paste.start + paste.text.length) === paste.text) ? paste : null;
+	const attachPaste = () => {
+		if (!pasted) return;
+		uploads.add([pasteAsFile(pasted.text)]);
+		if (!pasted.forced) setText((cur) => cur.slice(0, pasted.start) + cur.slice(pasted.start + pasted.text.length));
+		setPaste(null);
+		ref.current?.focus();
+	};
+
 	const refreshMenu = (value: string, caret: number) => {
 		const m = /(^|\s)@([^\s@]*)$/.exec(value.slice(0, caret));
 		setMenu(m ? { start: caret - (m[2]?.length ?? 0) - 1, query: m[2] ?? "" } : null);
@@ -179,7 +203,7 @@ export function GroupComposer({
 	const send = () => {
 		const body = text.trim();
 		const attachmentIds = uploads.ready.map((a) => a.id);
-		if ((!body && attachmentIds.length === 0) || uploads.busy || post.isPending || out) return;
+		if ((!body && attachmentIds.length === 0) || uploads.busy || uploads.failed > 0 || post.isPending || out) return;
 		const to = mentions.all ? { mode: "all" as const, agents: [] } : mentions.agents.length > 0 ? { mode: "agents" as const, agents: mentions.agents } : undefined;
 		post.mutate(
 			{ text: body, kind: "chat", to, attachmentIds },
@@ -188,6 +212,8 @@ export function GroupComposer({
 					uploads.clear();
 					setText("");
 					setMenu(null);
+					setPaste(null);
+					writeDraft("group", shared.id, { text: "", files: [] });
 				},
 			},
 		);
@@ -212,7 +238,12 @@ export function GroupComposer({
 				return;
 			}
 		}
-		if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+		if (e.key === "Escape" && pasted) {
+			setPaste(null);
+			return;
+		}
+		// 229 = Safari reports the Enter that commits an IME composition after `compositionend`.
+		if (e.key !== "Enter" || e.nativeEvent.isComposing || e.keyCode === 229) return;
 		if (e.metaKey || e.ctrlKey || (!e.shiftKey && !touch)) {
 			e.preventDefault();
 			send();
@@ -247,6 +278,14 @@ export function GroupComposer({
 					</div>
 				) : null}
 				<AttachmentTray uploads={uploads} />
+				{pasted ? (
+					<LargePasteBar
+						paste={pasted.stats}
+						onAttach={attachPaste}
+						onKeep={() => setPaste(null)}
+						{...(pasted.forced ? { note: t("This text is longer than a message can be ({max} characters), so it can only go as a file.", { max: MAX_CHARS.toLocaleString() }) } : {})}
+					/>
+				) : null}
 				<div className="flex items-end gap-2">
 					<AttachButton onFiles={uploads.add} />
 					<Textarea
@@ -258,25 +297,49 @@ export function GroupComposer({
 						}}
 						onKeyDown={onKeyDown}
 						onPaste={(e) => {
-							const files = filesFromClipboard(e);
-							if (files.length === 0) return;
-							e.preventDefault();
-							uploads.add(files);
+							const clip = e.clipboardData.getData("text/plain");
+							// Screenshots, copied pictures and files are attached; cells copied from a spreadsheet (text + picture) paste as text.
+							if (!clip) {
+								const files = filesFromClipboard(e);
+								if (files.length > 0) {
+									e.preventDefault();
+									uploads.add(files);
+									return;
+								}
+							}
+							const stats = measurePaste(clip);
+							if (!stats) return;
+							const el = e.currentTarget;
+							const normalized = clip.replace(/\r\n?/g, "\n");
+							// A message holds at most MAX_CHARS: the browser would cut a longer paste, so it is offered as a file only.
+							if (text.length - (el.selectionEnd - el.selectionStart) + normalized.length > MAX_CHARS) {
+								e.preventDefault();
+								setPaste({ start: el.selectionStart, text: normalized, stats, forced: true });
+							} else setPaste({ start: el.selectionStart, text: normalized, stats, forced: false });
 						}}
 						onClick={(e) => refreshMenu(e.currentTarget.value, e.currentTarget.selectionStart)}
 						rows={1}
-						maxLength={20_000}
+						maxLength={MAX_CHARS}
 						aria-label={t("Message to the group")}
 						placeholder={wide ? t("Message the group · @mention to pick an agent") : t("Message the group…")}
 						enterKeyHint={touch ? "enter" : "send"}
 						// 16px on touch screens: smaller text makes iOS zoom the page when the box is focused.
 						className="scrollbar-thin min-h-11 flex-1 resize-none overflow-hidden py-2.5 coarse:text-base"
 					/>
-					<Button variant="primary" size="lg" onClick={send} loading={post.isPending} disabled={(!text.trim() && uploads.ready.length === 0) || uploads.busy} aria-label={t("Send message")} className="shrink-0 px-3.5 coarse:min-h-12 coarse:min-w-12">
+					<Button variant="primary" size="lg" onClick={send} loading={post.isPending} disabled={(!text.trim() && uploads.ready.length === 0) || uploads.busy || uploads.failed > 0} aria-label={t("Send message")} className="shrink-0 px-3.5 coarse:min-h-12 coarse:min-w-12">
 						<Send />
 					</Button>
 				</div>
-				{touch ? null : <p className="mt-1.5 hidden text-2xs text-subtle fine:block [@media(max-height:520px)]:hidden">{t("Type @ to address an agent, a machine or everyone · drop, paste or attach files · Enter sends · Shift+Enter for a new line")}</p>}
+				{uploads.busy || uploads.failed > 0 ? (
+					<p role="status" className={cn("mt-1.5 flex items-center gap-1.5 text-2xs", uploads.failed > 0 && !uploads.busy ? "text-danger" : "text-muted-foreground")}>
+						{uploads.busy ? <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden /> : <TriangleAlert className="size-3.5 shrink-0" aria-hidden />}
+						{uploads.busy
+							? t("{count, plural, one {Uploading # file…} other {Uploading # files…}}", { count: uploads.items.filter((i) => i.status === "uploading").length })
+							: t("{count, plural, one {# upload failed: retry or remove it to send} other {# uploads failed: retry or remove them to send}}", { count: uploads.failed })}
+					</p>
+				) : touch ? null : (
+					<p className="mt-1.5 hidden text-2xs text-subtle fine:block [@media(max-height:520px)]:hidden">{t("Type @ to address an agent, a machine or everyone · paste, drop or attach pictures and files · Enter sends · Shift+Enter newline · Esc closes @")}</p>
+				)}
 			</div>
 		</div>
 	);

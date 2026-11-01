@@ -218,6 +218,7 @@ describe("B restarts", () => {
 });
 
 describe("A restarts", () => {
+	// Two lives of node A, a restart and real git pushes: the 30 s default hid which step stalled (the waits inside run up to 30 s each).
 	it("keeps driving, publishes its conversation again so B catches up, and injects the messages it had not injected yet exactly once", async () => {
 		const { sessionId, shared, mirrorId } = await joined();
 		// one message that was injected before the restart, one that was stored but not injected when the node died
@@ -285,7 +286,7 @@ describe("A restarts", () => {
 		// B's answer still reaches the restarted driver
 		await api(pair.b).post(`/shared/${shared.id}/messages`, { text: "welcome back", kind: "note" });
 		await eventually(async () => (await transcriptTexts(pair.a, sessionId)).some((t) => t.includes("welcome back")), "B's message after the restart", 20_000);
-	});
+	}, 90_000);
 });
 
 describe("former-driver work is finished at boot", () => {

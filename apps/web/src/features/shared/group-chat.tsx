@@ -5,7 +5,8 @@ import { useOmpStateOptional, useOptionalOmpStore } from "@/features/session/omp
 import { AGENT_MESSAGE_LIMIT } from "@/features/tasks/format";
 import { type Msg, msg, renderServerText, t, tr } from "@/i18n";
 import { useNode } from "@/lib/queries";
-import { hasFiles } from "@/lib/upload";
+import { DropOverlay } from "@/components/composer/drop-overlay.tsx";
+import { useFileDrop } from "@/components/composer/use-file-drop.ts";
 import { cn, relativeTime } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
@@ -243,8 +244,7 @@ export function GroupChat({
 	const waiting = useOmpStateOptional(useOptionalOmpStore()).requests.length > 0;
 	const uploads = useAttachmentUploads(shared.id);
 	const [fill, setFill] = useState<{ text: string; nonce: number } | null>(null);
-	const [dragging, setDragging] = useState(false);
-	const dragDepth = useRef(0);
+	const { dragging, handlers: drop } = useFileDrop(uploads.add);
 	// Every memoized row receives this: it must not change when the parent re-renders with a fresh inline callback.
 	const latestOpen = useRef(onOpenWorkspace);
 	latestOpen.current = onOpenWorkspace;
@@ -259,29 +259,7 @@ export function GroupChat({
 	return (
 		<div
 			className={cn("relative flex min-h-0 flex-1 flex-col bg-background", className)}
-			onDragEnter={(e) => {
-				if (!hasFiles(e)) return;
-				e.preventDefault();
-				dragDepth.current++;
-				setDragging(true);
-			}}
-			onDragOver={(e) => {
-				if (!hasFiles(e)) return;
-				e.preventDefault();
-				e.dataTransfer.dropEffect = "copy";
-			}}
-			onDragLeave={(e) => {
-				if (!hasFiles(e)) return;
-				dragDepth.current = Math.max(0, dragDepth.current - 1);
-				if (dragDepth.current === 0) setDragging(false);
-			}}
-			onDrop={(e) => {
-				if (!hasFiles(e)) return;
-				e.preventDefault();
-				dragDepth.current = 0;
-				setDragging(false);
-				uploads.add(Array.from(e.dataTransfer.files));
-			}}
+			{...drop}
 		>
 			<ChatHeader detail={detail} onOpenTeam={onOpenTeam} />
 			{empty ? (
@@ -291,11 +269,7 @@ export function GroupChat({
 			)}
 			{dock}
 			<GroupComposer detail={detail} uploads={uploads} keyboardOpen={keyboardOpen} fill={fill} />
-			{dragging ? (
-				<div aria-hidden className="pointer-events-none absolute inset-2 z-20 grid place-items-center rounded-2xl bg-accent-soft/90 text-sm font-medium text-accent shadow-[inset_0_0_0_2px_var(--accent)]">
-					{t("Drop files to share them with the group")}
-				</div>
-			) : null}
+			{dragging ? <DropOverlay className="inset-2 rounded-2xl">{t("Drop to share with the group")}</DropOverlay> : null}
 		</div>
 	);
 }

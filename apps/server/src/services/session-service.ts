@@ -537,7 +537,7 @@ export class SessionService {
 		const rt = await this.runtime(row.id);
 		// M6 project memory: the first prompt of a brand-new session carries the project's memory section (`ContextService.promptWithMemory`).
 		const message = await this.ctx.contexts.promptWithMemory(row, rt, input.message);
-		const accepted = await rt.prompt({ message, clientId: input.clientId, streamingBehavior: input.streamingBehavior });
+		const accepted = await rt.prompt({ message, clientId: input.clientId, streamingBehavior: input.streamingBehavior, ...(input.images?.length ? { images: input.images } : {}) });
 		const set: Partial<typeof agentSessions.$inferInsert> = { updatedAt: new Date().toISOString() };
 		if (row.title === DEFAULT_TITLE) set.title = titleFromPrompt(input.message);
 		this.ctx.db.update(agentSessions).set(set).where(eq(agentSessions.id, row.id)).run();

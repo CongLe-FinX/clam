@@ -673,11 +673,17 @@ export class OmpSessionRuntime implements RuntimeSession {
 
 	async prompt(input: PromptInput): Promise<{ promptId: string }> {
 		const transport = await this.connected();
+		const images = input.images?.map((i) => ({ type: "image", mimeType: i.mimeType, data: i.data })) ?? [];
+		const payload = { message: input.message, ...(images.length > 0 ? { images } : {}), ...(input.streamingBehavior ? { streamingBehavior: input.streamingBehavior } : {}) };
+		// OMP reads every command as one unchunked JSONL frame: refuse one it would not read instead of losing the session to a protocol error.
+		if (images.length > 0 && Buffer.byteLength(JSON.stringify(payload)) + 64 > transport.maxFrameBytes) {
+			throw new AgentRuntimeError("invalid_argument", `The message with its images exceeds the ${transport.maxFrameBytes}-byte frame limit of the agent runtime`, { maxFrameBytes: transport.maxFrameBytes });
+		}
 		const promptId = `p_${randomUUID().replaceAll("-", "").slice(0, 20)}`;
 		// Nothing running and not a slash command (which may never echo): show the prompt at once instead of when OMP echoes it.
 		const idle = this.settled && !this.agentRunning && this.inflight.size === 0;
 		const showPending = idle && !input.message.trimStart().startsWith("/");
-		for (const event of this.mapper.registerPrompt(promptId, input.clientId, input.message, { showPending })) this.emit(event);
+		for (const event of this.mapper.registerPrompt(promptId, input.clientId, input.message, { showPending, ...(images.length > 0 ? { images: input.images } : {}) })) this.emit(event);
 		this.inflight.set(promptId, input.clientId);
 		this.settled = false;
 		this.touch();
@@ -685,7 +691,7 @@ export class OmpSessionRuntime implements RuntimeSession {
 		try {
 			const ack = await transport.request<{ agentInvoked?: boolean } | undefined>(
 				"prompt",
-				{ message: input.message, ...(input.streamingBehavior ? { streamingBehavior: input.streamingBehavior } : {}) },
+				payload,
 				{ id: promptId },
 			);
 			if (isRecord(ack) && ack.agentInvoked === false) {

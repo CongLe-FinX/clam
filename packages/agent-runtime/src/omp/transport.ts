@@ -115,6 +115,11 @@ export class OmpTransport {
 		return this.#state;
 	}
 
+	/** Largest physical frame OMP accepts and sends, per its ready frame (1 MiB until the ready frame arrived). */
+	get maxFrameBytes(): number {
+		return this.#ready?.maxFrameBytes ?? DEFAULT_MAX_FRAME_BYTES;
+	}
+
 	get protocolVersion(): 1 | 2 {
 		return this.#protocolVersion;
 	}

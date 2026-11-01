@@ -523,24 +523,24 @@ function Workspace({ session }: { session: AgentSession }) {
 			<div className="flex h-full min-h-0 flex-col bg-background" style={kbInset > 0 ? { paddingBottom: kbInset } : undefined}>
 				{header}
 				{desktop ? (
-					<PanelGroup direction="horizontal" autoSaveId="clam.session.h" className={cn("min-h-0 flex-1", !panelsReady && "invisible")}>
-						<Panel id="left" order={1} defaultSize={18} minSize={16} maxSize={32} collapsible collapsedSize={0} ref={left.ref} onCollapse={left.onCollapse} onExpand={left.onExpand}>
+					<PanelGroup direction="horizontal" autoSaveId="clam.session.h" className={cn("relative min-h-0 flex-1", !panelsReady && "invisible")}>
+						<Panel id="left" className="relative min-w-0" order={1} defaultSize={18} minSize={16} maxSize={32} collapsible collapsedSize={0} ref={left.ref} onCollapse={left.onCollapse} onExpand={left.onExpand}>
 							{threadsEl()}
 						</Panel>
 						<PanelResizeHandle aria-label={t("Resize threads panel")} />
-						<Panel id="center" order={2} minSize={30}>
+						<Panel id="center" className="relative min-w-0" order={2} minSize={30}>
 							<PanelGroup direction="vertical" autoSaveId="clam.session.v">
-								<Panel id="chat" order={1} minSize={30}>
+								<Panel id="chat" className="relative min-w-0" order={1} minSize={30}>
 									{center}
 								</Panel>
 								<PanelResizeHandle />
-								<Panel id="log" order={2} defaultSize={0} minSize={12} maxSize={60} collapsible collapsedSize={0} ref={log.ref} onCollapse={log.onCollapse} onExpand={log.onExpand}>
+								<Panel id="log" className="relative min-w-0" order={2} defaultSize={0} minSize={12} maxSize={60} collapsible collapsedSize={0} ref={log.ref} onCollapse={log.onCollapse} onExpand={log.onExpand}>
 									{bottomEl(log.toggle)}
 								</Panel>
 							</PanelGroup>
 						</Panel>
 						<PanelResizeHandle aria-label={t("Resize context panel")} />
-						<Panel id="right" order={3} defaultSize={24} minSize={18} maxSize={40} collapsible collapsedSize={0} ref={right.ref} onCollapse={right.onCollapse} onExpand={right.onExpand}>
+						<Panel id="right" className="relative min-w-0" order={3} defaultSize={24} minSize={18} maxSize={40} collapsible collapsedSize={0} ref={right.ref} onCollapse={right.onCollapse} onExpand={right.onExpand}>
 							{contextEl}
 						</Panel>
 					</PanelGroup>

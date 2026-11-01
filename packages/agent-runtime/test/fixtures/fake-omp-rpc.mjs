@@ -738,8 +738,8 @@ export async function runRpc(argv, env) {
 		forward({ type: "message_end", message });
 	}
 
-	async function userMessageEvents(text) {
-		const message = { role: "user", content: [{ type: "text", text }], timestamp: Date.now() };
+	async function userMessageEvents(text, images = []) {
+		const message = { role: "user", content: [{ type: "text", text }, ...images], timestamp: Date.now() };
 		forward({ type: "message_start", message });
 		record(message);
 		forward({ type: "message_end", message });
@@ -899,7 +899,7 @@ export async function runRpc(argv, env) {
 		return { callMessage, toolResult, text: result.content[0].text };
 	}
 
-	async function executePrompt(id, text) {
+	async function executePrompt(id, text, images = []) {
 		const runMessages = [];
 		let status = "completed";
 		let error;
@@ -914,7 +914,7 @@ export async function runRpc(argv, env) {
 			forward({ type: "thinking_level_changed", thinkingLevel: "low", configured: "auto", resolved: "low" });
 		}
 		forward({ type: "turn_start" });
-		runMessages.push(await userMessageEvents(text));
+		runMessages.push(await userMessageEvents(text, images));
 		await pause();
 
 		if (text === "__crash__") {
@@ -1057,7 +1057,7 @@ export async function runRpc(argv, env) {
 		let item = first;
 		while (item) {
 			run = item;
-			const outcome = await executePrompt(item.id, item.message);
+			const outcome = await executePrompt(item.id, item.message, item.images);
 			run = undefined;
 			item = queue.shift();
 			if (item) {
@@ -1376,13 +1376,13 @@ export async function runRpc(argv, env) {
 						fail(id, type, "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
 						return;
 					}
-					queue.push({ id, message: text });
+					queue.push({ id, message: text, images: command.images });
 					ok(id, type, { agentInvoked: true });
 					emit({ type: "queue_update", steering: [], followUp: queue.map((q) => q.message) });
 					return;
 				}
 				// Reserve the slot synchronously so a following prompt is queued, not run concurrently.
-				run = { id, message: text };
+				run = { id, message: text, images: command.images };
 				ok(id, type, { agentInvoked: true });
 				track(runLoop(run));
 				return;

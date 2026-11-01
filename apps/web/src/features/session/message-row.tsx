@@ -1,14 +1,18 @@
 import type { UiBlock, UiMessage } from "@clam/contracts";
 import { AlertTriangle, BookMarked, Bot, Brain, ChevronRight } from "lucide-react";
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { CollapsibleText } from "@/components/collapsible-text";
 import { CopyButton } from "@/components/code-block";
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { projectFile, type RichFile } from "@/components/rich/assets";
+import { FileChip } from "@/components/rich/file-chip";
 import { FileStrip } from "@/components/rich/file-strip";
+import { LazyLightbox } from "@/components/rich/lazy-lightbox";
 import { RichImage } from "@/components/rich/rich-image";
 import { t } from "@/i18n";
 import { MeshMessageBubble, parseMeshMessage } from "@/features/tasks/mesh-message";
 import { cn, formatCompact, formatCost, formatDate, formatNumber, formatTime } from "@/lib/utils";
+import { type AttachedFileRef, splitAttachmentNote } from "./attachment-note.ts";
 import { useSessionEnv } from "./session-env.ts";
 import { type SessionStream, useMsgRec, useMsgRole, useMsgSlice, useRowOutputs } from "./stream-store.ts";
 import { ToolCard } from "./tool-card.tsx";
@@ -208,25 +212,80 @@ function UserText({ text }: { text: string }) {
 	);
 }
 
+type ImageBlock = Extract<UiBlock, { type: "image" }>;
+
+/** The pictures a message carried (what the model saw): one is shown larger, several as a grid; each opens the lightbox on the whole set. */
+function UserImages({ images }: { images: ImageBlock[] }) {
+	const [open, setOpen] = useState<number | null>(null);
+	const close = useCallback(() => setOpen(null), []);
+	if (images.length === 1) return <RichImage src={dataUrl(images[0] as ImageBlock)} alt={t("Image you attached")} className="mt-1.5 max-w-[16rem]" />;
+	return (
+		<>
+			<ul aria-label={t("Images you attached")} className="mt-1.5 grid grid-cols-3 gap-1.5">
+				{images.map((img, i) => (
+					// biome-ignore lint/suspicious/noArrayIndexKey: user message blocks are immutable
+					<li key={i}>
+						<button type="button" onClick={() => setOpen(i)} aria-label={t("View image {number} of {count}", { number: i + 1, count: images.length })} className="relative block aspect-square w-full overflow-hidden rounded-lg bg-surface-2 shadow-[inset_0_0_0_1px_var(--border)] outline-none focus-visible:ring-2 focus-visible:ring-ring">
+							<img src={dataUrl(img)} alt="" loading="lazy" decoding="async" className="size-full cursor-zoom-in object-cover" />
+						</button>
+					</li>
+				))}
+			</ul>
+			{open !== null ? <LazyLightbox items={images.map((img, i) => ({ src: dataUrl(img), alt: t("Image {number} of {count}", { number: i + 1, count: images.length }) }))} index={open} onIndexChange={setOpen} onClose={close} /> : null}
+		</>
+	);
+}
+
+/** The files a message names in its attachment block, as chips under the text (pictures the model also saw are the thumbnails above instead). */
+function UserFiles({ files }: { files: readonly AttachedFileRef[] }) {
+	const env = useSessionEnv();
+	if (files.length === 0) return null;
+	return (
+		<ul aria-label={t("Files you attached")} className="mt-1.5 flex flex-wrap gap-1">
+			{files.map((f) => {
+				const name = f.path.slice(f.path.lastIndexOf("/") + 1);
+				return (
+					<li key={f.path} className="min-w-0 max-w-full">
+						<FileChip file={projectFile(env.projectId, { path: f.path, name, size: 0, mimeType: "" })}>{name}</FileChip>
+					</li>
+				);
+			})}
+		</ul>
+	);
+}
+
 function UserRow({ stream, rowKey }: { stream: SessionStream; rowKey: string }) {
 	const rec = useMsgRec(stream, rowKey);
-	if (!rec) return null;
+	const parsed = useMemo(() => {
+		if (!rec) return null;
+		const texts: string[] = [];
+		const files: AttachedFileRef[] = [];
+		for (const b of rec.msg.content) {
+			if (b.type !== "text") continue;
+			const split = splitAttachmentNote(b.text);
+			texts.push(split.text);
+			files.push(...split.files);
+		}
+		const images = rec.msg.content.filter((b): b is ImageBlock => b.type === "image");
+		// A picture the model saw is already on screen as a thumbnail.
+		return { texts, images, files: images.length > 0 ? files.filter((f) => !f.seen) : files };
+	}, [rec]);
+	if (!rec || !parsed) return null;
 	const { msg } = rec;
 	const mesh = parseMeshMessage(rec.copyText);
 	if (mesh) return <MeshMessageBubble message={mesh} />;
 	const sending = rec.optimistic && !rec.sent;
+	const text = parsed.texts.join("\n\n");
 	return (
 		<div className="group/msg ml-auto flex w-full max-w-3xl flex-col items-end gap-1">
 			<div className={cn("max-w-[88%] rounded-2xl rounded-br-md bg-surface-3 px-3.5 py-2 text-sm leading-relaxed shadow-[inset_0_0_0_1px_var(--border)] transition-opacity sm:max-w-[80%]", sending && "opacity-60")}>
-				{msg.content.map((b, i) =>
-					b.type === "text" ? (
-						// biome-ignore lint/suspicious/noArrayIndexKey: user message blocks are immutable
-						<UserText key={i} text={b.text} />
-					) : b.type === "image" ? (
-						// biome-ignore lint/suspicious/noArrayIndexKey: user message blocks are immutable
-						<RichImage key={i} src={dataUrl(b)} alt={t("Image you attached")} className="mt-1 max-w-[16rem]" />
-					) : null,
-				)}
+				{text.trim() ? (
+					<CollapsibleText expandedKey={`${stream.sessionId}:${rowKey}`}>
+						<UserText text={text} />
+					</CollapsibleText>
+				) : null}
+				{parsed.images.length > 0 ? <UserImages images={parsed.images} /> : null}
+				<UserFiles files={parsed.files} />
 			</div>
 			<div className="flex min-h-6 items-center gap-1.5 text-2xs text-subtle">
 				{sending ? <span>{t("Sending…")}</span> : <span className="tabular">{formatTime(msg.timestamp)}</span>}

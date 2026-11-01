@@ -215,6 +215,11 @@ export class TurnOutputService {
 		await Promise.all([...this.states.values()].map((state) => state.chain));
 	}
 
+	/** Resolves once the open turn's start snapshot is taken (at once when no turn is open): the folder can then change without being mistaken for the starting state. */
+	async startSnapshotTaken(sessionId: string): Promise<void> {
+		await this.states.get(sessionId)?.open?.before.catch(() => undefined);
+	}
+
 	/** The turns of a session that produced files, oldest → newest (the newest 500). */
 	list(sessionId: string): TurnOutputs[] {
 		const rows = this.ctx.db.select().from(turnOutputs).where(eq(turnOutputs.sessionId, sessionId)).orderBy(desc(turnOutputs.endedAt), desc(turnOutputs.id)).limit(OUTPUT_TURNS_PAGE).all();

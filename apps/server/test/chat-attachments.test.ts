@@ -342,3 +342,44 @@ describe("the attachment wire route", () => {
 		expect((await signedRequest(c.b, c.a.netUrl, { path: `/shared/shs_other/attachments/${uploaded.id}` })).status).toBe(404);
 	});
 });
+
+describe("images in a group chat reach the model as vision input", () => {
+	// A real 1×1 PNG; and bytes that only claim to be one.
+	const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+	const fakePrompts = (node: FullHarness): Array<Record<string, any>> =>
+		readFileSync(node.fakeLog, "utf8")
+			.split("\n")
+			.filter(Boolean)
+			.map((line) => JSON.parse(line) as { kind: string; frame?: Record<string, any> })
+			.filter((r) => r.kind === "command" && r.frame?.type === "prompt" && String(r.frame.message).includes("Attached files"))
+			.map((r) => r.frame as Record<string, any>);
+
+	it("an image posted on A is handed to the agent on B as an image (bytes are local after replication) and by path; fakes and oversize stay path-only", async () => {
+		const c = (chat = await startChat());
+		const shot = await uploadTo(c.a, c.shared.id, "shot.png", PNG, "image/png");
+		const fake = await uploadTo(c.a, c.shared.id, "fake.png", Buffer.from("not an image at all"), "image/png");
+		const huge = await uploadTo(c.a, c.shared.id, "huge.png", Buffer.concat([PNG, Buffer.alloc(800 * 1024)]), "image/png");
+		const posted = await post(c.a, c.shared.id, { text: `what is in the picture?${QUIET}`, to: { mode: "all", agents: [] }, attachmentIds: [shot.id, fake.id, huge.id] });
+		expect(posted.status, JSON.stringify(posted.body)).toBe(201);
+
+		for (const node of [c.b, c.a]) {
+			const prompt = await eventually(() => fakePrompts(node)[0], `the injected prompt on ${node === c.a ? "A" : "B"}`);
+			expect(prompt.images, "only the real, small image is vision input").toEqual([{ type: "image", mimeType: "image/png", data: PNG.toString("base64") }]);
+			expect(prompt.message).toContain("attachments/shot.png (image/png, 70 B; also attached to this message as an image you can see)");
+			expect(prompt.message).toMatch(/attachments\/fake\.png \(image\/png, \d+ B\)\n/);
+			expect(prompt.message).toMatch(/attachments\/huge\.png \(image\/png, [\d.]+ [KM]i?B\)\n/);
+		}
+		// the copy in the agent's folder is still there for tools
+		expect(readFileSync(path.join(c.projectB.path, "attachments", "shot.png")).equals(PNG)).toBe(true);
+	});
+
+	it("an image addressed to one agent is vision input for that agent only, even when its node had to pull the bytes first", async () => {
+		const c = (chat = await startChat({ attachmentEagerMaxBytes: 16 }));
+		const shot = await uploadTo(c.a, c.shared.id, "late.png", Buffer.concat([PNG, Buffer.alloc(200)]), "image/png");
+		await post(c.a, c.shared.id, { text: `look${QUIET}`, to: { mode: "agents", agents: [c.agentB] }, attachmentIds: [shot.id] });
+		const prompt = await eventually(() => fakePrompts(c.b)[0], "the injected prompt on B");
+		expect(prompt.images).toHaveLength(1);
+		expect(prompt.images[0].data).toBe(Buffer.concat([PNG, Buffer.alloc(200)]).toString("base64"));
+		expect(fakePrompts(c.a)).toHaveLength(0);
+	});
+});

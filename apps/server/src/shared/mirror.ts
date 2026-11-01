@@ -15,7 +15,6 @@ const FORWARDED: ReadonlySet<string> = new Set(["state", "agent_start", "agent_e
 /** A sync chunk stays well under the listener's 1 MiB body limit. */
 const CHUNK_BYTES = 512 * 1024;
 const TRANSCRIPT_PAGE = 256;
-const LOAD_RETRIES = 3;
 
 type Event = { type: string } & Record<string, unknown>;
 
@@ -23,6 +22,8 @@ interface PeerLink {
 	peerId: string;
 	/** The peer must be (re)synchronised with the whole transcript before it can follow batches again. */
 	needsSync: boolean;
+	/** Its snapshot is on its way: batches numbered after that snapshot are kept for it (see `flush`). */
+	syncing: boolean;
 	pending: wire.SharedMirrorRequest[];
 	pumping: boolean;
 	retry: NodeJS.Timeout | null;
@@ -34,8 +35,8 @@ class Publisher {
 	seq = 0;
 	loaded = false;
 	loading: Promise<void> | null = null;
-	/** Events seen while the transcript was being read: a read that overlapped events is read again. */
-	events = 0;
+	/** While the transcript is being read: every event the runtime emits meanwhile, to be laid over the read (`ensureLoaded`). Null when no read is running. */
+	loadEvents: Event[] | null = null;
 	readonly reducer = new TranscriptReducer();
 	state: SessionLiveState | null = null;
 	buffer: Event[] = [];
@@ -182,7 +183,7 @@ export class MirrorService implements MirrorApi, SessionViews {
 		if (!participant || participant.state !== "active" || peerId === this.ctx.identity.nodeId) return;
 		let link = publisher.links.get(peerId);
 		if (!link) {
-			link = { peerId, needsSync: true, pending: [], pumping: false, retry: null };
+			link = { peerId, needsSync: true, syncing: false, pending: [], pumping: false, retry: null };
 			publisher.links.set(peerId, link);
 		}
 		link.needsSync = true;
@@ -195,8 +196,8 @@ export class MirrorService implements MirrorApi, SessionViews {
 		const publisher = this.bySession.get(sessionId);
 		if (!publisher || !FORWARDED.has(event.type)) return;
 		if (!publisher.loaded) {
-			// The transcript is read from the runtime when a participant needs it; whatever happens before is part of that read.
-			publisher.events++;
+			// What happened before the read began is part of the read; what happens while it runs is kept and laid over it.
+			publisher.loadEvents?.push(event as Event);
 			if (this.store.activePeers(publisher.sharedId).length > 0) void this.ensureLoaded(publisher);
 			return;
 		}
@@ -230,24 +231,28 @@ export class MirrorService implements MirrorApi, SessionViews {
 		this.buffer(publisher, { type: "state", state });
 	}
 
-	/** Read the driving session's transcript once; a read that overlapped runtime events is repeated (a few times). */
+	/**
+	 * Read the driving session's transcript (and state) once. The runtime keeps working while that is read, so the events that
+	 * arrive meanwhile are laid over the read (`TranscriptReducer.overlay`): a message the read did not see appears from its own
+	 * events, one it saw half-written is completed by them. Nothing awaits between that and `loaded`, so no event falls in a gap.
+	 */
 	private ensureLoaded(publisher: Publisher): Promise<void> {
 		if (publisher.loaded) return Promise.resolve();
 		publisher.loading ??= (async () => {
+			const during: Event[] = [];
+			publisher.loadEvents = during;
 			try {
-				let transcript: UiMessage[] = [];
-				for (let attempt = 0; attempt < LOAD_RETRIES; attempt++) {
-					const before = publisher.events;
-					transcript = await this.readTranscript(publisher.sessionId);
-					if (publisher.events === before) break;
-				}
-				const state = await this.ctx.sessions.state(publisher.sessionId).catch(() => null);
+				const transcript = await this.readTranscript(publisher.sessionId);
+				const read = await this.ctx.sessions.state(publisher.sessionId).catch(() => null);
 				publisher.reducer.replace(transcript);
+				publisher.reducer.overlay(during);
+				const state = read ?? (during.findLast((event) => event.type === "state")?.state as SessionLiveState | undefined) ?? null;
 				publisher.state = state ? this.withRequests(publisher, state) : null;
 				publisher.loaded = true;
 			} catch (error) {
 				this.hub.log.warn({ err: errorText(error), sharedId: publisher.sharedId }, "could not read the driving session's transcript for the mirror");
 			} finally {
+				publisher.loadEvents = null;
 				publisher.loading = null;
 			}
 		})();
@@ -275,7 +280,8 @@ export class MirrorService implements MirrorApi, SessionViews {
 		publisher.seq++;
 		const batch: wire.SharedMirrorRequest = { type: "events", epoch: publisher.epoch, streamId: publisher.streamId, seq: publisher.seq, events: events as wire.SharedMirrorEvent[] };
 		for (const link of publisher.links.values()) {
-			if (link.needsSync) continue; // the next sync includes these events
+			// A link that still waits for its snapshot gets everything from that snapshot on (the snapshot includes these events); one whose snapshot is on its way gets the batches numbered after it as soon as the snapshot has arrived.
+			if (link.needsSync && !link.syncing) continue;
 			link.pending.push(batch);
 			void this.pump(publisher, link);
 		}
@@ -311,7 +317,10 @@ export class MirrorService implements MirrorApi, SessionViews {
 					this.flush(publisher);
 					link.pending = [];
 					const snapshot = { seq: publisher.seq, messages: publisher.reducer.messages(), state: publisher.state ? this.withRequests(publisher, publisher.state) : null };
-					const outcome = await this.sendSync(publisher, peer.url, snapshot);
+					link.syncing = true;
+					const outcome = await this.sendSync(publisher, peer.url, snapshot).finally(() => {
+						link.syncing = false;
+					});
 					if (outcome !== "ok") {
 						if (outcome === "failed") this.scheduleRetry(publisher, link);
 						return;

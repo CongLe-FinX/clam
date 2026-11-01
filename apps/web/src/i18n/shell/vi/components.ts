@@ -98,5 +98,17 @@ const vi: Catalog = {
 	"Busy": "Đang bận",
 	"Crashed": "Bị lỗi",
 	"Restarting": "Đang khởi động lại",
+	"Show less": "Thu gọn",
+	"Show more": "Xem thêm",
+	"Cancel upload of {name}": "Hủy tải lên {name}",
+	"Remove {name}": "Gỡ {name}",
+	"Retry upload of {name}": "Thử tải lên lại {name}",
+	"Upload failed": "Tải lên thất bại",
+	"{percent} uploaded": "Đã tải lên {percent}",
+	"Attachments": "Tệp đính kèm",
+	"Long paste: {chars} characters, {lines} lines. Attach it as a file to keep the message short?": "Văn bản dán dài: {chars} ký tự, {lines} dòng. Đính kèm dưới dạng tệp để tin nhắn ngắn gọn?",
+	"Attach as file": "Đính kèm dưới dạng tệp",
+	"Keep inline": "Giữ trong tin nhắn",
+	"Dismiss": "Bỏ qua",
 };
 export default vi;

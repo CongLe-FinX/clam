@@ -137,12 +137,12 @@ export class OmpEventMapper {
 	 * for it when nothing is running: a prompt queued behind a run is delivered later, so showing it at the end
 	 * of the transcript now would put it before messages that still have to arrive.
 	 */
-	registerPrompt(promptId: string, clientId: string, text: string, options: { showPending?: boolean } = {}): SessionEvent[] {
+	registerPrompt(promptId: string, clientId: string, text: string, options: { showPending?: boolean; images?: ReadonlyArray<{ mimeType: string; data: string }> } = {}): SessionEvent[] {
 		const record: PromptRecord = { clientId, text };
 		this.#prompts.set(promptId, record);
 		this.#echoQueue.push(promptId);
 		if (!options.showPending) return [];
-		const message: UiMessage = { id: `m${this.#counter + 1}`, role: "user", timestamp: Date.now(), content: [{ type: "text", text }], clientId };
+		const message: UiMessage = { id: `m${this.#counter + 1}`, role: "user", timestamp: Date.now(), content: [{ type: "text", text }, ...(options.images ?? []).map((i): UiBlock => ({ type: "image", mimeType: i.mimeType, data: i.data }))], clientId };
 		this.#counter++;
 		record.synthetic = message;
 		this.#transcript.push(message);

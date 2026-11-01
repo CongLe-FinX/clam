@@ -1,5 +1,5 @@
 import type { wire } from "@clam/agent-network";
-import { ATTACHMENT_EAGER_MAX_BYTES, type I18nMessage, type SaveAttachmentBody, type FileEntry, type SharedAttachment } from "@clam/contracts";
+import { ATTACHMENT_EAGER_MAX_BYTES, type I18nMessage, type PromptImage, type SaveAttachmentBody, type FileEntry, type SharedAttachment } from "@clam/contracts";
 import type { Checkpoint, DecideSharedInviteBody, FilesApplyResult, FilesPreview, SessionLiveState, SharedInvite, SharedMessage, SharedSession, SharedSessionDetail, SharedTopicEvent, TransferBody, UiResponseBody } from "@clam/contracts";
 import type { GroupMessageKind, MessageTo } from "@clam/task-engine";
 import type { FastifyBaseLogger, FastifyReply, FastifyRequest } from "fastify";
@@ -148,6 +148,8 @@ export interface AttachmentApi {
 	save(sharedId: string, attachmentId: string, body: z.infer<typeof SaveAttachmentBody>): Promise<FileEntry>;
 	/** Copy the files into the project folder of the local agent session (`attachments/<name>`); `null` for a file that could not be fetched. */
 	placeInFolder(sessionId: string, files: readonly AttachmentRow[]): Promise<Array<{ file: AttachmentRow; relativePath: string | null }>>;
+	/** The files that are images a model takes as vision input and whose bytes are on this node, keyed by attachment id: in order, at most `PROMPT_IMAGES_MAX_COUNT` and `PROMPT_IMAGES_MAX_BASE64_BYTES` together; the rest are left to be read by path. */
+	promptImages(files: readonly AttachmentRow[]): Promise<Map<string, PromptImage>>;
 	/** Store a file of the agent's working folder as an unattached group chat file (`maxBytes` caps it; `skipIfPosted` makes a file already in the chat from that path with the same digest yield null). The agent's own path rules apply: inside the folder, a regular file, no `.git`. */
 	registerFromFolder(sharedId: string, sessionId: string, path: string, options?: { maxBytes?: number; skipIfPosted?: boolean }): Promise<AttachmentRow | null>;
 	/** An agent shares a file of its working folder (`mesh_share_file`): stored, then posted to the group as a message of that agent. */

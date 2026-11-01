@@ -15,11 +15,8 @@ import { createTestHarness, idleRuntime, type TestHarness } from "./helpers.ts";
  * whose events the test emits; the folders are real.
  */
 
-/**
- * The start snapshot is a real directory walk that runs off the event handler and exposes no completion signal (production never
- * waits for it either): a short real delay lets it finish before the test changes the folder. Fake timers cannot help: the wait is for file system I/O.
- */
-const settle = (ms = 80): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/** The start snapshot is a real directory walk that runs off the event handler; wait for it before the test changes the folder. */
+const started = (sessionId: string): Promise<void> => h.ctx.turnOutputs.startSnapshotTaken(sessionId);
 
 let h: TestHarness;
 let root: string;
@@ -53,7 +50,7 @@ function session(id: string, dir: string, kind = "local"): string {
 /** Run one turn: `agent_start`, let the start snapshot finish, do the work, `agent_end`. */
 async function turn(sessionId: string, work: () => void | Promise<void>, middle: SessionEvent[] = []): Promise<void> {
 	emit(sessionId, { type: "agent_start" });
-	await settle();
+	await started(sessionId);
 	await work();
 	for (const event of middle) emit(sessionId, event);
 	emit(sessionId, { type: "agent_end" });
@@ -216,7 +213,7 @@ describe("turn output detection", () => {
 		h.ctx.turnOutputs.snapshotLimits = { maxEntries: 3 };
 		const id = session("ses_5", dir);
 		emit(id, { type: "agent_start" });
-		await settle();
+		await started(id);
 		put(dir, "found-by-walk.txt", "x");
 		put(dir, "named.txt", "x");
 		emit(id, { type: "tool_start", toolCallId: "c1", toolName: "write", args: { path: "named.txt" } });
@@ -240,7 +237,7 @@ describe("turn output detection", () => {
 		const s2 = session("ses_i2", d2);
 		emit(s1, { type: "agent_start" });
 		emit(s2, { type: "agent_start" });
-		await settle();
+		await Promise.all([started(s1), started(s2)]);
 		put(d1, "one.png", "1");
 		put(d2, "two.png", "2");
 		emit(s2, { type: "agent_end" });
@@ -282,7 +279,7 @@ describe("turn output detection", () => {
 		const dir = folder("crash");
 		const id = session("ses_c", dir);
 		emit(id, { type: "agent_start" });
-		await settle();
+		await started(id);
 		put(dir, "lost.png", "x");
 		for (const listener of statusListeners) listener({ sessionId: id, state: "crashed", pid: null, startedAt: null, restarts: 1, lastError: "boom", lastActivityAt: null });
 		emit(id, { type: "agent_end" }); // nothing is open any more
@@ -295,7 +292,7 @@ describe("turn output detection", () => {
 		const dir = folder("settled");
 		const id = session("ses_s", dir);
 		emit(id, { type: "agent_start" });
-		await settle();
+		await started(id);
 		put(dir, "x.png", "x");
 		emit(id, { type: "settled" });
 		expect((await h.ctx.turnOutputs.takeRunOutputs(id)).map((f) => f.path)).toEqual(["x.png"]);
@@ -305,7 +302,7 @@ describe("turn output detection", () => {
 		const gone = folder("deleted");
 		const sGone = session("ses_d", gone);
 		emit(sGone, { type: "agent_start" });
-		await settle();
+		await started(sGone);
 		put(gone, "late.png", "x");
 		h.ctx.db.delete(agentSessions).where(eq(agentSessions.id, sGone)).run();
 		emit(sGone, { type: "agent_end" });
@@ -315,7 +312,7 @@ describe("turn output detection", () => {
 		const dir = folder("vanish");
 		const sVanish = session("ses_v", dir);
 		emit(sVanish, { type: "agent_start" });
-		await settle();
+		await started(sVanish);
 		rmSync(dir, { recursive: true, force: true });
 		emit(sVanish, { type: "agent_end" });
 		expect(await h.ctx.turnOutputs.takeRunOutputs(sVanish)).toEqual([]);

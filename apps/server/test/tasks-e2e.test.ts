@@ -245,6 +245,8 @@ describe("agent discussion through both sessions", () => {
 		expect(onA.messages[1]?.delivery).toBe("delivered");
 		expect(onB.messages[0]?.delivery).toBe("delivered");
 
+		// the status note goes into A's delegating session after the task shows as succeeded: the injector records it as notified once the prompt was handed over
+		await eventually(() => pair.a.ctx.tasks.store.get(task.id).notifiedStatus === "succeeded", "the status note to be injected into A's delegating session");
 		// what the agents actually received
 		const aPrompts = promptsOf(pair.a).map((p) => p.message);
 		const questionPrompt = aPrompts.find((m) => m.startsWith("[CL Agent Mesh]") && m.includes("kind question"));

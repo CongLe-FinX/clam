@@ -109,8 +109,35 @@ export const UpdateSessionBody = z.object({
 	archived: z.boolean().optional(),
 });
 
+/** Image types a prompt can carry to the model (what vision models accept). */
+export const PROMPT_IMAGE_MIME_TYPES = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+/** At most this many images per prompt. */
+export const PROMPT_IMAGES_MAX_COUNT = 8;
+/**
+ * All images of one prompt together, as base64 characters. OMP reads each command as one unchunked JSONL frame of at most 1 MiB
+ * (`maxFrameBytes` of its ready frame) and echoes the user message back in a frame of its own, so the images leave room for the text.
+ */
+export const PROMPT_IMAGES_MAX_BASE64_BYTES = 768 * 1024;
+
+export const PromptImage = z.object({
+	mimeType: z.enum(PROMPT_IMAGE_MIME_TYPES),
+	/** Base64 of the image bytes, no `data:` prefix. */
+	data: z.string().min(1).max(PROMPT_IMAGES_MAX_BASE64_BYTES).regex(/^[A-Za-z0-9+/]+={0,2}$/, "Image data must be base64"),
+});
+export type PromptImage = z.infer<typeof PromptImage>;
+
+export const PromptImages = z
+	.array(PromptImage)
+	.max(PROMPT_IMAGES_MAX_COUNT)
+	.superRefine((images, ctx) => {
+		const total = images.reduce((sum, image) => sum + image.data.length, 0);
+		if (total > PROMPT_IMAGES_MAX_BASE64_BYTES) ctx.addIssue({ code: "custom", message: `Images together exceed ${PROMPT_IMAGES_MAX_BASE64_BYTES} bytes of base64` });
+	});
+
 export const PromptBody = z.object({
 	message: z.string().min(1),
+	/** Images the model sees (vision input) next to the text. The client also saves them in the project folder so tools can use the files. */
+	images: PromptImages.optional(),
 	/** How to deliver while the agent is busy. Ignored when idle. */
 	streamingBehavior: z.enum(["steer", "followUp"]).optional(),
 	/** Client-generated id for optimistic rendering + idempotency. */

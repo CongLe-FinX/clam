@@ -149,6 +149,17 @@
 @keyframes clam-caret { 0%, 100% { opacity: 1 } 50% { opacity: 0 } }
 @keyframes clam-dot { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0) } 30% { opacity: 1; transform: translateY(-3px) } }
 
+@property --clam-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
+/* A clipped long message: its last 4rem fade out while collapsed (a mask, so it matches any bubble colour, light or dark). */
+.clam-clip {
+	--clam-fade: 0px;
+	-webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - var(--clam-fade)), transparent);
+	mask-image: linear-gradient(to bottom, #000 calc(100% - var(--clam-fade)), transparent);
+	transition: --clam-fade 220ms var(--ease-out-quint);
+}
+.clam-clip[data-collapsed="true"] { --clam-fade: 4rem; }
+@media (prefers-reduced-motion: reduce) { .clam-clip { transition: none; } }
+
 @utility animate-fade-in { animation: clam-fade-in 160ms var(--ease-out-quint) both; }
 @utility animate-slide-up { animation: clam-slide-up 220ms var(--ease-out-quint) both; }
 @utility animate-pop-in { animation: clam-pop-in 160ms var(--ease-spring) both; }

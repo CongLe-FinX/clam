@@ -199,16 +199,17 @@ describe("epochs and driver changes", () => {
 		const { shared, sessionId, request, mirrorId } = await asking("__ask__");
 		const send = (body: unknown, idempotencyKey?: string) => signedRequest(pair.b, pair.a.netUrl, { method: "POST", path: `/shared/${shared.id}/answer`, body, ...(idempotencyKey ? { idempotencyKey } : {}) });
 		const answers = { requestId: request.requestId, answers: ANSWERS };
-		// the driver is at epoch 2 now (as after a hand-over): what B saw at epoch 1 belongs to a runtime that no longer drives
-		pair.a.ctx.shared.store.update(shared.id, { epoch: 2 });
-		const stale = await send({ epoch: 1, ...answers });
-		expect(stale.status).toBe(409);
-		expect(stale.body.error).toMatchObject({ code: "stale_epoch", details: { currentEpoch: 2, driverNodeId: pair.aId } });
+		// an epoch the driver has not reached: it asks the sender who drives now, and refuses
 		const ahead = await send({ epoch: 3, ...answers });
 		expect(ahead.status).toBe(409);
-		expect(ahead.body.error.code).toBe("epoch_unknown");
-		expect(uiResponses(pair.a)).toHaveLength(0);
+		expect(ahead.body.error).toMatchObject({ code: "epoch_unknown", details: { currentEpoch: 1 } });
+		// the driver is at epoch 2 (as after a hand-over): what B saw at epoch 1 belongs to a runtime that no longer drives. The store says 2 for
+		// one synchronous step only: for any longer, B's reconcile would read it from the driver, adopt it, and the driver would adopt it back.
+		pair.a.ctx.shared.store.update(shared.id, { epoch: 2 });
+		const stale = pair.a.ctx.shared.requests.receiveAnswer(pair.bId, shared.id, { epoch: 1, ...answers });
 		pair.a.ctx.shared.store.update(shared.id, { epoch: 1 });
+		await expect(stale).rejects.toMatchObject({ status: 409, code: "stale_epoch", details: { currentEpoch: 2, driverNodeId: pair.aId } });
+		expect(uiResponses(pair.a)).toHaveLength(0);
 		expect((await pendingOn(pair.a, sessionId)).map((r) => r.requestId)).toEqual([request.requestId]);
 
 		// the wire body itself is validated: epoch ≥ 1, exactly one of value / answers
@@ -218,14 +219,16 @@ describe("epochs and driver changes", () => {
 		// with the right epoch the call goes through; a retry with the same key replays the 200, a new key learns it was answered
 		const key = `answer-${Date.now()}`;
 		const first = await send({ epoch: 1, ...answers }, key);
-		expect(first.status).toBe(200);
+		expect(first.status, JSON.stringify(first.body)).toBe(200);
 		expect(first.body).toEqual({ ok: true, outcome: "answered" });
 		const retry = await send({ epoch: 1, ...answers }, key);
-		expect(retry.status).toBe(200);
+		expect(retry.status, JSON.stringify(retry.body)).toBe(200);
 		expect(retry.headers.get("idempotent-replay")).toBe("true");
 		const other = await send({ epoch: 1, ...answers });
-		expect(other.status).toBe(409);
+		expect(other.status, JSON.stringify(other.body)).toBe(409);
 		expect(other.body.error.code).toBe("already_answered");
+		// the frame reaches the fake agent through its stdin: it is in the log once the agent has carried on with the answer
+		await eventually(() => agentSaid(pair.a, sessionId, "SQLite"), "the agent to carry on with the answer");
 		expect(uiResponses(pair.a)).toHaveLength(1);
 		await eventually(async () => (await pendingOn(pair.b, mirrorId)).length === 0, "B to see it resolved");
 	});

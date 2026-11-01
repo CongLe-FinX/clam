@@ -32,6 +32,23 @@ export class TranscriptReducer {
 		}
 	}
 
+	/**
+	 * Lay the events that arrived while the snapshot given to `replace` was being read over that snapshot. The read may have seen
+	 * none, some or all of them, so they are applied in the way that ends with the same transcript in every case: `message_start` and
+	 * `message_end` carry the whole message (an upsert, in order), a delta only grows a message whose start is among these events
+	 * (any other message may already hold it in the read; its `message_end` carries the rest), a removal removes.
+	 */
+	overlay(events: ReadonlyArray<{ type: string } & Record<string, unknown>>): void {
+		const arrived = new TranscriptReducer();
+		const removed: string[] = [];
+		for (const event of events) {
+			arrived.apply(event);
+			if (event.type === "message_removed" && typeof event.messageId === "string") removed.push(event.messageId);
+		}
+		for (const message of arrived.messages()) this.apply({ type: "message_end", message });
+		for (const id of removed) this.apply({ type: "message_removed", messageId: id });
+	}
+
 	get size(): number {
 		return this.order.length;
 	}

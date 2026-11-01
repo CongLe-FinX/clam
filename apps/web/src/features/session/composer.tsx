@@ -1,34 +1,47 @@
-import { ArrowUp, Clock, CornerDownRight, Loader2, Paperclip, RotateCw, Square } from "lucide-react";
+import { PROMPT_IMAGES_MAX_COUNT, type PromptImage, routes } from "@clam/contracts";
+import { ArrowUp, Clock, CornerDownRight, EyeOff, Loader2, Paperclip, RotateCw, Square, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { UploadDock, useProjectUploads } from "@/features/projects/uploads.tsx";
+import { ComposerChips } from "@/components/composer/chips.tsx";
+import { DropOverlay } from "@/components/composer/drop-overlay.tsx";
+import { LargePasteBar } from "@/components/composer/large-paste-bar.tsx";
+import { useFileDrop } from "@/components/composer/use-file-drop.ts";
 import { useIsMobile } from "@/hooks/use-breakpoint";
 import { T, t } from "@/i18n";
-import { errorText } from "@/lib/api";
-import { filesFromClipboard, hasFiles } from "@/lib/upload";
+import { errorText, localUrl } from "@/lib/api";
+import { readDraft, writeDraft } from "@/lib/draft-store.ts";
+import { imageBudgetBytes, isVisionImage, prepareImage } from "@/lib/image-prep.ts";
+import { type LargePaste, measurePaste, pasteAsFile } from "@/lib/large-paste.ts";
+import { filesFromClipboard } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Kbd } from "@/ui/kbd";
 import { Tip } from "@/ui/tooltip";
-import { ModelPicker, ModelSettings, ThinkingPicker } from "./model-pickers.tsx";
+import { withAttachmentNote } from "./attachment-note.ts";
+import { type ComposerFile, useComposerFiles } from "./composer-files.ts";
+import { ModelPicker, ModelSettings, ThinkingPicker, useVisionInput } from "./model-pickers.tsx";
 import { useSessionEnv } from "./session-env.ts";
 import { isBusy, type SessionStream, useStreamMeta } from "./stream-store.ts";
 
-const draftKey = (id: string) => `clam.draft:${id}`;
-function readDraft(id: string): string {
-	try {
-		return sessionStorage.getItem(draftKey(id)) ?? "";
-	} catch {
-		return "";
-	}
-}
-function writeDraft(id: string, value: string): void {
-	try {
-		if (value) sessionStorage.setItem(draftKey(id), value);
-		else sessionStorage.removeItem(draftKey(id));
-	} catch {
-		/* storage unavailable: the draft just isn't kept */
-	}
+const MOD_KEY = typeof navigator !== "undefined" && /mac|iphone|ipad/i.test(navigator.platform) ? "⌘" : "Ctrl";
+
+/** The pictures of a send as vision input: the original bytes when small, else scaled down to fit; one that cannot be read stays a file. */
+async function visionImages(files: readonly ComposerFile[], projectId: string): Promise<Map<number, PromptImage>> {
+	const candidates = files.filter((f) => f.kind === "image" && isVisionImage({ type: f.type })).slice(0, PROMPT_IMAGES_MAX_COUNT);
+	const budget = imageBudgetBytes(candidates.length);
+	const out = new Map<number, PromptImage>();
+	await Promise.all(
+		candidates.map(async (f) => {
+			try {
+				const blob = f.file ?? (await (await fetch(localUrl(routes.projectRaw(projectId), { path: f.path }))).blob());
+				const prepared = await prepareImage(blob, budget);
+				if (prepared) out.set(f.id, { mimeType: prepared.mimeType, data: prepared.data });
+			} catch {
+				/* sent as a file only */
+			}
+		}),
+	);
+	return out;
 }
 
 const coarsePointer = typeof matchMedia === "function" ? matchMedia("(pointer: coarse)") : null;
@@ -69,16 +82,18 @@ export function Composer({
 	className?: string;
 }) {
 	const sessionId = stream.sessionId;
-	const [value, setValue] = useState(() => readDraft(sessionId));
+	const [draft] = useState(() => readDraft("session", sessionId));
+	const [value, setValue] = useState(draft.text);
 	const [mode, setMode] = useState<"steer" | "followUp">("steer");
 	const [restarting, setRestarting] = useState(false);
+	const [sending, setSending] = useState(false);
+	const [paste, setPaste] = useState<{ start: number; text: string; stats: LargePaste } | null>(null);
 	const ref = useRef<HTMLTextAreaElement>(null);
 	const { projectId } = useSessionEnv();
-	const uploads = useProjectUploads(projectId);
+	const files = useComposerFiles(projectId, draft.files);
+	const vision = useVisionInput(stream);
 	const fileInput = useRef<HTMLInputElement>(null);
-	const dragDepth = useRef(0);
-	const [dragging, setDragging] = useState(false);
-	const announced = useRef(new Set<number>());
+	const { dragging, handlers: drop } = useFileDrop(files.add);
 	const mobile = useIsMobile();
 	const touch = mobile || (coarsePointer?.matches ?? false);
 	const busy = useStreamMeta(stream, isBusy);
@@ -86,16 +101,22 @@ export function Composer({
 	const queued = useStreamMeta(stream, (m) => m.live?.queued);
 	const blocked = useBlockedReason(stream);
 	const trimmed = value.trim();
+	const readyCount = files.items.filter((i) => i.status === "ready").length;
+	const hasContent = trimmed !== "" || readyCount > 0;
+	const sendBlocked = blocked.reason !== null || files.uploading > 0 || files.failed > 0 || sending;
 	const placeholder = blocked.reason ?? (busy ? (mode === "steer" ? t("Steer the agent…") : t("Queue a follow-up…")) : t("Message the agent…"));
+	const pasted = paste && value.slice(paste.start, paste.start + paste.text.length) === paste.text ? paste : null;
+	const hasPictures = files.items.some((i) => i.kind === "image");
 
-	// Draft persistence (debounced; flushed on unmount).
-	const latest = useRef(value);
-	latest.current = value;
+	// Draft persistence (debounced; flushed on unmount): the text and the files that are already uploaded.
+	const latest = useRef({ text: value, files: files.draftFiles });
+	latest.current = { text: value, files: files.draftFiles };
+	// biome-ignore lint/correctness/useExhaustiveDependencies: `latest` carries both
 	useEffect(() => {
-		const timer = setTimeout(() => writeDraft(sessionId, value), 250);
+		const timer = setTimeout(() => writeDraft("session", sessionId, latest.current), 250);
 		return () => clearTimeout(timer);
-	}, [value, sessionId]);
-	useEffect(() => () => writeDraft(sessionId, latest.current), [sessionId]);
+	}, [value, files.draftFiles, sessionId]);
+	useEffect(() => () => writeDraft("session", sessionId, latest.current), [sessionId]);
 
 	useEffect(() => {
 		if (fill) {
@@ -129,29 +150,50 @@ export function Composer({
 		return () => ro.disconnect();
 	}, [fit]);
 
-	// A finished upload lands in the project folder: reference it in the draft so the agent knows which file is meant.
-	useEffect(() => {
-		const done = uploads.items.filter((i) => i.status === "done" && !announced.current.has(i.id));
-		if (done.length === 0) return;
-		for (const i of done) announced.current.add(i.id);
-		const refs = done.map((i) => `\`${i.path}\``).join(" ");
-		setValue((cur) => (cur.trim() ? `${cur.replace(/\s+$/, "")} ${refs} ` : `${refs} `));
-		ref.current?.focus();
-	}, [uploads.items]);
+	const submit = useCallback(
+		async (behavior: "steer" | "followUp") => {
+			const text = value.trim();
+			if ((!text && readyCount === 0) || sendBlocked) return;
+			setSending(true);
+			let taken: ComposerFile[] = [];
+			try {
+				const ready = files.items.filter((i) => i.status === "ready");
+				const seen = vision.supported ? await visionImages(ready, projectId) : new Map<number, PromptImage>();
+				if (vision.supported && ready.some((f) => f.kind === "image" && isVisionImage({ type: f.type }) && !seen.has(f.id))) {
+					toast.warning(t("Some pictures could not be prepared for the model; only their file paths are sent."));
+				}
+				taken = files.take();
+				setValue("");
+				setPaste(null);
+				writeDraft("session", sessionId, { text: "", files: [] });
+				const message = withAttachmentNote(
+					text,
+					taken.flatMap((f) => (f.path ? [{ path: f.path, seen: seen.has(f.id) }] : [])),
+				);
+				await stream.sendPrompt(
+					message,
+					behavior,
+					taken.flatMap((f) => seen.get(f.id) ?? []),
+				);
+			} catch (e) {
+				setValue((cur) => (cur.trim() ? `${text}\n${cur}` : text));
+				files.restore(taken);
+				toast.error(t("Message not sent: {error}", { error: errorText(e) }));
+				ref.current?.focus();
+			} finally {
+				setSending(false);
+			}
+		},
+		[value, readyCount, sendBlocked, files, vision.supported, projectId, sessionId, stream],
+	);
 
-	const submit = useCallback(async () => {
-		const text = value.trim();
-		if (!text || blocked.reason) return;
-		setValue("");
-		writeDraft(sessionId, "");
-		try {
-			await stream.sendPrompt(text, mode);
-		} catch (e) {
-			setValue((cur) => (cur.trim() ? `${text}\n${cur}` : text));
-			toast.error(t("Message not sent: {error}", { error: errorText(e) }));
-			ref.current?.focus();
-		}
-	}, [value, blocked.reason, sessionId, stream, mode]);
+	const attachPasteAsFile = () => {
+		if (!pasted) return;
+		files.add([pasteAsFile(pasted.text)]);
+		setValue((cur) => cur.slice(0, pasted.start) + cur.slice(pasted.start + pasted.text.length));
+		setPaste(null);
+		ref.current?.focus();
+	};
 
 	const abort = useCallback(() => {
 		stream.abort().catch((e) => toast.error(t("Could not stop the agent: {error}", { error: errorText(e) })));
@@ -227,62 +269,61 @@ export function Composer({
 						"relative flex flex-col rounded-2xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border-strong)] transition-shadow focus-within:shadow-[inset_0_0_0_1px_var(--accent),0_0_0_3px_var(--accent-soft)]",
 						dragging && "shadow-[inset_0_0_0_2px_var(--accent)]",
 					)}
-					onDragEnter={(e) => {
-						if (!hasFiles(e)) return;
-						dragDepth.current++;
-						setDragging(true);
-					}}
-					onDragOver={(e) => {
-						if (!hasFiles(e)) return;
-						e.preventDefault();
-						e.dataTransfer.dropEffect = "copy";
-					}}
-					onDragLeave={(e) => {
-						if (!hasFiles(e)) return;
-						dragDepth.current = Math.max(0, dragDepth.current - 1);
-						if (dragDepth.current === 0) setDragging(false);
-					}}
-					onDrop={(e) => {
-						if (!hasFiles(e)) return;
-						e.preventDefault();
-						dragDepth.current = 0;
-						setDragging(false);
-						uploads.upload(Array.from(e.dataTransfer.files), "");
-					}}
+					{...drop}
 				>
+					<ComposerChips
+						chips={files.chips.map((c) => (c.kind === "image" && !vision.supported ? { ...c, unseen: t("The model cannot see this picture; only its file path is sent") } : c))}
+						onRemove={(id) => files.remove(id as number)}
+						onRetry={(id) => files.retry(id as number)}
+					/>
+					{hasPictures && !vision.supported ? (
+						<p role="status" className="mx-3 mt-2 flex items-start gap-1.5 text-2xs text-warning">
+							<EyeOff aria-hidden className="mt-px size-3.5 shrink-0" />
+							<span>{t("{model} cannot see pictures. They are saved in the project folder and the agent only gets their file paths.", { model: vision.modelName ?? t("This model") })}</span>
+						</p>
+					) : null}
+					{pasted ? <LargePasteBar paste={pasted.stats} onAttach={attachPasteAsFile} onKeep={() => setPaste(null)} /> : null}
 					<textarea
 						ref={ref}
 						onPaste={(e) => {
-							// Screenshots and copied files become uploads; rich text (e.g. spreadsheet cells) pastes as text.
-							if (e.clipboardData.types.includes("text/html")) return;
-							const files = filesFromClipboard(e);
-							if (files.length === 0) return;
-							e.preventDefault();
-							uploads.upload(files, "");
+							const text = e.clipboardData.getData("text/plain");
+							// Screenshots and copied files become attachments; cells copied from a spreadsheet (text + picture) paste as text.
+							if (!text) {
+								const pastedFiles = filesFromClipboard(e);
+								if (pastedFiles.length > 0) {
+									e.preventDefault();
+									files.add(pastedFiles);
+									return;
+								}
+							}
+							const stats = measurePaste(text);
+							if (stats) setPaste({ start: e.currentTarget.selectionStart, text: text.replace(/\r\n?/g, "\n"), stats });
 						}}
 						value={value}
 						rows={1}
 						onChange={(e) => setValue(e.target.value)}
 						onKeyDown={(e) => {
-							if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+							if (e.key === "Escape" && pasted) {
+								e.stopPropagation();
+								setPaste(null);
+								return;
+							}
+							// 229 = Safari reports the Enter that commits an IME composition after `compositionend`.
+							if (e.key !== "Enter" || e.nativeEvent.isComposing || e.keyCode === 229) return;
 							const meta = e.metaKey || e.ctrlKey;
 							if (meta || (!e.shiftKey && !touch)) {
 								e.preventDefault();
-								void submit();
+								// While the agent works, Enter delivers the way the Steer/Queue switch says and Ctrl/Cmd+Enter the other way.
+								void submit(busy && meta ? (mode === "steer" ? "followUp" : "steer") : mode);
 							}
 						}}
 						placeholder={placeholder}
 						aria-label={t("Message")}
 						enterKeyHint={touch ? "enter" : "send"}
 						autoCapitalize="sentences"
-						className="scrollbar-thin block max-h-32 min-h-11 w-full resize-none bg-transparent px-3.5 pb-1 pt-3 text-base leading-relaxed outline-none [field-sizing:content] placeholder:text-subtle md:max-h-[12.5rem] md:text-sm"
+						className="scrollbar-thin block max-h-32 min-h-11 w-full resize-none overflow-y-auto bg-transparent px-3.5 pb-1 pt-3 text-base leading-relaxed outline-none [field-sizing:content] placeholder:text-subtle md:max-h-[12.5rem] md:text-sm"
 					/>
-					<UploadDock uploads={uploads} />
-					{dragging ? (
-						<div aria-hidden className="pointer-events-none absolute inset-0 z-10 grid place-items-center rounded-2xl bg-accent-soft text-xs font-medium text-accent">
-							{t("Drop to add to the project folder")}
-						</div>
-					) : null}
+					{dragging ? <DropOverlay>{t("Drop to attach to your message")}</DropOverlay> : null}
 					<div className="flex items-center gap-1.5 px-2 pb-2">
 						<div className="flex min-w-0 flex-1 items-center gap-1.5">
 							<input
@@ -291,11 +332,11 @@ export function Composer({
 								multiple
 								hidden
 								onChange={(e) => {
-									uploads.upload(Array.from(e.target.files ?? []), "");
+									files.add(Array.from(e.target.files ?? []));
 									e.target.value = "";
 								}}
 							/>
-							<Tip label={t("Attach files to the project folder")}>
+							<Tip label={t("Attach pictures and files (saved in the project folder)")}>
 								<Button size="icon" variant="ghost" aria-label={t("Attach files")} onClick={() => fileInput.current?.click()} className="rounded-xl">
 									<Paperclip />
 								</Button>
@@ -330,12 +371,25 @@ export function Composer({
 								<ModelPicker stream={stream} className="max-w-[9.5rem]" />
 								<ThinkingPicker stream={stream} />
 							</div>
-							{touch ? null : (
+							{files.uploading > 0 || files.failed > 0 ? (
+								<span role="status" className={cn("flex min-w-0 items-center gap-1.5 truncate text-2xs", files.failed > 0 && files.uploading === 0 ? "text-danger" : "text-muted-foreground")}>
+									{files.uploading > 0 ? <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden /> : <TriangleAlert className="size-3.5 shrink-0" aria-hidden />}
+									<span className="truncate">
+										{files.uploading > 0
+											? t("{count, plural, one {Uploading # file…} other {Uploading # files…}}", { count: files.uploading })
+											: t("{count, plural, one {# upload failed: retry or remove it to send} other {# uploads failed: retry or remove them to send}}", { count: files.failed })}
+									</span>
+								</span>
+							) : touch ? null : (
 								<span className="hidden truncate text-2xs text-subtle md:inline">
 									{busy ? (
-										<T text="<k1>↵</k1> send · <k2>⇧↵</k2> newline · <k3>Esc</k3> stop" tags={{ k1: <Kbd />, k2: <Kbd />, k3: <Kbd /> }} />
+										<T
+											text="<k1>↵</k1> {first} · <k2>{mod}↵</k2> {second} · <k3>Esc</k3> stop"
+											params={{ first: mode === "steer" ? t("steer") : t("queue"), second: mode === "steer" ? t("queue") : t("steer"), mod: MOD_KEY }}
+											tags={{ k1: <Kbd />, k2: <Kbd />, k3: <Kbd /> }}
+										/>
 									) : (
-										<T text="<k1>↵</k1> send · <k2>⇧↵</k2> newline" tags={{ k1: <Kbd />, k2: <Kbd /> }} />
+										<T text="<k1>↵</k1> send · <k2>⇧↵</k2> newline · <k3>{mod}V</k3> paste pictures" params={{ mod: MOD_KEY }} tags={{ k1: <Kbd />, k2: <Kbd />, k3: <Kbd /> }} />
 									)}
 								</span>
 							)}
@@ -347,8 +401,8 @@ export function Composer({
 								</Button>
 							</Tip>
 						) : null}
-						<Button size="icon" variant={trimmed && blocked.reason === null ? "primary" : "secondary"} aria-label={busy ? (mode === "steer" ? t("Send steering message") : t("Queue follow-up")) : t("Send message")} disabled={!trimmed || blocked.reason !== null} onClick={() => void submit()} className="rounded-xl">
-							<ArrowUp />
+						<Button size="icon" variant={hasContent && !sendBlocked ? "primary" : "secondary"} aria-label={busy ? (mode === "steer" ? t("Send steering message") : t("Queue follow-up")) : t("Send message")} disabled={!hasContent || sendBlocked} onClick={() => void submit(mode)} className="rounded-xl">
+							{sending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
 						</Button>
 					</div>
 				</div>

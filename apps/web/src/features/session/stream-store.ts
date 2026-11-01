@@ -1,4 +1,4 @@
-import type { AgentSession, MessagesPage, PendingUiRequest, RuntimeStatus, SessionEvent, SessionLiveState, SessionOutputsPage, TurnOutputs, UiMessage } from "@clam/contracts";
+import type { AgentSession, MessagesPage, PendingUiRequest, PromptImage, RuntimeStatus, SessionEvent, SessionLiveState, SessionOutputsPage, TurnOutputs, UiBlock, UiMessage } from "@clam/contracts";
 import { routes } from "@clam/contracts";
 import type { QueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useSyncExternalStore } from "react";
@@ -900,16 +900,18 @@ export class SessionStream {
 	// ── actions
 
 	/** Optimistically renders the prompt; on failure rolls back and rethrows so the composer can restore the text. */
-	sendPrompt = async (text: string, behavior: "steer" | "followUp"): Promise<void> => {
+	sendPrompt = async (text: string, behavior: "steer" | "followUp", images: readonly PromptImage[] = []): Promise<void> => {
 		const clientId = newClientId();
 		const key = `u:${clientId}`;
-		const msg: UiMessage = { id: `optimistic:${clientId}`, role: "user", timestamp: Date.now(), content: [{ type: "text", text }], clientId };
+		const content: UiBlock[] = [{ type: "text", text }, ...images.map((i): UiBlock => ({ type: "image", mimeType: i.mimeType, data: i.data }))];
+		const msg: UiMessage = { id: `optimistic:${clientId}`, role: "user", timestamp: Date.now(), content, clientId };
 		this.put(key, msg, { optimistic: true, sent: false });
 		this.append(key);
 		this.setMeta({ sendTick: this.meta.sendTick + 1 });
 		try {
 			await api.post(routes.sessionPrompt(this.sessionId), {
 				message: text,
+				...(images.length > 0 ? { images } : {}),
 				streamingBehavior: isBusy(this.meta) ? behavior : undefined,
 				clientId,
 			});

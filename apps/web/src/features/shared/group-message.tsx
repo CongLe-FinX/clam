@@ -2,6 +2,7 @@ import type { Participant, SharedMessage, SharedSession } from "@clam/contracts"
 import { Link } from "@tanstack/react-router";
 import { ExternalLink } from "lucide-react";
 import { memo, type ReactNode, useMemo } from "react";
+import { CollapsibleText } from "@/components/collapsible-text";
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { attachmentAssets } from "@/components/rich/assets.ts";
 import { DeliveryMark } from "@/features/tasks/components";
@@ -134,7 +135,13 @@ export const GroupMessage = memo(function GroupMessage({ message, sharedId, grou
 										mine ? cn("bg-accent-soft", !grouped && "rounded-tr-md") : author.kind === "agent" ? cn("bg-surface-1 pl-4", TINT_BAR, !grouped && "rounded-tl-md") : cn("bg-surface-3/60", !grouped && "rounded-tl-md"),
 									)}
 								>
-									<LazyMarkdown text={text} assets={assets} />
+									{author.kind === "human" ? (
+										<CollapsibleText expandedKey={`${sharedId}:${message.id}`}>
+											<LazyMarkdown text={text} assets={assets} breaks />
+										</CollapsibleText>
+									) : (
+										<LazyMarkdown text={text} assets={assets} />
+									)}
 								</div>
 							) : null}
 							<AttachmentCards sharedId={sharedId} attachments={message.attachments} hidden={inline} align={mine ? "end" : "start"} />

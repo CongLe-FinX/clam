@@ -112,6 +112,65 @@ describe("TranscriptReducer", () => {
 		expect(copy).toHaveLength(1);
 		expect(copy[0]?.content).toEqual([{ type: "text", text: "x" }]);
 	});
+
+	describe("overlay (events that arrived while the snapshot was being read)", () => {
+		const delta = (messageId: string, text: string) => ({ type: "message_delta", messageId, contentIndex: 0, kind: "text", delta: text });
+		const texts = (reducer: TranscriptReducer): Array<[string, string]> => reducer.messages().map((m) => [m.id, m.content[0]?.type === "text" ? m.content[0].text : ""]);
+
+		it("adds the messages the read did not see, in the order they appeared, behind the ones it did", () => {
+			const reducer = new TranscriptReducer([message("m1", "start", "user"), message("m2", "FAKE: start")]);
+			reducer.overlay([
+				{ type: "message_start", message: message("m3", "", "user") },
+				{ type: "state" },
+				{ type: "message_end", message: message("m3", "second", "user") },
+				{ type: "message_start", message: message("m4", "") },
+				{ type: "message_end", message: message("m4", "FAKE: second") },
+			]);
+			expect(texts(reducer)).toEqual([["m1", "start"], ["m2", "FAKE: start"], ["m3", "second"], ["m4", "FAKE: second"]]);
+		});
+
+		it("ends with the same transcript whether the read saw none, part or all of the events", () => {
+			const events = [
+				{ type: "message_start", message: message("a", "") },
+				delta("a", "Hel"),
+				delta("a", "lo"),
+				{ type: "message_end", message: message("a", "Hello") },
+			];
+			const sawNone = new TranscriptReducer();
+			const sawStart = new TranscriptReducer([message("a", "")]);
+			const sawPart = new TranscriptReducer([message("a", "Hel")]);
+			const sawAll = new TranscriptReducer([message("a", "Hello")]);
+			for (const reducer of [sawNone, sawStart, sawPart, sawAll]) {
+				reducer.overlay(events);
+				expect(texts(reducer)).toEqual([["a", "Hello"]]);
+			}
+		});
+
+		it("does not repeat the deltas of a message that started before the read: its message_end completes it", () => {
+			// the read already holds "Hel"; the delta "lo" arrived during it and must not be appended a second time
+			const reducer = new TranscriptReducer([message("a", "Hello")]);
+			reducer.overlay([delta("a", "lo")]);
+			expect(texts(reducer)).toEqual([["a", "Hello"]]);
+			reducer.overlay([delta("a", "lo"), { type: "message_end", message: message("a", "Hello world") }]);
+			expect(texts(reducer)).toEqual([["a", "Hello world"]]);
+		});
+
+		it("applies a removal, also to a message only the read holds, and never brings a removed message back", () => {
+			const reducer = new TranscriptReducer([message("keep"), message("gone")]);
+			reducer.overlay([
+				{ type: "message_start", message: message("temp", "") },
+				{ type: "message_removed", messageId: "temp" },
+				{ type: "message_removed", messageId: "gone" },
+			]);
+			expect(texts(reducer)).toEqual([["keep", "keep"]]);
+		});
+
+		it("is a no-op without events", () => {
+			const reducer = new TranscriptReducer([message("a")]);
+			reducer.overlay([]);
+			expect(texts(reducer)).toEqual([["a", "a"]]);
+		});
+	});
 });
 
 describe("pageOf", () => {
