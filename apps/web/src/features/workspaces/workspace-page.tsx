@@ -115,16 +115,16 @@ export default function WorkspacePage() {
 						/>
 					</Card>
 				) : null}
-				<div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+				<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
 					{projects.data?.filter((p) => p.origin !== "chat").map((p) => (
-						<Card key={p.id} className="transition-[box-shadow,transform] duration-200 hover:-translate-y-px hover:shadow-[inset_0_0_0_1px_var(--border-strong)]">
+						<Card key={p.id} className="min-w-0 transition-[box-shadow,transform] duration-200 hover:-translate-y-px hover:shadow-[inset_0_0_0_1px_var(--border-strong)]">
 							<Link to="/projects/$projectId" params={{ projectId: p.id }} preload="intent" className="flex flex-col gap-2.5 rounded-xl p-4 outline-none">
 								<div className="flex items-center gap-2.5">
 									{p.vcs === "none" ? <Folder className="size-4 shrink-0 text-accent" /> : <FolderGit2 className="size-4 shrink-0 text-accent" />}
 									<h3 className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">{p.name}</h3>
 									{p.repository ? (
-										<Badge variant="outline" className="gap-1">
-											<GitBranch /> {p.repository.owner}/{p.repository.name}
+										<Badge variant="outline" className="min-w-0 max-w-[55%] gap-1">
+											<GitBranch /> <span className="truncate">{p.repository.owner}/{p.repository.name}</span>
 										</Badge>
 									) : p.vcs === "none" ? (
 										<Badge variant="outline" className="gap-1">
@@ -133,11 +133,11 @@ export default function WorkspacePage() {
 									) : null}
 								</div>
 								<p className="truncate font-mono text-2xs text-subtle">{p.path}</p>
-								<div className="flex items-center justify-between text-xs text-muted-foreground">
+								<div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
 									<span>
 										{t("{count, plural, one {# session} other {# sessions}}", { count: p.sessionCount })}
 									</span>
-									<span className="text-subtle">{p.lastActivityAt ? t("Active {time}", { time: relativeTime(p.lastActivityAt) }) : t("No activity yet")}</span>
+									<span className="truncate text-subtle">{p.lastActivityAt ? t("Active {time}", { time: relativeTime(p.lastActivityAt) }) : t("No activity yet")}</span>
 								</div>
 							</Link>
 						</Card>
@@ -145,8 +145,8 @@ export default function WorkspacePage() {
 				</div>
 			</section>
 
-			<div className="grid gap-4 lg:grid-cols-5">
-				<Card className="lg:col-span-3">
+			<div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+				<Card className="min-w-0 lg:col-span-3">
 					<CardHeader>
 						<CardTitle>{t("Recent sessions")}</CardTitle>
 						<Button variant="ghost" size="sm" disabled={(projects.data?.length ?? 0) === 0} onClick={() => openDialog({ kind: "create-session", projectId: projects.data?.[0]?.id })}>
@@ -161,7 +161,7 @@ export default function WorkspacePage() {
 						))}
 					</div>
 				</Card>
-				<Card className="lg:col-span-2">
+				<Card className="min-w-0 lg:col-span-2">
 					<CardHeader>
 						<CardTitle className="flex items-center gap-2">
 							<Bot className="size-4 text-muted-foreground" /> {t("Agents")}
