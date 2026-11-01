@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "CL Agent Mesh \u2014 Distributed AI Agents. One Shared Workspace.",
+  "description": "CLAM \u2014 CL Agent Mesh: Distributed AI Agents. One Shared Workspace.",
   "packageManager": "pnpm@11.20.0",
   "engines": {
     "node": ">=22.12"
