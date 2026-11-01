@@ -241,7 +241,10 @@ describe("sessions", () => {
 		expect(["ready", "busy"]).toContain(status?.state);
 		const runtimeSessionId = (await http.get<AgentSession>(`/sessions/${session.id}`)).body.runtimeSessionId;
 
-		expect((await http.post(`/runtime/${session.id}/stop`)).status).toBe(204);
+		// A bodyless POST some browsers/proxies label with a non-JSON type (Safari via the tunnel) must still stop it; a real unknown body stays 415.
+		const stopUrl = `${full.url}/api/local/runtime/${session.id}/stop`;
+		expect((await fetch(stopUrl, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: "x" })).status).toBe(415);
+		expect((await fetch(stopUrl, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" } })).status).toBe(204);
 		expect((await http.get<RuntimeStatus[]>("/runtime")).body).toEqual([]);
 		expect((await http.get<AgentSession>(`/sessions/${session.id}`)).body.status).toBe("stopped");
 		expect((await http.post(`/runtime/ses_nope/stop`)).status).toBe(404);

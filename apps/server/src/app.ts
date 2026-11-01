@@ -84,6 +84,12 @@ export async function registerUiSurface(app: FastifyInstance, ctx: ServerContext
 				done(Object.assign(error as Error, { statusCode: 400 }), undefined);
 			}
 		});
+		// Some clients/proxies label an empty POST with another type (e.g. `application/x-www-form-urlencoded`): still "no body".
+		// Any other non-empty payload keeps Fastify's 415; route scopes with their own parsers (uploads) are unaffected.
+		ui.addContentTypeParser("*", { parseAs: "buffer" }, (request, body, done) => {
+			if ((body as Buffer).length === 0) return done(null, undefined);
+			done(Object.assign(new Error(`Unsupported Media Type: ${request.headers["content-type"] ?? ""}`), { statusCode: 415, code: "FST_ERR_CTP_INVALID_MEDIA_TYPE" }), undefined);
+		});
 		ui.addHook("onRoute", (route) => {
 			route.bodyLimit ??= UI_BODY_LIMIT;
 		});
