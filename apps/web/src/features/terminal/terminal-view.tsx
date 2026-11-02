@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { type ConnectionState, TerminalConnection } from "./connection";
 import { LINE_HEIGHT } from "./grid";
-import { FONT_FAMILY, clampFont, terminalTheme } from "./theme";
+import { FONT_FAMILY, SYMBOLS_FONT, clampFont, terminalTheme } from "./theme";
 
 export interface TerminalControls {
 	focus(): void;
@@ -97,11 +97,12 @@ export default function TerminalView({ session, blocked, fontSize, onFontSize, t
 		let disposed = false;
 		const disposers: Array<() => void> = [];
 		void (async () => {
-			try {
-				await document.fonts.load(`${latest.current.fontSize}px "JetBrains Mono Variable"`);
-			} catch {
-				// the fallback monospace font is fine
-			}
+			// Both faces must be ready before xterm measures cells and fills its glyph atlas, or icons stay cached as tofu.
+			const size = latest.current.fontSize;
+			await Promise.allSettled([
+				document.fonts.load(`${size}px "JetBrains Mono Variable"`),
+				document.fonts.load(`${size}px "${SYMBOLS_FONT}"`, "\ue0b0\uf120"),
+			]); // a face that fails to load falls back to the next family in FONT_FAMILY
 			if (disposed) return;
 			const term = new Terminal({
 				fontFamily: FONT_FAMILY,

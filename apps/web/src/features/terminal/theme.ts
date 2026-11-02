@@ -79,4 +79,5 @@ export function saveFontSize(size: number): void {
 }
 
 export const clampFont = (size: number): number => Math.min(FONT_MAX, Math.max(FONT_MIN, Math.round(size)));
-export const FONT_FAMILY = '"JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+export const SYMBOLS_FONT = "Symbols Nerd Font Mono";
+export const FONT_FAMILY = `"JetBrains Mono Variable", "${SYMBOLS_FONT}", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;

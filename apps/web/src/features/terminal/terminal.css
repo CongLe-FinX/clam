@@ -1,3 +1,12 @@
+/* Nerd Font icons (oh-my-posh, starship, powerlevel10k prompts, eza/lsd file icons) live in the Private Use Area, which no system font
+   covers: without this face they draw as tofu boxes. Symbols-only, MIT (github.com/ryanoasis/nerd-fonts); unicode-range keeps text in
+   JetBrains Mono and lets the browser skip the download until a terminal actually loads it. */
+@font-face {
+	font-family: "Symbols Nerd Font Mono";
+	src: url("./fonts/SymbolsNerdFontMono-Regular.woff2") format("woff2");
+	font-display: block;
+	unicode-range: U+23FB-23FE, U+2630, U+2665, U+26A1, U+276C-2771, U+2B58, U+E000-F8FF, U+F0001-F1AF0;
+}
 /* xterm.js tweaks that belong to the app's look and to touch browsers. */
 /* The breathing room is padding on xterm's own element: FitAddon subtracts exactly that from the container, whereas padding on the
    container itself is not subtracted and left a partial last row hidden under the footer / key bar. */
