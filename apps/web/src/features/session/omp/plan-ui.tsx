@@ -12,6 +12,16 @@ import { isActive, isDone, isDropped, planSignature, planStats } from "./plan-mo
 
 const taskKey = (phase: string, content: string): string => `${phase}\u0000${content}`;
 
+/** The plan the user closed, per session: it stays hidden across reloads and visits until the agent writes a different plan. */
+const dismissedKey = (sessionId: string) => `clam.planDismissed.${sessionId}`;
+function readDismissed(sessionId: string): string | null {
+	try {
+		return localStorage.getItem(dismissedKey(sessionId));
+	} catch {
+		return null;
+	}
+}
+
 /** Status marker: done = check (springs in when it flips), active = pulsing dot, dropped = struck, else an empty ring. */
 function Marker({ status, flash }: { status: string; flash: boolean }) {
 	if (isDone(status)) {
@@ -122,13 +132,22 @@ export function PlanSection({ phases }: { phases: readonly TodoPhase[] }) {
 
 /**
  * "Plan 3/8 · Writing tests": always visible above the composer while the agent has a plan. Expands into the list (a popover on
- * desktop, a bottom sheet on phones). Once everything is done it says so and can be dismissed; a new plan brings it back.
+ * desktop, a bottom sheet on phones). Once everything is done it says so and can be dismissed — for good, in this session (kept in
+ * localStorage) — until the agent writes a plan with different steps.
  */
 export function PlanChip({ stream, className }: { stream: SessionStream; className?: string }) {
 	const phases = useStreamMeta(stream, (m) => m.live?.todoPhases);
 	const stats = planStats(phases);
 	const signature = planSignature(phases);
-	const [dismissed, setDismissed] = useState<string | null>(null);
+	const [dismissed, setDismissed] = useState<string | null>(() => readDismissed(stream.sessionId));
+	const dismiss = () => {
+		setDismissed(signature);
+		try {
+			localStorage.setItem(dismissedKey(stream.sessionId), signature);
+		} catch {
+			// storage unavailable (private mode): hidden for this visit only
+		}
+	};
 	const [open, setOpen] = useState(false);
 	const mobile = useBreakpoint() === "mobile";
 	if (!phases || stats.total === 0 || dismissed === signature) return null;
@@ -197,7 +216,7 @@ export function PlanChip({ stream, className }: { stream: SessionStream; classNa
 				</Popover>
 			)}
 			{stats.complete ? (
-				<Button variant="ghost" size="icon-sm" aria-label={t("Dismiss plan")} onClick={() => setDismissed(signature)}>
+				<Button variant="ghost" size="icon-sm" aria-label={t("Dismiss plan")} onClick={dismiss}>
 					<X />
 				</Button>
 			) : null}

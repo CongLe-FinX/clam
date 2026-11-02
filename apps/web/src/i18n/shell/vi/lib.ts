@@ -2,6 +2,8 @@ import type { Catalog } from "../../core";
 
 const vi: Catalog = {
 	"Cannot reach the CL Agent Mesh server. Is it running?": "Không thể kết nối tới máy chủ CL Agent Mesh. Máy chủ có đang chạy không?",
+	"A new version of CL Agent Mesh is available": "Đã có phiên bản mới của CL Agent Mesh",
+	"Reload": "Tải lại",
 	"Request failed ({status})": "Yêu cầu thất bại ({status})",
 	"Something went wrong": "Đã xảy ra lỗi",
 	"Context conflict: {title}": "Xung đột ngữ cảnh: {title}",

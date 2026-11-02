@@ -183,9 +183,6 @@ export class SessionStream {
 	private outputs = new Map<string, TurnOutputs>();
 	private rowOutputs = new Map<string, readonly TurnOutputs[]>();
 	private outL = new Map<string, Set<Listener>>();
-	/** Every turn's outputs, oldest → newest (a new array whenever one changes): feeds the Files drawer and its count badge. */
-	private allOutputs: readonly TurnOutputs[] = [];
-	private allOutL = new Set<Listener>();
 	/** Rows that arrived live. The enter animation plays once for them; virtualizer remounts must never replay it. */
 	private liveRows = new Set<string>();
 
@@ -226,11 +223,6 @@ export class SessionStream {
 	subscribeTool = (id: string, cb: Listener): (() => void) => addKeyed(this.toolL, id, cb);
 	getRowOutputs = (key: string): readonly TurnOutputs[] | undefined => this.rowOutputs.get(key);
 	subscribeRowOutputs = (key: string, cb: Listener): (() => void) => addKeyed(this.outL, key, cb);
-	getAllOutputs = (): readonly TurnOutputs[] => this.allOutputs;
-	subscribeAllOutputs = (cb: Listener): (() => void) => {
-		this.allOutL.add(cb);
-		return () => void this.allOutL.delete(cb);
-	};
 	isLiveRow = (key: string): boolean => this.liveRows.has(key);
 	/** The row has been shown: it must not animate again when it remounts. */
 	seenRow = (key: string): void => {
@@ -502,11 +494,7 @@ export class SessionStream {
 			changed = true;
 		}
 		while (this.outputs.size > 1000) this.outputs.delete(this.outputs.keys().next().value as string);
-		if (changed) {
-			this.allOutputs = [...this.outputs.values()].sort((a, b) => a.startedAt - b.startedAt);
-			fire(this.allOutL);
-			this.reindexOutputs();
-		}
+		if (changed) this.reindexOutputs();
 	}
 
 	/**
@@ -1034,10 +1022,6 @@ export function useToolRec(stream: SessionStream, id: string | null | undefined)
 
 export function useOrder(stream: SessionStream): readonly string[] {
 	return useSyncExternalStore(stream.subscribeOrder, stream.getOrder);
-}
-
-export function useAllOutputs(stream: SessionStream): readonly TurnOutputs[] {
-	return useSyncExternalStore(stream.subscribeAllOutputs, stream.getAllOutputs);
 }
 
 export function useRowOutputs(stream: SessionStream, key: string): readonly TurnOutputs[] | undefined {

@@ -1,11 +1,12 @@
 import type { AgentSession } from "@clam/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { BookMarked, Bot, ChevronDown, GitBranch, RotateCw, ScrollText, SearchX, TriangleAlert, Users, X } from "lucide-react";
+import { BookMarked, Bot, ChevronDown, FolderTree, GitBranch, RotateCw, ScrollText, SearchX, TriangleAlert, Users, X } from "lucide-react";
 import { lazy, type ReactNode, type RefObject, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ImperativePanelHandle, Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { toast } from "sonner";
 import { useGitStatus } from "@/features/git/hooks";
+import { FileExplorer } from "@/features/projects/file-explorer.tsx";
 import { useSharedDetail, useSharedLive } from "@/features/shared/hooks";
 import { GroupBar, GroupChat } from "@/features/shared/group-chat";
 import { driverOf, participantLabel } from "@/features/shared/format";
@@ -29,19 +30,17 @@ import { OmpContext, OmpStore, useOmpState } from "./omp/omp-store.ts";
 import { PlanChip } from "./omp/plan-ui.tsx";
 import { SubagentViewer } from "./omp/subagent-viewer.tsx";
 import { SubagentsPanel } from "./omp/subagents-panel.tsx";
-import { changedFiles } from "./changed-files.ts";
 import { Composer } from "./composer.tsx";
 import { ContextPanel } from "./context-panel.tsx";
 import { Conversation } from "./conversation.tsx";
 import { RuntimeLog } from "./runtime-log.tsx";
 import { SessionHeader } from "./session-header.tsx";
 import { type SessionEnv, SessionEnvContext } from "./session-env.ts";
-import { SessionStream, StreamContext, useAllOutputs, useStreamMeta } from "./stream-store.ts";
+import { SessionStream, StreamContext, useStreamMeta } from "./stream-store.ts";
 import { ThreadsPanel } from "./threads-panel.tsx";
 import { useKeyboardInset } from "./use-keyboard-inset.ts";
 
 const GitWorkbench = lazy(() => import("@/features/git/git-panel.tsx"));
-const SessionFiles = lazy(() => import("./session-files.tsx"));
 const TeamPanel = lazy(() => import("@/features/shared/team-panel.tsx").then((m) => ({ default: m.TeamPanel })));
 const MemoryPanel = lazy(() => import("@/features/context/memory-panel.tsx"));
 const AddAgentDialog = lazy(() => import("@/features/shared/add-agent-dialog.tsx"));
@@ -295,7 +294,6 @@ function Workspace({ session }: { session: AgentSession }) {
 	const workspace = useMemo(() => workspaces?.find((w) => w.id === project?.workspaceId), [workspaces, project?.workspaceId]);
 	const kbInset = useKeyboardInset(!desktop);
 	const detail = useSharedDetail(session.sharedSessionId).data;
-	const allOutputs = useAllOutputs(stream);
 	useSharedLive(session.sharedSessionId);
 	/** Mirrors show another machine's conversation; moved copies belong to the machine that took over. Neither accepts prompts. */
 	const readOnly = session.kind === "mirror" || session.movedTo !== null;
@@ -312,19 +310,13 @@ function Workspace({ session }: { session: AgentSession }) {
 		};
 	}, [session.title]);
 
-	// Files open in Quick Look over the chat (`?file=` in the URL); the Files drawer lists the folder and what the agent changed.
+	// Files open in Quick Look over the chat (`?file=` in the URL); the folder tree is the right panel's Files tab.
 	const ql = useQuickLook();
 	const qlRef = useRef(ql);
 	qlRef.current = ql;
-	const [filesOpen, setFilesOpen] = useState(false);
-	const [filesMounted, setFilesMounted] = useState(false);
-	const changed = useMemo(() => changedFiles(allOutputs), [allOutputs]);
-	// A git folder: the Files button and drawer show its uncommitted changes (what a commit would take), not every file this session touched.
-	const gitStatus = useGitStatus(session.checkoutId, { live: true }).data;
-	const gitFiles = gitStatus?.isRepo ? gitStatus.files : null;
 	const [sheets, setSheets] = useState({ left: false, right: false, log: false });
 	const [fill, setFill] = useState<{ text: string; nonce: number } | null>(null);
-	const [rightTab, setRightTab] = useState<"context" | "memory" | "changes" | "team" | "agents">("context");
+	const [rightTab, setRightTab] = useState<RightTabId>("context");
 	const [addAgent, setAddAgent] = useState(false);
 	const [bottomTab, setBottomTab] = useState<"log" | "git">("log");
 
@@ -364,10 +356,18 @@ function Workspace({ session }: { session: AgentSession }) {
 
 	/** Stable (the conversation rows are memoized on it): always reads the latest Quick Look state. */
 	const openFile = useCallback((path: string) => qlRef.current.open(path), []);
+	const rightShown = desktop ? !right.collapsed : sheets.right;
+	/** `f` / the Files button: show the Files tab, or hide the panel when it already shows it. */
 	const toggleFiles = useCallback(() => {
-		setFilesMounted(true);
-		setFilesOpen((o) => !o);
-	}, []);
+		if (rightShown && rightTab === "files") {
+			if (desktop) right.toggle();
+			else setSheets((s) => ({ ...s, right: false }));
+			return;
+		}
+		setRightTab("files");
+		if (desktop) rightOpen();
+		else setSheets((s) => (s.right ? s : { ...s, right: true }));
+	}, [rightShown, rightTab, desktop, right, rightOpen]);
 
 	const agents = useAgents().data;
 	const agentName = agents?.find((a) => a.id === session.agentId)?.name ?? t("The agent");
@@ -414,6 +414,7 @@ function Workspace({ session }: { session: AgentSession }) {
 			onTab={(t) => (t === "team" ? openTeam() : setRightTab(t))}
 			context={<ContextPanel stream={stream} session={session} project={project} />}
 			memory={<MemoryPanel session={session} />}
+			files={<FileExplorer projectId={session.checkoutId} selectedPath={ql.file ?? null} onOpenFile={openFile} className="h-full" />}
 			team={<TeamPanel session={session} onAddAgent={() => setAddAgent(true)} />}
 			teamUnread={detail?.shared.unreadMessages ?? 0}
 			agents={<SubagentsPanel store={omp} />}
@@ -489,8 +490,7 @@ function Workspace({ session }: { session: AgentSession }) {
 				showLeft: desktop ? !left.collapsed : sheets.left,
 				showRight: desktop ? !right.collapsed : sheets.right,
 				showLog: desktop ? !log.collapsed : sheets.log,
-				showFiles: filesOpen,
-				filesCount: gitFiles ? gitFiles.length : changed.length,
+				showFiles: rightShown && rightTab === "files",
 				onToggleLeft: () => toggles.current.left(),
 				onToggleRight: () => toggles.current.right(),
 				onToggleLog: () => toggles.current.log(),
@@ -549,8 +549,8 @@ function Workspace({ session }: { session: AgentSession }) {
 								style={mobile && kbInset > 0 ? { bottom: kbInset, height: `min(82dvh, calc(100dvh - ${kbInset}px - 1rem))` } : undefined}
 								aria-describedby={undefined}
 							>
-								<SheetTitle className="sr-only">{rightTab === "team" ? t("Team") : rightTab === "memory" ? t("Memory") : rightTab === "agents" ? t("Subagents") : t("Context")}</SheetTitle>
-								<SheetDescription className="sr-only">{rightTab === "team" ? t("Participants, discussion and checkpoints of the shared session.") : rightTab === "agents" ? t("Subagents the agent started, with live progress.") : t("Context usage, plan, stats and session info.")}</SheetDescription>
+								<SheetTitle className="sr-only">{rightTab === "team" ? t("Team") : rightTab === "memory" ? t("Memory") : rightTab === "agents" ? t("Subagents") : rightTab === "files" ? t("Files") : t("Context")}</SheetTitle>
+								<SheetDescription className="sr-only">{rightTab === "team" ? t("Participants, discussion and checkpoints of the shared session.") : rightTab === "agents" ? t("Subagents the agent started, with live progress.") : rightTab === "files" ? t("The session folder.") : t("Context usage, plan, stats and session info.")}</SheetDescription>
 								{sheets.right ? <div className="min-h-0 flex-1 overflow-hidden">{contextEl}</div> : null}
 							</SheetContent>
 						</Sheet>
@@ -565,11 +565,6 @@ function Workspace({ session }: { session: AgentSession }) {
 						) : null}
 					</>
 				)}
-				{filesMounted ? (
-					<Suspense fallback={null}>
-						<SessionFiles session={session} changed={changed} gitFiles={gitFiles} open={filesOpen} onOpenChange={setFilesOpen} mobile={mobile} selectedPath={ql.file ?? null} onOpenFile={openFile} />
-					</Suspense>
-				) : null}
 				<QuickLookHost projectId={session.checkoutId} ql={ql} />
 				<SubagentViewer store={omp} />
 				{addAgent ? (
@@ -607,15 +602,16 @@ function PanelTab({ active, onClick, children }: { active: boolean; onClick: () 
 	);
 }
 
-type RightTabId = "context" | "memory" | "changes" | "team" | "agents";
+type RightTabId = "context" | "memory" | "changes" | "files" | "team" | "agents";
 
-/** Right panel: the session context, the project's Git changes, and (shared sessions) the team. */
+/** Right panel: the session context, the project's Git changes and folder tree, and (shared sessions) the team. */
 function RightPanel({
 	session,
 	tab,
 	onTab,
 	context,
 	memory,
+	files,
 	team,
 	teamUnread,
 	agents,
@@ -627,6 +623,8 @@ function RightPanel({
 	context: ReactNode;
 	/** Project memory (Shared Context) of this session's project. */
 	memory: ReactNode;
+	/** The session folder's file tree. */
+	files: ReactNode;
 	/** Rendered under the Team tab; null hides the tab (moved copies of unshared sessions have nothing to show). */
 	team: ReactNode | null;
 	teamUnread: number;
@@ -657,6 +655,9 @@ function RightPanel({
 						{dirty > 0 ? <span className="tabular rounded bg-accent-soft px-1 font-mono text-2xs text-accent">{dirty}</span> : null}
 					</PanelTab>
 				) : null}
+				<PanelTab active={shown === "files"} onClick={() => onTab("files")}>
+					<FolderTree /> <span className="@max-[22rem]:sr-only">{t("Files")}</span>
+				</PanelTab>
 				{subagentCount > 0 || tab === "agents" ? (
 					<PanelTab active={shown === "agents"} onClick={() => onTab("agents")}>
 						<Bot /> <span className="@max-[22rem]:sr-only">{t("Subagents")}</span>
@@ -677,6 +678,8 @@ function RightPanel({
 					agents
 				) : shown === "memory" ? (
 					<Suspense fallback={<Skeleton className="m-3 h-24" />}>{memory}</Suspense>
+				) : shown === "files" ? (
+					files
 				) : shown === "team" && team ? (
 					<Suspense fallback={<Skeleton className="m-3 h-24" />}>{team}</Suspense>
 				) : (

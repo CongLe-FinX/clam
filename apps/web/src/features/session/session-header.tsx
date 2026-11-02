@@ -85,10 +85,8 @@ export interface HeaderPanels {
 	showLeft: boolean;
 	showRight: boolean;
 	showLog: boolean;
-	/** The Files drawer is open. */
+	/** The right panel shows its Files tab. */
 	showFiles: boolean;
-	/** Files the agent changed in this session (badge). */
-	filesCount: number;
 	onToggleLeft: () => void;
 	onToggleRight: () => void;
 	onToggleLog: () => void;
@@ -139,13 +137,8 @@ export function SessionHeader({
 	const canAdd = !readOnly && session.kind === "local" && (!shared || shared.localRole === "driver");
 
 	const filesToggle = (
-		<PanelToggle label={panels.filesCount > 0 ? t("Files, {count} changed", { count: panels.filesCount }) : t("Files")} shortcut="F" pressed={panels.showFiles} onClick={panels.onToggleFiles} className="relative">
+		<PanelToggle label={t("Files")} shortcut="F" pressed={panels.showFiles} onClick={panels.onToggleFiles}>
 			<FolderTree />
-			{panels.filesCount > 0 ? (
-				<span aria-hidden className="tabular absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-semibold leading-none text-background">
-					{panels.filesCount > 99 ? "99+" : panels.filesCount}
-				</span>
-			) : null}
 		</PanelToggle>
 	);
 
