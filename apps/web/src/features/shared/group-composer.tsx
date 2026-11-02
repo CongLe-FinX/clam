@@ -1,6 +1,6 @@
 import { type MentionCandidate, mentionTokens, parseMentions, type Participant, type SharedSession, type SharedSessionDetail } from "@clam/contracts";
 import { ArrowUp, AtSign, Bot, CornerDownRight, Loader2, TriangleAlert, Users } from "lucide-react";
-import { type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { LargePasteBar } from "@/components/composer/large-paste-bar.tsx";
 import { T, t } from "@/i18n";
 import { readDraft, writeDraft } from "@/lib/draft-store.ts";
@@ -139,11 +139,11 @@ export function GroupComposer({
 	}, [menu, options]);
 	useEffect(() => setActive(0), [menu?.query]);
 
-	// One row to MAX_ROWS rows, never taller than a third of the visible viewport (the keyboard shrinks it).
-	// biome-ignore lint/correctness/useExhaustiveDependencies: text is the trigger, the height is read from the element
-	useLayoutEffect(() => {
+	// One row to MAX_ROWS rows, never taller than a third of the visible viewport (the keyboard shrinks it). Measured again whenever the
+	// box changes width: measured while the chat was still being laid out (a narrow box wraps the placeholder) it would stay tall.
+	const fit = useCallback(() => {
 		const el = ref.current;
-		if (!el) return;
+		if (!el || el.clientWidth === 0) return;
 		el.style.height = "auto";
 		const cs = getComputedStyle(el);
 		const line = Number.parseFloat(cs.lineHeight) || 22;
@@ -151,7 +151,21 @@ export function GroupComposer({
 		const max = Math.min(line * MAX_ROWS + chrome, (window.visualViewport?.height ?? window.innerHeight) / 3);
 		el.style.height = `${Math.min(el.scrollHeight, max)}px`;
 		el.style.overflowY = el.scrollHeight > max ? "auto" : "hidden";
-	}, [text]);
+	}, []);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: text is the trigger, the height is read from the element
+	useLayoutEffect(fit, [text]);
+	useEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		let width = el.clientWidth;
+		const observer = new ResizeObserver(() => {
+			if (el.clientWidth === width) return;
+			width = el.clientWidth;
+			fit();
+		});
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, [fit]);
 
 	useEffect(() => {
 		if (!fill) return;

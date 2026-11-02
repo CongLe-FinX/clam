@@ -70,6 +70,19 @@ type Row =
 
 const isSystem = (m: SharedMessage): boolean => m.kind === "system" || m.author.kind === "system";
 
+/**
+ * A row's height before it is measured, from its text (~90 characters a line at the chat's width). A flat guess makes every long message
+ * that scrolls in from above grow by hundreds of pixels, and the virtualizer shifts the page to compensate: the scroll stutters.
+ */
+function estimateRow(row: Row | undefined): number {
+	if (!row || row.type === "earlier-head") return 40;
+	const text = row.type === "msg" ? row.message.text : textOf(row.message);
+	let lines = 0;
+	for (const line of text.split("\n")) lines += Math.max(1, Math.ceil(line.length / 90));
+	const chrome = row.type === "msg" ? (row.grouped ? 40 : 76) + (row.day ? 44 : 0) + row.message.attachments.length * 76 : 60;
+	return Math.min(chrome + lines * 26, 6000);
+}
+
 /** Flat list the virtualizer walks: pre-group transcript (once the log's start is loaded), then every message with its day divider and grouping. */
 function buildRows(messages: readonly SharedMessage[], earlier: Earlier): Row[] {
 	const rows: Row[] = [];
@@ -218,7 +231,7 @@ export function GroupTimeline({
 	const v = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => parentRef.current,
-		estimateSize: (i) => (rows[i]?.type === "msg" ? 104 : 72),
+		estimateSize: (i) => estimateRow(rows[i]),
 		overscan: 8,
 		paddingStart: 16,
 		paddingEnd: 16,
