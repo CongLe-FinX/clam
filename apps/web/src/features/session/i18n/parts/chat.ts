@@ -58,7 +58,7 @@ const vi: Catalog = {
 
 	// composer.tsx
 	"Runtime unavailable — see the banner above": "Runtime không khả dụng — xem thông báo phía trên",
-	"Starting runtime…": "Đang khởi động runtime…",
+	"Connecting to the runtime…": "Đang kết nối runtime…",
 	"The runtime crashed": "Runtime đã gặp sự cố",
 	"The runtime is stopped": "Runtime đã dừng",
 	"Runtime is starting…": "Runtime đang khởi động…",

@@ -103,6 +103,9 @@ const initialMeta: StreamMeta = {
 
 export const isBusy = (m: StreamMeta): boolean => m.agentRunning || m.live?.runtime.state === "busy";
 
+/** The last runtime state each session reported in this tab: a reopened session shows it at once instead of waiting a round trip (slow over a tunnel). */
+const lastLive = new Map<string, SessionLiveState>();
+
 // ───────────────────────────── helpers ─────────────────────────────
 
 const MAX_LOG = 1500;
@@ -158,6 +161,8 @@ export class SessionStream {
 	private log: readonly LogEntry[] = [];
 	private logSeq = 0;
 	private meta: StreamMeta = initialMeta;
+	/** `meta.live` is the remembered state of an earlier visit, not yet confirmed by the server: no transition to log or react to. */
+	private seeded = false;
 
 	private metaL = new Set<Listener>();
 	private orderL = new Set<Listener>();
@@ -190,6 +195,11 @@ export class SessionStream {
 		readonly sessionId: string,
 		private readonly qc: QueryClient,
 	) {
+		const known = lastLive.get(sessionId);
+		if (known) {
+			this.meta = { ...initialMeta, live: known };
+			this.seeded = true;
+		}
 		// The server sends the dialog's "First prompt" itself, before this page existed: show it right away.
 		const first = peekInitialPrompt(sessionId);
 		if (first) {
@@ -660,7 +670,9 @@ export class SessionStream {
 	}
 
 	private applyState(state: SessionLiveState): void {
-		const prev = this.meta.live;
+		const prev = this.seeded ? null : this.meta.live;
+		this.seeded = false;
+		lastLive.set(this.sessionId, state);
 		if (prev && prev.runtime.state !== state.runtime.state) {
 			const s = state.runtime.state;
 			this.pushLog({

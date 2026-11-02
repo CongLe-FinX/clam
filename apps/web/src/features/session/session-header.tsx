@@ -127,7 +127,7 @@ export function SessionHeader({
 	const aborting = useStreamMeta(stream, (m) => m.aborting);
 	const approvals = useStreamMeta(stream, (m) => m.uiRequests.length);
 
-	const stateLabel = runtime ? tr(RUNTIME_STATE_LABEL[runtime.state]) : liveStatus === "error" ? t("Unavailable") : t("Starting");
+	const stateLabel = runtime ? tr(RUNTIME_STATE_LABEL[runtime.state]) : liveStatus === "error" ? t("Unavailable") : t("Connecting");
 	const dot = runtime ? runtimeDot(runtime.state) : liveStatus === "error" ? "crashed" : "starting";
 	const driver = shared ? driverOf(shared) : undefined;
 	const teamUnread = shared?.unreadMessages ?? 0;

@@ -54,7 +54,7 @@ function useBlockedReason(stream: SessionStream): { reason: string | null; resta
 	const status = useStreamMeta(stream, (m) => m.liveStatus);
 	if (!live) {
 		if (status === "error") return { reason: t("Runtime unavailable — see the banner above"), restartable: false, loading: false };
-		return { reason: t("Starting runtime…"), restartable: false, loading: true };
+		return { reason: t("Connecting to the runtime…"), restartable: false, loading: true };
 	}
 	switch (live.runtime.state) {
 		case "crashed":
