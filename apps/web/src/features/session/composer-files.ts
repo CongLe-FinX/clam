@@ -38,9 +38,10 @@ function numbered(name: string, n: number): string {
 }
 
 const isImage = (type: string, name: string): boolean => type.startsWith("image/") || /\.(png|jpe?g|gif|webp|avif|bmp|heic|svg)$/i.test(name);
+const ATTACHMENTS_DIR = "attachments";
 
 /**
- * The files of the message being written: up to three uploads run at once into the project folder (a taken name becomes "name (n)",
+ * The files of the message being written: up to three uploads run at once into the project's `attachments/` folder (a taken name becomes "name (n)",
  * nothing is overwritten), each with progress, cancel and retry. `take()` hands the ready files to the send and empties the tray;
  * `restore()` puts them back when the send failed. Finished uploads are kept so a draft can reference them.
  */
@@ -75,9 +76,10 @@ export function useComposerFiles(projectId: string, initial: DraftFile[]) {
 			if (!item?.file) return;
 			patch(id, { status: "uploading", sent: 0, error: undefined });
 			let name = item.name;
+			let target = `${ATTACHMENTS_DIR}/${name}`;
 			try {
 				for (let n = 1; ; n++) {
-					const handle = uploadFile<FileEntry>(localUrl(routes.projectUpload(projectId), { path: name }), item.file, (sent) => patch(id, { sent }));
+					const handle = uploadFile<FileEntry>(localUrl(routes.projectUpload(projectId), { path: target }), item.file, (sent) => patch(id, { sent }));
 					handles.current.set(id, handle);
 					try {
 						await handle.promise;
@@ -86,12 +88,13 @@ export function useComposerFiles(projectId: string, initial: DraftFile[]) {
 						// Taken: keep both (the draft must never replace a file of the project).
 						if (e instanceof ApiError && e.status === 409 && n <= MAX_RENAMES) {
 							name = numbered(item.name, n);
+							target = `${ATTACHMENTS_DIR}/${name}`;
 							continue;
 						}
 						throw e;
 					}
 				}
-				patch(id, { status: "ready", sent: item.size, path: name });
+				patch(id, { status: "ready", sent: item.size, path: target });
 				void qc.invalidateQueries({ queryKey: ["local", "project", projectId, "files"] });
 			} catch (e) {
 				if (isAbort(e)) return;

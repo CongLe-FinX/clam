@@ -9,6 +9,6 @@ coverage/
 !.env.example
 *.tsbuildinfo
 
-# local screenshots
+# local screenshots and chat attachments
 /screenshots/
-/IMG_*.png
+/attachments/
