@@ -319,6 +319,9 @@ function Workspace({ session }: { session: AgentSession }) {
 	const [filesOpen, setFilesOpen] = useState(false);
 	const [filesMounted, setFilesMounted] = useState(false);
 	const changed = useMemo(() => changedFiles(allOutputs), [allOutputs]);
+	// A git folder: the Files button and drawer show its uncommitted changes (what a commit would take), not every file this session touched.
+	const gitStatus = useGitStatus(session.checkoutId, { live: true }).data;
+	const gitFiles = gitStatus?.isRepo ? gitStatus.files : null;
 	const [sheets, setSheets] = useState({ left: false, right: false, log: false });
 	const [fill, setFill] = useState<{ text: string; nonce: number } | null>(null);
 	const [rightTab, setRightTab] = useState<"context" | "memory" | "changes" | "team" | "agents">("context");
@@ -368,9 +371,9 @@ function Workspace({ session }: { session: AgentSession }) {
 
 	const agents = useAgents().data;
 	const agentName = agents?.find((a) => a.id === session.agentId)?.name ?? t("The agent");
-	const projectId = session.projectId;
+	const checkoutId = session.checkoutId;
 	// Stable per session/project/agent, so memoized conversation rows (markdown assets, file strips) never re-render for it.
-	const env = useMemo<SessionEnv>(() => ({ projectId, assets: projectAssets(projectId), openFile, agentName }), [projectId, openFile, agentName]);
+	const env = useMemo<SessionEnv>(() => ({ checkoutId, assets: projectAssets(checkoutId), openFile, agentName }), [checkoutId, openFile, agentName]);
 
 	// "Inspect" on a tool card reveals the context panel.
 	const selectedTool = useStreamMeta(stream, (m) => m.selectedToolId);
@@ -487,7 +490,7 @@ function Workspace({ session }: { session: AgentSession }) {
 				showRight: desktop ? !right.collapsed : sheets.right,
 				showLog: desktop ? !log.collapsed : sheets.log,
 				showFiles: filesOpen,
-				filesCount: changed.length,
+				filesCount: gitFiles ? gitFiles.length : changed.length,
 				onToggleLeft: () => toggles.current.left(),
 				onToggleRight: () => toggles.current.right(),
 				onToggleLog: () => toggles.current.log(),
@@ -564,10 +567,10 @@ function Workspace({ session }: { session: AgentSession }) {
 				)}
 				{filesMounted ? (
 					<Suspense fallback={null}>
-						<SessionFiles session={session} changed={changed} open={filesOpen} onOpenChange={setFilesOpen} mobile={mobile} selectedPath={ql.file ?? null} onOpenFile={openFile} />
+						<SessionFiles session={session} changed={changed} gitFiles={gitFiles} open={filesOpen} onOpenChange={setFilesOpen} mobile={mobile} selectedPath={ql.file ?? null} onOpenFile={openFile} />
 					</Suspense>
 				) : null}
-				<QuickLookHost projectId={session.projectId} ql={ql} />
+				<QuickLookHost projectId={session.checkoutId} ql={ql} />
 				<SubagentViewer store={omp} />
 				{addAgent ? (
 					<Suspense fallback={null}>
@@ -634,7 +637,7 @@ function RightPanel({
 	const { subagents } = useOmpState(omp);
 	const subagentCount = subagents.length;
 	const subagentRunning = subagents.filter((s) => s.status === "running" || s.status === "pending").length;
-	const status = useGitStatus(session.projectId).data;
+	const status = useGitStatus(session.checkoutId).data;
 	const dirty = status?.isRepo ? status.files.length : 0;
 	// A plain-folder project (no .git) has no changes view; the tab is hidden rather than showing an empty state.
 	const hasGit = !status || status.isRepo;
@@ -678,7 +681,7 @@ function RightPanel({
 					<Suspense fallback={<Skeleton className="m-3 h-24" />}>{team}</Suspense>
 				) : (
 					<Suspense fallback={<Skeleton className="m-3 h-24" />}>
-						<GitWorkbench projectId={session.projectId} sessionId={session.id} />
+						<GitWorkbench projectId={session.checkoutId} sessionId={session.id} />
 					</Suspense>
 				)}
 			</div>
@@ -709,7 +712,7 @@ function BottomPanel({ stream, session, tab, onTab, onCollapse }: { stream: Sess
 			</div>
 			<div className="min-h-0 flex-1">
 				<Suspense fallback={<Skeleton className="m-3 h-24" />}>
-					<GitWorkbench projectId={session.projectId} sessionId={session.id} />
+					<GitWorkbench projectId={session.checkoutId} sessionId={session.id} />
 				</Suspense>
 			</div>
 		</div>

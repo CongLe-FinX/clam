@@ -151,6 +151,7 @@ const vi: Catalog = {
 	"Files the agent changed in this session and the session folder.": "Các tệp tác nhân đã thay đổi trong phiên này và thư mục của phiên.",
 	"Close": "Đóng",
 	"Changed in this session": "Đã thay đổi trong phiên này",
+	"Uncommitted changes": "Thay đổi chưa commit",
 	"Files, {count} changed": "Tệp, {count} đã thay đổi",
 	"Switch between the threads of this project.": "Chuyển giữa các luồng của dự án này.",
 	"Delete chat…": "Xóa chat…",
