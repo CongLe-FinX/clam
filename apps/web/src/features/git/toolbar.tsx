@@ -1,6 +1,6 @@
 import type { GitStatus } from "@clam/contracts";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpFromLine, RefreshCw } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpFromLine, CloudOff, RefreshCw } from "lucide-react";
 import { msg, t, tr } from "@/i18n";
 import { relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
@@ -73,10 +73,12 @@ export function GitToolbar({
 	];
 
 	return (
-		<div className="shrink-0 border-b bg-surface-1/60">
-			<div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 px-2.5 py-2">
-				<BranchSwitcher projectId={projectId} status={status} open={branchOpen} onOpenChange={onBranchOpenChange} disabled={working} />
-				<div className="flex items-center gap-1" aria-label={t("Ahead and behind upstream")}>
+		<div className="@container shrink-0 border-b bg-surface-1/60">
+			<div className="flex items-center gap-2 px-2.5 py-2">
+				<div className="min-w-0 shrink">
+					<BranchSwitcher projectId={projectId} status={status} open={branchOpen} onOpenChange={onBranchOpenChange} disabled={working} />
+				</div>
+				<div className="flex shrink-0 items-center gap-1" aria-label={t("Ahead and behind upstream")}>
 					{status.ahead > 0 ? (
 						<Tip label={t("{count, plural, one {# commit} other {# commits}} ahead of {upstream}", { count: status.ahead, upstream: status.upstream ?? t("upstream") })}>
 							<Badge variant="accent" className="tabular">
@@ -95,16 +97,23 @@ export function GitToolbar({
 					) : null}
 					{status.operation ? <Badge variant="danger">{t("{operation} in progress", { operation: status.operation })}</Badge> : null}
 					{status.detached ? <Badge variant="warning">{t("detached")}</Badge> : null}
-					{!hasUpstream && canSync && status.remotes.length > 0 ? <Badge variant="outline">{t("not published")}</Badge> : null}
+					{!hasUpstream && canSync && status.remotes.length > 0 ? (
+						<Tip label={t("Not published: this branch is not on origin yet")}>
+							<span role="img" aria-label={t("not published")} className="grid size-6 place-items-center rounded-md text-subtle">
+								<CloudOff className="size-3.5" />
+							</span>
+						</Tip>
+					) : null}
 				</div>
-				<div className="ml-auto flex items-center gap-1">
+				<div className="ml-auto flex shrink-0 items-center gap-1">
 					{sync.map(({ key, label, icon: Icon, tip, disabled, count, run }) => {
 						const active = busy === key;
 						return (
 							<Tip key={key} label={tip}>
 								<Button variant="outline" size={compact ? "sm" : "md"} aria-label={tr(label)} loading={active} disabled={disabled || (working && !active)} onClick={run}>
 									{active ? null : <Icon />}
-									{tr(label)}
+									{/* a narrow panel keeps one line: labels give way to the icons (the tooltip still says it all) */}
+									<span className="@max-[30rem]:sr-only">{tr(label)}</span>
 									{count > 0 && !active ? <span className="tabular -mr-0.5 rounded bg-accent-soft px-1 font-mono text-2xs text-accent">{count}</span> : null}
 								</Button>
 							</Tip>

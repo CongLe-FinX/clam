@@ -337,6 +337,7 @@ const vi: Catalog = {
 	"Create this branch on origin and upload its commits": "Tạo branch này trên origin và đẩy các commit lên",
 	"Upload {count, plural, one {# commit} other {# commits}} to origin — never forced": "Đẩy {count, plural, other {# commit}} lên origin — không bao giờ ép buộc",
 	"Nothing to push: every commit is already on origin": "Không có gì để đẩy: mọi commit đã có trên origin",
+	"Not published: this branch is not on origin yet": "Chưa xuất bản: branch này chưa có trên origin",
 	"Ahead and behind upstream": "Đi trước và tụt sau upstream",
 	"{count, plural, one {# commit} other {# commits}} ahead of {upstream}": "{count, plural, other {# commit}} đi trước {upstream}",
 	"{count, plural, one {# commit} other {# commits}} behind {upstream}": "{count, plural, other {# commit}} tụt sau {upstream}",
