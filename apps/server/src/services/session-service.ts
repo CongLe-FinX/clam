@@ -1,7 +1,7 @@
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import type { ApprovalMode, RuntimeSession } from "@clam/agent-runtime";
-import { placeSessionFile, readSubagentRoster, readSubagentTranscript } from "@clam/agent-runtime/omp";
+import { placeSessionFile, readSubagentRoster, readSubagentTranscript, standardizeProjectDir } from "@clam/agent-runtime/omp";
 import {
 	type AgentSession,
 	type PendingUiRequest,
@@ -114,6 +114,8 @@ export class SessionService {
 	private readonly usageChains = new Map<string, Promise<void>>();
 	private readonly disposers: Array<() => void> = [];
 	private readonly spawnOverrides = new Map<string, SpawnOverrides>();
+	/** Conversations being moved to a new folder (`relocateConversation`): concurrent openers wait for the one move. */
+	private readonly relocating = new Map<string, Promise<void>>();
 	private started = false;
 	private views: SessionViews | null = null;
 	private removeGuard: SessionRemoveGuard | null = null;
@@ -224,11 +226,17 @@ export class SessionService {
 		return row;
 	}
 
-	/** The git-mode shared session this node drives, when `row` is the session that works for it; undefined for every other session. */
+	/**
+	 * The git-mode shared session whose worktree `row` works in: the session that drives it on this node, and — once this node lost the
+	 * driver role — the same session while its worktree is still here (moving its conversation back to the project folder mid-hand-over
+	 * would race the `moved` bookkeeping). Undefined for every other session.
+	 */
 	private drivenShare(row: SessionRow): typeof sharedSessions.$inferSelect | undefined {
 		if (!row.sharedSessionId || this.isViewed(row)) return undefined;
 		const shared = this.ctx.db.select().from(sharedSessions).where(eq(sharedSessions.id, row.sharedSessionId)).get();
-		return shared && drivesGitShare(shared) && shared.localProjectId === row.projectId ? shared : undefined;
+		if (!shared || shared.localProjectId !== row.projectId) return undefined;
+		if (drivesGitShare(shared)) return shared;
+		return shared.vcs !== "files" && shared.localSessionId === row.id && hasWorktree(this.ctx, shared.id) ? shared : undefined;
 	}
 
 	/**
@@ -532,6 +540,14 @@ export class SessionService {
 		// A live process keeps the directory it started in: when the session's folder changed (it became a shared session's driver) an idle one restarts there.
 		const live = this.ctx.runtime.get(id);
 		if (live && live.spec.cwd !== cwd && !this.isBusy(id)) await this.ctx.runtime.stop(id);
+		if (!this.ctx.runtime.get(id)) {
+			let moving = this.relocating.get(id);
+			if (!moving) {
+				moving = this.relocateConversation(row, cwd).finally(() => this.relocating.delete(id));
+				this.relocating.set(id, moving);
+			}
+			await moving;
+		}
 		const session = await this.ctx.runtime.open({
 			sessionId: id,
 			cwd,
@@ -543,6 +559,38 @@ export class SessionService {
 		});
 		this.persistBinding(row, session);
 		return session;
+	}
+
+	/**
+	 * omp resumes a conversation only in the directory recorded in its header. When the session's folder changed (a share made before
+	 * worktrees, now driven from its worktree) the conversation is moved there with `omp session pack` + `unpack --cwd`; the old file and
+	 * its artifacts are kept aside in `<sessionDir>/.relocated-<time>/`, never deleted. Caller: no runtime of the session is running.
+	 */
+	private async relocateConversation(row: SessionRow, cwd: string): Promise<void> {
+		const file = row.runtimeSessionFile;
+		if (!file) return;
+		const recorded = await recordedCwd(file);
+		const target = standardizeProjectDir(cwd);
+		if (recorded === null) return;
+		// Same folder under another spelling (macOS `/private/var` vs `/var`, a symlink): nothing to move.
+		const [from, to] = await Promise.all([recorded, cwd].map((p) => realpath(p).catch(() => path.resolve(p))));
+		if (from === to) return;
+		const scratch = path.join(row.sessionDir, `.relocate-${Date.now()}.tar`);
+		let unpacked: string;
+		try {
+			await this.ctx.ompCli.sessionPack(file, scratch);
+			unpacked = (await this.ctx.ompCli.sessionUnpack(scratch, target)).sessionFile;
+		} finally {
+			await rm(scratch, { force: true });
+		}
+		const aside = path.join(row.sessionDir, `.relocated-${Date.now()}`);
+		await mkdir(aside, { recursive: true });
+		const name = path.basename(file, ".jsonl");
+		await rename(file, path.join(aside, path.basename(file)));
+		await rename(path.join(path.dirname(file), name), path.join(aside, name)).catch(() => undefined);
+		const placed = await placeSessionFile(unpacked, row.sessionDir);
+		this.ctx.db.update(agentSessions).set({ runtimeSessionFile: placed }).where(eq(agentSessions.id, row.id)).run();
+		this.ctx.log.info({ sessionId: row.id, from: recorded, to: target }, "moved the conversation to the session's new folder");
 	}
 
 	private persistBinding(row: SessionRow, session: RuntimeSession): void {
@@ -823,5 +871,26 @@ export class SessionService {
 			}
 		});
 		if (stats) this.publishUpsert(sessionId);
+	}
+}
+
+/** The working directory a conversation file records in its `session` header (within the first lines), or null if none is found. */
+async function recordedCwd(file: string): Promise<string | null> {
+	const handle = await open(file, "r").catch(() => null);
+	if (!handle) return null;
+	try {
+		const buffer = Buffer.alloc(8192);
+		const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+		for (const line of buffer.subarray(0, bytesRead).toString("utf8").split("\n").slice(0, 8)) {
+			try {
+				const entry = JSON.parse(line) as { type?: unknown; cwd?: unknown };
+				if (entry.type === "session" && typeof entry.cwd === "string") return entry.cwd;
+			} catch {
+				// a partial last line or a non-JSON line: keep looking
+			}
+		}
+		return null;
+	} finally {
+		await handle.close();
 	}
 }

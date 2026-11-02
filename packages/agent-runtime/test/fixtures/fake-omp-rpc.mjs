@@ -2,10 +2,18 @@
 // Plain Node ESM, no dependencies. Behaviour knobs are environment variables (FAKE_OMP_*), see README at the
 // top of each handler below. Frame shapes follow rpc-types.ts / rpc-session-events.ts of oh-my-pi 18.14.
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
+
+function realOrResolved(p) {
+	try {
+		return realpathSync(p);
+	} catch {
+		return resolve(p);
+	}
+}
 
 const MAX_REASSEMBLED_BYTES = 64 * 1024 * 1024;
 
@@ -304,9 +312,13 @@ export async function runRpc(argv, env) {
 		sessionDir = dir;
 		const newest = readdirSync(dir).filter((name) => name.endsWith(".jsonl")).sort().at(-1);
 		if (newest) {
-			sessionFile = join(dir, newest);
-			const lines = readFileSync(sessionFile, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
-			header = lines.find((line) => line.type === "session");
+			const file = join(dir, newest);
+			const lines = readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+			const found = lines.find((line) => line.type === "session");
+			// Real omp compares its standardized spellings; real paths are the fake's equivalent.
+			if (args.cwd && found?.cwd && realOrResolved(found.cwd) !== realOrResolved(args.cwd)) return null;
+			sessionFile = file;
+			header = found;
 			messages = lines.filter((line) => line.type === "message").map((line) => line.message);
 			sessionId = header.id;
 			totals = { input: 0, output: 0 };
@@ -1172,6 +1184,11 @@ export async function runRpc(argv, env) {
 					currentModel = found;
 				}
 				const resumed = openSession(command.sessionDir);
+				if (resumed === null) {
+					// Real omp refuses to resume a conversation recorded in another directory (SESSION_CWD_CHANGE_REJECTED → cancelled).
+					ok(id, type, { cancelled: true, resumed: false, sessionId, sessionFile });
+					return;
+				}
 				ok(id, type, { cancelled: false, resumed, sessionId, sessionFile });
 				return;
 			}

@@ -100,7 +100,7 @@ export async function createFullHarness(
 	const fakeLog = join(dataDir, "fake-omp.log");
 	const fakeHome = join(dataDir, "fake-home");
 	mkdirSync(fakeHome, { recursive: true });
-	const log = pino({ level: "silent" });
+	const log = pino({ level: process.env.HARNESS_LOG ?? "silent" });
 
 	const config: ServerConfig = {
 		dataDir,
