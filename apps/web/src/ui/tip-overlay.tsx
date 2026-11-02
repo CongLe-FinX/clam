@@ -1,5 +1,6 @@
 import * as T from "@radix-ui/react-tooltip";
 import { useLayoutEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
@@ -11,7 +12,10 @@ interface Props {
 	onClose: () => void;
 }
 
-/** The open tooltip: Radix positions it against a fixed, invisible box laid over the trigger's rectangle. */
+/**
+ * The open tooltip: Radix positions it against a fixed, invisible box laid over the trigger's rectangle. The box lives in `<body>`:
+ * inside a container-query panel, a transformed or filtered ancestor `position: fixed` would be relative to that ancestor, not the viewport.
+ */
 export default function TipOverlay({ anchor, label, side, shortcut, onClose }: Props) {
 	const [rect, setRect] = useState(() => anchor.getBoundingClientRect());
 	useLayoutEffect(() => {
@@ -27,9 +31,12 @@ export default function TipOverlay({ anchor, label, side, shortcut, onClose }: P
 	return (
 		<T.Provider delayDuration={0}>
 			<T.Root open onOpenChange={(o) => !o && onClose()}>
-				<T.Trigger asChild>
-					<span aria-hidden className="pointer-events-none fixed" style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }} />
-				</T.Trigger>
+				{createPortal(
+					<T.Trigger asChild>
+						<span aria-hidden className="pointer-events-none fixed" style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }} />
+					</T.Trigger>,
+					document.body,
+				)}
 				<T.Portal>
 					<T.Content
 						side={side}

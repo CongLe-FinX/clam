@@ -1,6 +1,6 @@
 import type { GitStatus } from "@clam/contracts";
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, CloudDownload, DownloadCloud, UploadCloud } from "lucide-react";
+import { ArrowDown, ArrowDownToLine, ArrowUp, ArrowUpFromLine, RefreshCw } from "lucide-react";
 import { msg, t, tr } from "@/i18n";
 import { relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
@@ -35,27 +35,37 @@ export function GitToolbar({
 	const sync = [
 		{
 			key: "fetch" as const,
-			label: msg("Fetch"),
-			icon: CloudDownload,
-			tip: status.lastFetchedAt ? t("Fetch from origin · last fetched {time}", { time: relativeTime(status.lastFetchedAt) }) : t("Fetch from origin"),
+			label: msg("Check for updates"),
+			icon: RefreshCw,
+			tip: status.lastFetchedAt
+				? t("Check origin for new commits without changing your files · last checked {time}", { time: relativeTime(status.lastFetchedAt) })
+				: t("Check origin for new commits without changing your files"),
 			disabled: status.remotes.length === 0,
 			count: 0,
 			run: () => void runFetch(qc, projectId),
 		},
 		{
 			key: "pull" as const,
-			label: msg("Pull"),
-			icon: DownloadCloud,
-			tip: !hasUpstream ? t("No upstream to pull from") : status.behind > 0 ? t("Pull {count, plural, one {# commit} other {# commits}} (fast-forward only)", { count: status.behind }) : t("Pull (fast-forward only)"),
+			label: msg("Pull changes"),
+			icon: ArrowDownToLine,
+			tip: !hasUpstream
+				? t("This branch is not on origin yet: nothing to pull")
+				: status.behind > 0
+					? t("Bring {count, plural, one {# new commit} other {# new commits}} from origin into your files (fast-forward only)", { count: status.behind })
+					: t("Bring new commits from origin into your files (fast-forward only)"),
 			disabled: !canSync || !hasUpstream,
 			count: status.behind,
 			run: () => void runPull(qc, projectId),
 		},
 		{
 			key: "push" as const,
-			label: hasUpstream ? msg("Push") : msg("Publish"),
-			icon: UploadCloud,
-			tip: !hasUpstream ? t("Publish this branch to origin") : status.ahead > 0 ? t("Push {count, plural, one {# commit} other {# commits}} — never forced", { count: status.ahead }) : t("Nothing to push"),
+			label: hasUpstream ? msg("Push changes") : msg("Publish"),
+			icon: ArrowUpFromLine,
+			tip: !hasUpstream
+				? t("Create this branch on origin and upload its commits")
+				: status.ahead > 0
+					? t("Upload {count, plural, one {# commit} other {# commits}} to origin — never forced", { count: status.ahead })
+					: t("Nothing to push: every commit is already on origin"),
 			disabled: !canSync || nothingToPush || status.remotes.length === 0,
 			count: status.ahead,
 			run: () => void runPush(qc, projectId, { setUpstream: true }),
@@ -92,11 +102,10 @@ export function GitToolbar({
 						const active = busy === key;
 						return (
 							<Tip key={key} label={tip}>
-								<Button variant="outline" size={compact ? "icon" : "md"} aria-label={tr(label)} loading={active} disabled={disabled || (working && !active)} onClick={run} className="relative">
+								<Button variant="outline" size={compact ? "sm" : "md"} aria-label={tr(label)} loading={active} disabled={disabled || (working && !active)} onClick={run}>
 									{active ? null : <Icon />}
-									{compact ? null : tr(label)}
+									{tr(label)}
 									{count > 0 && !active ? <span className="tabular -mr-0.5 rounded bg-accent-soft px-1 font-mono text-2xs text-accent">{count}</span> : null}
-									{compact && count > 0 && !active ? <span className="absolute -right-1 -top-1 grid min-w-4 place-items-center rounded-full bg-accent px-1 font-mono text-[10px] leading-4 text-accent-foreground">{count}</span> : null}
 								</Button>
 							</Tip>
 						);
