@@ -20,6 +20,7 @@ import {
 	type MessageTo,
 } from "@clam/task-engine";
 import { eq } from "drizzle-orm";
+import { contentTypeFor } from "../http/file-response.ts";
 import { ApiError } from "../http/errors.ts";
 import { KeyedLock, errorText } from "../network/util.ts";
 import { injectIntoSession } from "../tasks/session-injection.ts";
@@ -46,13 +47,38 @@ const OFFICE = /\.(docx?|xlsx?|pptx?|od[tsp])$/i;
 const DATA = /^(text\/(csv|markdown|plain|tab-separated-values)|application\/json)$/;
 
 /** What a group reply attaches, most showable first: images, video, PDF, office documents, audio, then csv/markdown/text/json. Null = never attached (archives, code, binaries...). */
-function showableRank(file: TurnOutputFile): number | null {
+function showableRank(file: Pick<TurnOutputFile, "mimeType" | "name">): number | null {
 	if (file.mimeType.startsWith("image/")) return 0;
 	if (file.mimeType.startsWith("video/")) return 1;
 	if (file.mimeType === "application/pdf") return 2;
 	if (OFFICE.test(file.name)) return 3;
 	if (file.mimeType.startsWith("audio/")) return 4;
 	return DATA.test(file.mimeType) ? 5 : null;
+}
+
+/** `![alt](target "title")` and `[text](<target>)`: group 1 is the target. */
+const MD_TARGET = /!?\[[^\]\n]*\]\(\s*(<[^>\n]+>|[^\s)]+)(?:\s+(?:"[^"\n]*"|'[^'\n]*'))?\s*\)/g;
+
+/**
+ * The local paths a reply's markdown images and links point at (`.dev/shots/a.png`, `./out/My%20chart.png` → `out/My chart.png`),
+ * in order, without URLs, anchors, query or hash. Code spans and fences are examples, not references.
+ */
+export function referencedPaths(text: string): string[] {
+	const prose = text.replace(/```[\s\S]*?```/g, "").replace(/`[^`\n]*`/g, "");
+	const out = new Set<string>();
+	for (const match of prose.matchAll(MD_TARGET)) {
+		let target = (match[1] as string).replace(/^<|>$/g, "");
+		if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith("//") || target.startsWith("#")) continue;
+		target = target.split(/[?#]/, 1)[0] ?? "";
+		try {
+			target = decodeURIComponent(target);
+		} catch {
+			// keep it as written
+		}
+		target = target.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+		if (target !== "") out.add(target);
+	}
+	return [...out];
 }
 
 /** The wire's body limit. A longer final text is cut and says so. */
@@ -626,28 +652,45 @@ export class DiscussionService implements DiscussionApi {
 		return undefined;
 	}
 
-	/** Files a turn produced that belong in the group chat, stored as unposted attachments of this shared session: at most `REPLY_MAX_FILES`, the most showable first. Never throws. */
-	private async attachProduced(shared: SharedRow, sessionId: string, produced: readonly TurnOutputFile[]): Promise<AttachmentRow[]> {
-		const wanted = produced
-			.filter((file) => file.size <= ATTACHMENT_EAGER_MAX_BYTES && showableRank(file) !== null)
-			.sort((a, b) => (showableRank(a) as number) - (showableRank(b) as number) || a.path.localeCompare(b.path));
+	/**
+	 * Files that belong in the group chat with a reply, stored as unposted attachments of this shared session (at most
+	 * `REPLY_MAX_FILES`). First the showable files the reply's markdown points at, wherever they are in the folder: the group
+	 * renders `![](path)` from the message's own attachments only, and the turn-outputs walk skips dot-folders (`.dev/shots/`)
+	 * and files of earlier turns. They are attached even when posted before, so the reply's images never render broken. Then
+	 * the other files the turns produced, the most showable first. Never throws.
+	 */
+	private async attachProduced(shared: SharedRow, sessionId: string, produced: readonly TurnOutputFile[], referenced: readonly string[]): Promise<AttachmentRow[]> {
 		const rows: AttachmentRow[] = [];
-		for (const file of wanted) {
-			if (rows.length >= REPLY_MAX_FILES) break;
+		const taken = new Set<string>();
+		const attach = async (filePath: string, skipIfPosted: boolean) => {
 			try {
-				const row = await this.hub.attachments.registerFromFolder(shared.id, sessionId, file.path, { maxBytes: ATTACHMENT_EAGER_MAX_BYTES, skipIfPosted: true });
+				const row = await this.hub.attachments.registerFromFolder(shared.id, sessionId, filePath, { maxBytes: ATTACHMENT_EAGER_MAX_BYTES, skipIfPosted });
 				if (row) rows.push(row);
 			} catch (error) {
-				// Deleted or moved since the turn, outside the folder, a link to elsewhere: the reply goes out without it.
-				this.hub.log.debug({ err: errorText(error), sharedId: shared.id, sessionId, path: file.path }, "a file of the turn was not attached to the reply");
+				// Deleted or moved since the turn, too large, outside the folder, a link to elsewhere: the reply goes out without it.
+				this.hub.log.debug({ err: errorText(error), sharedId: shared.id, sessionId, path: filePath }, "a file of the turn was not attached to the reply");
 			}
+		};
+		for (const ref of referenced) {
+			if (rows.length >= REPLY_MAX_FILES) return rows;
+			const name = ref.slice(ref.lastIndexOf("/") + 1);
+			if (showableRank({ name, mimeType: contentTypeFor(name).split(";", 1)[0] as string }) === null) continue;
+			await attach(ref, false);
+		}
+		for (const row of rows) if (row.copiedPath) taken.add(row.copiedPath);
+		const wanted = produced
+			.filter((file) => !taken.has(file.path) && file.size <= ATTACHMENT_EAGER_MAX_BYTES && showableRank(file) !== null)
+			.sort((a, b) => (showableRank(a) as number) - (showableRank(b) as number) || a.path.localeCompare(b.path));
+		for (const file of wanted) {
+			if (rows.length >= REPLY_MAX_FILES) break;
+			await attach(file.path, true);
 		}
 		return rows;
 	}
 
 	/**
-	 * Post the final text of a turn to the group as this agent's reply, with the files its turns produced in the working folder
-	 * (images, video, audio, PDF, office files, csv/text: up to `REPLY_MAX_FILES`) as attachments, replicated like a person's
+	 * Post the final text of a turn to the group as this agent's reply, with the files its markdown points at and the files its
+	 * turns produced in the working folder (images, video, audio, PDF, office files, csv/text: up to `REPLY_MAX_FILES`) as attachments, replicated like a person's
 	 * uploads. A turn that produced files but no text still posts. `answered` is false for a run that answers nothing the group
 	 * should read (the machinery's own prompts): its files are forgotten. A final text that repeats (whitespace aside) a message
 	 * the agent posted itself during the turn (it answered through `mesh_say`) is not posted again, which would show the same
@@ -661,7 +704,7 @@ export class DiscussionService implements DiscussionApi {
 			if (!shared) return;
 			const final = run.finalText ?? "";
 			const text = run.posted.has(normalizeText(final)) ? "" : final;
-			const attachments = await this.attachProduced(shared, sessionId, produced);
+			const attachments = await this.attachProduced(shared, sessionId, produced, referencedPaths(text));
 			if (text === "" && attachments.length === 0) return;
 			const agent = this.ctx.db
 				.select({ id: agents.id, name: agents.name })

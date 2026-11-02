@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { SharedMessage } from "@clam/contracts";
 import { ATTACHMENT_EAGER_MAX_BYTES } from "@clam/contracts";
@@ -153,5 +153,35 @@ describe("a reply without text but with files", () => {
 		const before = (await detailOn(c.a, c.shared.id)).messages.length;
 		await discussion.postReply(c.sessionA, { answered: true, finalText: null, posted: new Set() });
 		expect((await detailOn(c.a, c.shared.id)).messages).toHaveLength(before);
+	});
+});
+
+describe("files the reply's markdown points at", () => {
+	// Driven on the real services: the fake agent cannot write a markdown final text with images.
+	it("are attached even in dot-folders or made before the run, on every reply that shows them", async () => {
+		const c = (chat = await startChat());
+		const discussion = c.a.ctx.shared.discussion as unknown as { postReply(sessionId: string, run: { answered: boolean; finalText: string | null; posted: ReadonlySet<string> }): Promise<void> };
+		const put = (rel: string): void => {
+			mkdirSync(path.dirname(path.join(c.projectA.path, rel)), { recursive: true });
+			writeFileSync(path.join(c.projectA.path, rel), `bytes of ${rel}`);
+		};
+		for (const rel of [".dev/shots/flow.png", "docs/old.png", "code.png", "src/main.ts", "out/app.zip"]) put(rel);
+		const reply = async (finalText: string): Promise<SharedMessage> => {
+			const known = new Set((await detailOn(c.a, c.shared.id)).messages.map((m) => m.id));
+			await discussion.postReply(c.sessionA, { answered: true, finalText, posted: new Set() });
+			const added = (await detailOn(c.a, c.shared.id)).messages.filter((m) => !known.has(m.id));
+			expect(added).toHaveLength(1);
+			return added[0] as SharedMessage;
+		};
+		const text = [
+			"1. Flow: ![flow](.dev/shots/flow.png)",
+			'2. Old: ![old](./docs/old.png "title"), source in [main](src/main.ts)',
+			"Not attached: `![x](code.png)` (code), [bundle](out/app.zip) (archive), [site](https://example.com/a.png), [top](#flow), ![gone](missing.png)",
+		].join("\n");
+		const first = await reply(text);
+		expect(first.attachments.map((a) => a.name)).toEqual(["flow.png", "old.png", "main.ts"]);
+		// a later reply that shows the same image again carries it again: the group renders a message's images from its own files
+		const again = await reply("Still: ![old](docs/old.png)");
+		expect(again.attachments.map((a) => a.name)).toEqual(["old.png"]);
 	});
 });
