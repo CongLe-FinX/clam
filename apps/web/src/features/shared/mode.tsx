@@ -36,6 +36,33 @@ export function FilesInfoButton({ className }: { className?: string }) {
 	);
 }
 
+/** How the shared session moves its files, as one icon (branch or folder sync); the details open on hover, tap or Enter. */
+export function ModeIcon({ vcs, repo }: { vcs: ShareMode; repo: SharedSession["repo"] }) {
+	const branch = vcs === "git" ? repo?.branch : undefined;
+	const git = branch !== undefined;
+	const label = git ? t("Git branch {branch}", { branch }) : t("Folder sync · no repository");
+	const Icon = git ? GitBranch : FolderSync;
+	return (
+		<Popover>
+			<Tip label={label}>
+				<PopoverTrigger asChild>
+					<button
+						type="button"
+						aria-label={label}
+						className="grid size-7 shrink-0 place-items-center rounded-lg text-subtle outline-none hover:bg-surface-2 hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:size-11"
+					>
+						<Icon className="size-3.5" aria-hidden />
+					</button>
+				</PopoverTrigger>
+			</Tip>
+			<PopoverContent align="end" className="w-72 text-xs text-muted-foreground">
+				<ModeLabel vcs={vcs} repo={repo} className="mb-1.5 flex-wrap" />
+				<p>{git ? t("Checkpoints commit the lead's work to this branch and push it.") : tr(FILES_INFO)}</p>
+			</PopoverContent>
+		</Popover>
+	);
+}
+
 /**
  * How a shared session moves its files: `Git branch · repo · branch`, or `Folder sync · no repository` with an info tooltip.
  * `interactive` renders a tappable info button (use it outside links/buttons); otherwise a hover tooltip on the label.

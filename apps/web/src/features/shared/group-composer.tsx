@@ -1,15 +1,15 @@
 import { type MentionCandidate, mentionTokens, parseMentions, type Participant, type SharedSession, type SharedSessionDetail } from "@clam/contracts";
-import { AtSign, Bot, CornerDownRight, Loader2, Send, TriangleAlert, Users } from "lucide-react";
+import { ArrowUp, AtSign, Bot, CornerDownRight, Loader2, TriangleAlert, Users } from "lucide-react";
 import { type KeyboardEvent, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { LargePasteBar } from "@/components/composer/large-paste-bar.tsx";
-import { t } from "@/i18n";
+import { T, t } from "@/i18n";
 import { readDraft, writeDraft } from "@/lib/draft-store.ts";
 import { type LargePaste, measurePaste, pasteAsFile } from "@/lib/large-paste.ts";
 import { filesFromClipboard } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
-import { Textarea } from "@/ui/textarea";
+import { Kbd } from "@/ui/kbd";
 import { AttachButton, AttachmentTray, type AttachmentUploads } from "./attachments.tsx";
 import { driverOf, participantLabel, teamOf } from "./format.ts";
 import { MachineChip } from "./identity.tsx";
@@ -18,6 +18,7 @@ import { usePostSharedMessage } from "./hooks.ts";
 const coarsePointer = typeof matchMedia === "function" ? matchMedia("(pointer: coarse)") : null;
 const MAX_ROWS = 8;
 const MAX_CHARS = 20_000;
+const MOD_KEY = typeof navigator !== "undefined" && /mac|iphone|ipad/i.test(navigator.platform) ? "⌘" : "Ctrl";
 
 interface MentionOption {
 	key: string;
@@ -67,7 +68,7 @@ function RecipientChip({ lead, everyone, mentioned }: { lead: Participant | unde
 					title={explicit ? t("Who this message is addressed to") : t("Messages without an @mention go to the lead agent")}
 					aria-label={explicit ? t("This message is addressed to {name}", { name: label }) : t("Messages without an @mention go to {name}", { name: label })}
 					data-testid="recipient-chip"
-					className="inline-flex min-h-7 max-w-full flex-wrap items-center gap-x-1.5 gap-y-1 rounded-full bg-surface-2 px-2.5 py-0.5 text-2xs text-muted-foreground outline-none hover:bg-surface-3 focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:min-h-11"
+					className="inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 overflow-hidden rounded-full bg-surface-2 px-2.5 text-2xs text-muted-foreground outline-none hover:bg-surface-3 focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-9"
 				>
 					{everyone ? <Users className="size-3 shrink-0" aria-hidden /> : <CornerDownRight className="size-3 shrink-0" aria-hidden />}
 					{everyone ? (
@@ -252,7 +253,7 @@ export function GroupComposer({
 
 	if (out) return <div className={cn("shrink-0 border-t px-4 py-3 pb-safe text-center text-xs text-subtle", className)}>{t("You are no longer part of this group; the chat is read-only.")}</div>;
 	return (
-		<div className={cn("relative shrink-0 border-t bg-surface-1 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-2.5", keyboardOpen ? "pb-2" : "pb-[max(0.75rem,env(safe-area-inset-bottom))]", className)}>
+		<div className={cn("relative shrink-0 bg-background pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-1.5", keyboardOpen ? "pb-2" : "pb-[max(0.75rem,env(safe-area-inset-bottom))]", className)}>
 			<div className="mx-auto w-full max-w-3xl">
 				{menu && matches.length > 0 ? (
 					<ul role="listbox" aria-label={t("Mention")} className="clam-pop absolute inset-x-3 bottom-full z-10 mb-1 mx-auto flex max-h-56 max-w-3xl flex-col overflow-y-auto rounded-xl bg-overlay p-1 shadow-pop shadow-[inset_0_0_0_1px_var(--border-strong)]">
@@ -272,23 +273,18 @@ export function GroupComposer({
 						))}
 					</ul>
 				) : null}
-				{lead?.agentName || mentions.all || mentioned.length > 0 ? (
-					<div className="mb-1.5 flex items-center [@media(max-height:520px)]:hidden">
-						<RecipientChip lead={lead} everyone={mentions.all} mentioned={mentioned} />
-					</div>
-				) : null}
-				<AttachmentTray uploads={uploads} />
-				{pasted ? (
-					<LargePasteBar
-						paste={pasted.stats}
-						onAttach={attachPaste}
-						onKeep={() => setPaste(null)}
-						{...(pasted.forced ? { note: t("This text is longer than a message can be ({max} characters), so it can only go as a file.", { max: MAX_CHARS.toLocaleString() }) } : {})}
-					/>
-				) : null}
-				<div className="flex items-end gap-2">
-					<AttachButton onFiles={uploads.add} />
-					<Textarea
+				{/* One box: what you type on top, a single bar below (attach · who it goes to · keys · send), like the session composer. */}
+				<div className="relative flex flex-col rounded-2xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border-strong)] transition-shadow focus-within:shadow-[inset_0_0_0_1px_var(--accent),0_0_0_3px_var(--accent-soft)]">
+					<AttachmentTray uploads={uploads} />
+					{pasted ? (
+						<LargePasteBar
+							paste={pasted.stats}
+							onAttach={attachPaste}
+							onKeep={() => setPaste(null)}
+							{...(pasted.forced ? { note: t("This text is longer than a message can be ({max} characters), so it can only go as a file.", { max: MAX_CHARS.toLocaleString() }) } : {})}
+						/>
+					) : null}
+					<textarea
 						ref={ref}
 						value={text}
 						onChange={(e) => {
@@ -324,22 +320,40 @@ export function GroupComposer({
 						placeholder={wide ? t("Message the group · @mention to pick an agent") : t("Message the group…")}
 						enterKeyHint={touch ? "enter" : "send"}
 						// 16px on touch screens: smaller text makes iOS zoom the page when the box is focused.
-						className="scrollbar-thin min-h-11 flex-1 resize-none overflow-hidden py-2.5 coarse:text-base"
+						className="scrollbar-thin block min-h-10 w-full resize-none overflow-hidden bg-transparent px-3.5 pb-1 pt-2.5 text-base leading-relaxed outline-none placeholder:text-subtle md:text-sm"
 					/>
-					<Button variant="primary" size="lg" onClick={send} loading={post.isPending} disabled={(!text.trim() && uploads.ready.length === 0) || uploads.busy || uploads.failed > 0} aria-label={t("Send message")} className="shrink-0 px-3.5 coarse:min-h-12 coarse:min-w-12">
-						<Send />
-					</Button>
+					<div className="flex items-center gap-1.5 px-2 pb-2">
+						<AttachButton onFiles={uploads.add} />
+						{lead?.agentName || mentions.all || mentioned.length > 0 ? <RecipientChip lead={lead} everyone={mentions.all} mentioned={mentioned} /> : null}
+						<div className="flex min-w-0 flex-1 items-center">
+							{uploads.busy || uploads.failed > 0 ? (
+								<span role="status" className={cn("flex min-w-0 items-center gap-1.5 truncate text-2xs", uploads.failed > 0 && !uploads.busy ? "text-danger" : "text-muted-foreground")}>
+									{uploads.busy ? <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden /> : <TriangleAlert className="size-3.5 shrink-0" aria-hidden />}
+									<span className="truncate">
+										{uploads.busy
+											? t("{count, plural, one {Uploading # file…} other {Uploading # files…}}", { count: uploads.items.filter((i) => i.status === "uploading").length })
+											: t("{count, plural, one {# upload failed: retry or remove it to send} other {# uploads failed: retry or remove them to send}}", { count: uploads.failed })}
+									</span>
+								</span>
+							) : touch ? null : (
+								<span className="hidden truncate text-2xs text-subtle lg:inline">
+									<T text="<k1>@</k1> mention · <k2>↵</k2> send · <k3>⇧↵</k3> newline · <k4>{mod}V</k4> paste pictures" params={{ mod: MOD_KEY }} tags={{ k1: <Kbd />, k2: <Kbd />, k3: <Kbd />, k4: <Kbd /> }} />
+								</span>
+							)}
+						</div>
+						<Button
+							size="icon"
+							variant={(text.trim() || uploads.ready.length > 0) && !uploads.busy && uploads.failed === 0 ? "primary" : "secondary"}
+							onClick={send}
+							loading={post.isPending}
+							disabled={(!text.trim() && uploads.ready.length === 0) || uploads.busy || uploads.failed > 0}
+							aria-label={t("Send message")}
+							className="shrink-0 rounded-xl"
+						>
+							<ArrowUp />
+						</Button>
+					</div>
 				</div>
-				{uploads.busy || uploads.failed > 0 ? (
-					<p role="status" className={cn("mt-1.5 flex items-center gap-1.5 text-2xs", uploads.failed > 0 && !uploads.busy ? "text-danger" : "text-muted-foreground")}>
-						{uploads.busy ? <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden /> : <TriangleAlert className="size-3.5 shrink-0" aria-hidden />}
-						{uploads.busy
-							? t("{count, plural, one {Uploading # file…} other {Uploading # files…}}", { count: uploads.items.filter((i) => i.status === "uploading").length })
-							: t("{count, plural, one {# upload failed: retry or remove it to send} other {# uploads failed: retry or remove them to send}}", { count: uploads.failed })}
-					</p>
-				) : touch ? null : (
-					<p className="mt-1.5 hidden text-2xs text-subtle fine:block [@media(max-height:520px)]:hidden">{t("Type @ to address an agent, a machine or everyone · paste, drop or attach pictures and files · Enter sends · Shift+Enter newline · Esc closes @")}</p>
-				)}
 			</div>
 		</div>
 	);

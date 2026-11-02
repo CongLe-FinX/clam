@@ -19,7 +19,7 @@ import { GroupComposer } from "./group-composer.tsx";
 import { GroupTimeline, useEarlierConversation } from "./group-timeline.tsx";
 import { useCheckpointNow, useMarkSharedRead, useSharedHistory } from "./hooks.ts";
 import { AuthorAvatar, hueOf, MachineChip } from "./identity.tsx";
-import { CheckpointFacts, ModeLabel } from "./mode.tsx";
+import { CheckpointFacts, ModeIcon } from "./mode.tsx";
 
 // ───────────────────────────── header ─────────────────────────────
 
@@ -121,44 +121,40 @@ function BudgetChip({ left: budget }: { left: number }) {
 	);
 }
 
-function ChatHeader({ detail, onOpenTeam }: { detail: SharedSessionDetail; onOpenTeam: () => void }) {
+/**
+ * The group at a glance, one row (sits in the session's view bar): members and lead (opens the team), the agent-message budget,
+ * the last checkpoint, and how files travel (an icon; details on hover/tap).
+ */
+export function GroupSummary({ detail, onOpenTeam, className }: { detail: SharedSessionDetail; onOpenTeam: () => void; className?: string }) {
 	const { shared } = detail;
 	const members = teamOf(shared);
 	const lead = driverOf(shared);
 	const leadName = lead ? (lead.agentName ?? lead.nodeName) : null;
 	return (
-		<div className="flex shrink-0 flex-col gap-2 border-b px-3 py-2">
-			<div className="flex items-center gap-1.5">
-				<button
-					type="button"
-					onClick={onOpenTeam}
-					aria-label={lead ? t("Open the team. {count} in the group, lead {lead}", { count: members.length, lead: participantLabel(lead) }) : t("Open the team")}
-					title={lead ? t("Lead: {name}", { name: participantLabel(lead) }) : undefined}
-					className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-1 py-0.5 text-left outline-none hover:bg-surface-2 focus-visible:bg-surface-2 coarse:py-1.5"
-				>
-					<span className="flex shrink-0 -space-x-1.5">
-						{members.map((p) => (
-							<Avatar key={p.nodeId} p={p} lead={p.nodeId === shared.driverNodeId} />
-						))}
+		<div className={cn("flex min-w-0 items-center gap-1", className)}>
+			<button
+				type="button"
+				onClick={onOpenTeam}
+				aria-label={lead ? t("Open the team. {count} in the group, lead {lead}", { count: members.length, lead: participantLabel(lead) }) : t("Open the team")}
+				title={lead ? t("Lead: {name}", { name: participantLabel(lead) }) : undefined}
+				className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-0.5 text-left outline-none hover:bg-surface-2 focus-visible:bg-surface-2 coarse:py-1.5"
+			>
+				<span className="flex shrink-0 -space-x-1.5">
+					{members.map((p) => (
+						<Avatar key={p.nodeId} p={p} lead={p.nodeId === shared.driverNodeId} />
+					))}
+				</span>
+				{lead && leadName ? (
+					<span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground max-md:hidden">
+						<span className="shrink-0">{t("lead")}</span>
+						<span className="truncate font-medium text-foreground">{leadName}</span>
+						{lead.agentName ? <MachineChip name={lead.nodeName} className="max-lg:hidden" /> : null}
 					</span>
-					<span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-						<span className="shrink-0 font-medium text-foreground">{t("{count} in the group", { count: members.length })}</span>
-						{lead && leadName ? (
-							<span className="flex min-w-0 items-center gap-1.5 max-sm:hidden">
-								<span aria-hidden>·</span>
-								<span className="shrink-0">{t("lead")}</span>
-								<span className="truncate font-medium text-foreground">{leadName}</span>
-								{lead.agentName ? <MachineChip name={lead.nodeName} /> : null}
-							</span>
-						) : null}
-					</span>
-				</button>
-				<BudgetChip left={shared.agentMessageBudget} />
-				<CheckpointsPopover shared={shared} checkpoints={detail.checkpoints} onOpenTeam={onOpenTeam} />
-			</div>
-			<div className="min-w-0 text-2xs text-muted-foreground [@media(max-height:520px)]:hidden">
-				<ModeLabel vcs={shared.vcs} repo={shared.repo} interactive />
-			</div>
+				) : null}
+			</button>
+			<BudgetChip left={shared.agentMessageBudget} />
+			<CheckpointsPopover shared={shared} checkpoints={detail.checkpoints} onOpenTeam={onOpenTeam} />
+			<ModeIcon vcs={shared.vcs} repo={shared.repo} />
 		</div>
 	);
 }
@@ -219,7 +215,6 @@ export function GroupChat({
 	active,
 	keyboardOpen,
 	onOpenWorkspace,
-	onOpenTeam,
 	dock,
 	className,
 }: {
@@ -229,7 +224,6 @@ export function GroupChat({
 	active: boolean;
 	keyboardOpen: boolean;
 	onOpenWorkspace: () => void;
-	onOpenTeam: () => void;
 	/** What the agent is waiting for (its question or approval card): right above the composer, where the eye already is. */
 	dock?: ReactNode;
 	className?: string;
@@ -261,7 +255,6 @@ export function GroupChat({
 			className={cn("relative flex min-h-0 flex-1 flex-col bg-background", className)}
 			{...drop}
 		>
-			<ChatHeader detail={detail} onOpenTeam={onOpenTeam} />
 			{empty ? (
 				<GroupEmpty onPick={(text) => setFill({ text, nonce: Date.now() })} />
 			) : (

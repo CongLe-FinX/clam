@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { useGitStatus } from "@/features/git/hooks";
 import { FileExplorer } from "@/features/projects/file-explorer.tsx";
 import { useSharedDetail, useSharedLive } from "@/features/shared/hooks";
-import { GroupBar, GroupChat } from "@/features/shared/group-chat";
+import { GroupBar, GroupChat, GroupSummary } from "@/features/shared/group-chat";
 import { driverOf, participantLabel } from "@/features/shared/format";
 import { QuickLookHost, useQuickLook } from "@/features/projects/use-quick-look.tsx";
 import { SharedBanner } from "@/features/shared/shared-banner";
@@ -431,7 +431,15 @@ function Workspace({ session }: { session: AgentSession }) {
 
 	const center = (
 		<div className="flex h-full min-h-0 min-w-0 flex-col bg-background">
-			{sharedMode ? <ViewSwitch view={view} onView={setView} unread={detail?.shared.unreadMessages ?? 0} workspaceLabel={session.kind === "mirror" ? t("Live view") : session.movedTo ? t("Moved copy") : t("Workspace")} /> : null}
+			{sharedMode ? (
+				<ViewSwitch
+					view={view}
+					onView={setView}
+					unread={detail?.shared.unreadMessages ?? 0}
+					workspaceLabel={session.kind === "mirror" ? t("Live view") : session.movedTo ? t("Moved copy") : t("Workspace")}
+					trailing={detail ? <GroupSummary detail={detail} onOpenTeam={openTeam} className="ml-auto" /> : null}
+				/>
+			) : null}
 			<TaskBanner sessionId={session.id} />
 			<SharedBanner session={session} detail={detail} onOpenTeam={openTeam} onOpenHandover={handover} />
 			{readOnly || showChat ? null : <StateBanner stream={stream} />}
@@ -443,7 +451,6 @@ function Workspace({ session }: { session: AgentSession }) {
 						active={view === "group"}
 						keyboardOpen={kbInset > 0}
 						onOpenWorkspace={() => setView("workspace")}
-						onOpenTeam={openTeam}
 						dock={<AskDock store={omp} group={participantLabel(driverOf(detail.shared) ?? { agentName: null, nodeName: t("the driving machine") })} />}
 					/>
 				) : (
@@ -722,17 +729,20 @@ function BottomPanel({ stream, session, tab, onTab, onCollapse }: { stream: Sess
 	);
 }
 
-/** Shared sessions: the group chat is the main view, the agent's own session (tool calls, files) its workspace. */
-function ViewSwitch({ view, onView, unread, workspaceLabel }: { view: "group" | "workspace"; onView: (v: "group" | "workspace") => void; unread: number; workspaceLabel: string }) {
+/** Shared sessions: the group chat is the main view, the agent's own session (tool calls, files) its workspace; the group at a glance on the right. */
+function ViewSwitch({ view, onView, unread, workspaceLabel, trailing }: { view: "group" | "workspace"; onView: (v: "group" | "workspace") => void; unread: number; workspaceLabel: string; trailing: ReactNode }) {
 	return (
-		<div role="tablist" aria-label={t("Session view")} className="flex h-10 shrink-0 items-center gap-0.5 border-b bg-surface-1 px-1.5 coarse:h-12">
-			<PanelTab active={view === "group"} onClick={() => onView("group")}>
-				<Users /> {t("Group chat")}
-				{unread > 0 ? <span className="tabular rounded bg-accent px-1 font-mono text-2xs text-accent-foreground">{unread}</span> : null}
-			</PanelTab>
-			<PanelTab active={view === "workspace"} onClick={() => onView("workspace")}>
-				<Bot /> {workspaceLabel}
-			</PanelTab>
+		<div className="flex h-11 shrink-0 items-center gap-2 border-b bg-surface-1 px-1.5 coarse:h-12">
+			<div role="tablist" aria-label={t("Session view")} className="flex shrink-0 items-center gap-0.5">
+				<PanelTab active={view === "group"} onClick={() => onView("group")}>
+					<Users /> <span className="max-sm:sr-only">{t("Group chat")}</span>
+					{unread > 0 ? <span className="tabular rounded bg-accent px-1 font-mono text-2xs text-accent-foreground">{unread}</span> : null}
+				</PanelTab>
+				<PanelTab active={view === "workspace"} onClick={() => onView("workspace")}>
+					<Bot /> <span className="max-sm:sr-only">{workspaceLabel}</span>
+				</PanelTab>
+			</div>
+			{trailing}
 		</div>
 	);
 }

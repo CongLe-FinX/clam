@@ -198,7 +198,7 @@ export function useAttachmentUploads(sharedId: string): AttachmentUploads {
 
 /** Files waiting to be sent with the next message: thumbnails for pictures, cards for the rest. */
 export function AttachmentTray({ uploads, className }: { uploads: AttachmentUploads; className?: string }) {
-	return <ComposerChips chips={uploads.chips} onRemove={(id) => uploads.cancel(id as number)} onRetry={(id) => uploads.retry(id as number)} className={cn("px-0 pb-2 pt-0", className)} />;
+	return <ComposerChips chips={uploads.chips} onRemove={(id) => uploads.cancel(id as number)} onRetry={(id) => uploads.retry(id as number)} className={className} />;
 }
 
 /** Paperclip button + hidden multi-file input. */
@@ -206,7 +206,7 @@ export function AttachButton({ onFiles, disabled }: { onFiles: (files: File[]) =
 	const input = useRef<HTMLInputElement>(null);
 	return (
 		<>
-			<Button variant="ghost" size="lg" aria-label={t("Attach files")} disabled={disabled} onClick={() => input.current?.click()} className="shrink-0 px-3 coarse:min-h-12 coarse:min-w-12">
+			<Button variant="ghost" size="icon" aria-label={t("Attach files")} disabled={disabled} onClick={() => input.current?.click()} className="shrink-0 rounded-xl">
 				<Paperclip />
 			</Button>
 			<input

@@ -71,7 +71,8 @@ const vi: Catalog = {
 	"Open the team. {count} in the group, lead {lead}": "Mở nhóm. {count} thành viên trong nhóm, trưởng nhóm {lead}",
 	"Open the team": "Mở nhóm",
 	"Lead: {name}": "Trưởng nhóm: {name}",
-	"{count} in the group": "{count} thành viên trong nhóm",
+	"Git branch {branch}": "Git branch {branch}",
+	"Checkpoints commit the lead's work to this branch and push it.": "Mỗi checkpoint commit công việc của trưởng nhóm lên branch này và push lên.",
 	"Research": "Nghiên cứu",
 	"Research how teams keep long-running AI agents reliable. Compare three approaches, cite your sources and end with a recommendation.": "Tìm hiểu cách các nhóm giữ cho AI agent chạy lâu dài luôn đáng tin cậy. So sánh ba cách tiếp cận, trích dẫn nguồn và kết thúc bằng một đề xuất.",
 	"Report": "Báo cáo",
@@ -391,6 +392,6 @@ const vi: Catalog = {
 	"This text is longer than a message can be ({max} characters), so it can only go as a file.": "Văn bản này dài hơn giới hạn của một tin nhắn ({max} ký tự), nên chỉ có thể gửi dưới dạng tệp.",
 	"{count, plural, one {Uploading # file…} other {Uploading # files…}}": "{count, plural, other {Đang tải lên # tệp…}}",
 	"{count, plural, one {# upload failed: retry or remove it to send} other {# uploads failed: retry or remove them to send}}": "{count, plural, other {# tệp tải lên thất bại: thử lại hoặc xóa để gửi}}",
-	"Type @ to address an agent, a machine or everyone · paste, drop or attach pictures and files · Enter sends · Shift+Enter newline · Esc closes @": "Gõ @ để gọi một agent, một máy hoặc mọi người · dán, thả hoặc đính kèm ảnh và tệp · Enter gửi · Shift+Enter xuống dòng · Esc đóng @",
+	"<k1>@</k1> mention · <k2>↵</k2> send · <k3>⇧↵</k3> newline · <k4>{mod}V</k4> paste pictures": "<k1>@</k1> gọi agent · <k2>↵</k2> gửi · <k3>⇧↵</k3> xuống dòng · <k4>{mod}V</k4> dán ảnh",
 };
 export default vi;
