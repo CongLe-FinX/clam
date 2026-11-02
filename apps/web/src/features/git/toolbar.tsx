@@ -75,7 +75,7 @@ export function GitToolbar({
 	return (
 		<div className="@container shrink-0 border-b bg-surface-1/60">
 			<div className="flex items-center gap-2 px-2.5 py-2">
-				<div className="min-w-0 shrink">
+				<div className="min-w-0 flex-1">
 					<BranchSwitcher projectId={projectId} status={status} open={branchOpen} onOpenChange={onBranchOpenChange} disabled={working} />
 				</div>
 				<div className="flex shrink-0 items-center gap-1" aria-label={t("Ahead and behind upstream")}>

@@ -50,7 +50,7 @@ export function BranchSwitcher({ projectId, status, open, onOpenChange, disabled
 					type="button"
 					disabled={disabled}
 					aria-label={t("Branch: {label}. Switch branch", { label })}
-					className="group inline-flex h-8 max-w-[14rem] min-w-0 items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 text-[13px] font-medium outline-none transition-colors hover:bg-surface-3 focus-visible:shadow-[0_0_0_2px_var(--accent)] disabled:opacity-60 coarse:h-11"
+					className="group flex h-8 w-full max-w-[14rem] min-w-0 items-center gap-1.5 rounded-lg bg-surface-2 px-2.5 text-[13px] font-medium outline-none transition-colors hover:bg-surface-3 focus-visible:shadow-[0_0_0_2px_var(--accent)] disabled:opacity-60 coarse:h-11"
 				>
 					<BranchIcon aria-hidden className="size-3.5 shrink-0 text-accent" />
 					<span className="min-w-0 truncate font-mono text-xs">{label}</span>
