@@ -10,7 +10,7 @@ import { sendFile } from "../http/file-response.ts";
 import { rawBodyScope } from "../http/raw-body.ts";
 import { resolveInsideRoot } from "../services/files.ts";
 import { commitNew, receiveToFile, refuseGitDir, resolveWritableTarget } from "../services/file-writes.ts";
-import { requireProject } from "./projects.ts";
+import { checkoutFolder } from "../services/checkouts.ts";
 
 const RawQuery = z.object({
 	path: z.string().min(1, "path is required"),
@@ -21,12 +21,12 @@ const UploadQuery = z.object({
 	overwrite: z.enum(["1", "0", "true", "false"]).optional(),
 });
 
-/** Raw file bytes of a project folder (preview/download) and raw uploads into it. */
+/** Raw file bytes of a project folder or shared-session worktree (`:id` is a checkout id; preview/download) and raw uploads into it. */
 export default async function projectFileRoutes(app: FastifyInstance, { ctx }: RoutePluginOptions): Promise<void> {
 	app.get<{ Params: { id: string } }>(routes.projectRaw(":id"), { config: { compress: false } }, async (req, reply) => {
-		const row = requireProject(ctx, req.params.id);
+		const root = await checkoutFolder(ctx, req.params.id);
 		const query = RawQuery.parse(req.query);
-		const { rel, abs } = await resolveInsideRoot(row.path, query.path);
+		const { rel, abs } = await resolveInsideRoot(root, query.path);
 		if (rel === "") throw ApiError.badRequest(i18nMsg("path must name a file"));
 		refuseGitDir(rel);
 		const info = await stat(abs);
@@ -38,10 +38,10 @@ export default async function projectFileRoutes(app: FastifyInstance, { ctx }: R
 	await app.register(async (upload) => {
 		rawBodyScope(upload);
 		upload.post<{ Params: { id: string } }>(routes.projectUpload(":id"), { bodyLimit: ATTACHMENT_MAX_BYTES }, async (req, reply): Promise<FileEntry> => {
-			const row = requireProject(ctx, req.params.id);
+			const root = await checkoutFolder(ctx, req.params.id);
 			const query = UploadQuery.parse(req.query);
 			const overwrite = query.overwrite === "1" || query.overwrite === "true";
-			const { rel, abs } = await resolveWritableTarget(row.path, query.path);
+			const { rel, abs } = await resolveWritableTarget(root, query.path);
 			const existing = await lstat(abs).catch(() => null);
 			if (existing?.isDirectory()) throw ApiError.conflict(i18nMsg('"{rel}" is a folder', { rel }));
 			if (existing && !overwrite) throw ApiError.conflict(i18nMsg('"{rel}" already exists; send overwrite=1 to replace it', { rel }));

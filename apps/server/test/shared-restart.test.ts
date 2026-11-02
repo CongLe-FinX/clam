@@ -22,6 +22,7 @@ import {
 	transcriptTexts,
 	waitForShared,
 	whenSettled,
+	worktreeOf,
 	type GitConfigIsolation,
 	type SharedPair,
 } from "./shared-fixtures.ts";
@@ -201,7 +202,8 @@ describe("B restarts", () => {
 		await promptAndWait(pair.b, newSessionId, "b works after the restart");
 		await eventually(async () => (await transcriptTexts(pair.b, newSessionId)).includes("FAKE: b works after the restart"), "the resumed session's answer");
 		expect((await sessionOn(pair.b, newSessionId)).kind).toBe("local");
-		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo?.branch);
+		expect(git(worktreeOf(pair.b, shared.id), "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo?.branch);
+		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
 
 		// A returns: it learns the change from B (queued before the restart, or by asking) and mirrors the restarted driver
 		await pair.start("a");
@@ -294,10 +296,11 @@ describe("former-driver work is finished at boot", () => {
 	async function aDiedAndBTookOver() {
 		const joinedSession = await joinedWithNotes();
 		const { shared, sessionId } = joinedSession;
-		writeFileSync(path.join(pair.workA, "LOCAL_COMMIT.md"), "committed on A, never pushed\n");
-		git(pair.workA, "add", "LOCAL_COMMIT.md");
-		git(pair.workA, "commit", "-m", "local only");
-		writeFileSync(path.join(pair.workA, "UNSAVED.md"), "uncommitted on A\n");
+		const worktreeA = worktreeOf(pair.a, shared.id);
+		writeFileSync(path.join(worktreeA, "LOCAL_COMMIT.md"), "committed on A, never pushed\n");
+		git(worktreeA, "add", "LOCAL_COMMIT.md");
+		git(worktreeA, "commit", "-m", "local only");
+		writeFileSync(path.join(worktreeA, "UNSAVED.md"), "uncommitted on A\n");
 		await pair.stop("a");
 		await waitForShared(pair.b, shared.id, (s) => s.takeoverAvailable, "takeover available", 20_000);
 		const took = await api(pair.b).post<SharedSession>(`/shared/${shared.id}/takeover`, {});
@@ -391,7 +394,7 @@ describe("former-driver work is finished at boot", () => {
 		expect(calls(pair.a).filter((argv) => argv.includes("moved"))).toHaveLength(movedCalls);
 		expect(git(pair.origin, "rev-list", "--count", rescue).trim()).toBe(commitsBefore);
 		expect((await sessionOn(pair.a, sessionId)).movedTo).toMatchObject({ nodeId: pair.bId, sessionId: newSessionId });
-		expect(git(pair.workA, "status", "--porcelain").trim()).toBe("");
+		expect(git(worktreeOf(pair.a, shared.id), "status", "--porcelain").trim()).toBe("");
 		expect(git(pair.origin, "show", `${rescue}:UNSAVED.md`)).toBe("uncommitted on A\n");
 	});
 

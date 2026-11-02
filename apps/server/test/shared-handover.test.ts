@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import type { AgentSession, SharedSession, SharedTransfer, TransferPhase } from "@clam/contracts";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { api } from "./full-harness.ts";
@@ -15,6 +17,7 @@ import {
 	transcriptTexts,
 	waitForShared,
 	whenSettled,
+	worktreeOf,
 	type GitConfigIsolation,
 	type SharedPair,
 } from "./shared-fixtures.ts";
@@ -51,7 +54,7 @@ async function newSession(title: string): Promise<AgentSession> {
 }
 
 describe("hand-over to a node that is not a participant yet", () => {
-	it("shares an UNSHARED session, B auto-accepts, everything A changed (even uncommitted) moves to B in one action, A follows as a participant with a live mirror", async () => {
+	it("shares an UNSHARED session, B auto-accepts, the work moves to B in one action (what the agent changed before sharing stays in A's project folder), A follows as a participant with a live mirror", async () => {
 		pair = await startSharedPair();
 		await pair.autoAcceptOnB(true);
 		const session = await newSession("Build the feature");
@@ -78,16 +81,20 @@ describe("hand-over to a node that is not a participant yet", () => {
 		expect(indexes).toEqual([...indexes].sort((x, y) => x - y));
 		expect(seen.phases).toEqual(expect.arrayContaining(["checkpointing", "delivering", "handing_over", "continuing"]));
 
-		// B continues in a NEW local session cloned from A's snapshot, with the work in its clone
+		// B continues in a NEW local session cloned from A's snapshot, in its own worktree on the shared branch
 		const onB = await waitForShared(pair.b, sharedId, (s) => s.localRole === "driver" && s.epoch === 2, "B is the driver");
 		const newSession_ = await sessionOn(pair.b, onB.localSessionId as string);
 		expect(newSession_).toMatchObject({ kind: "local", sharedSessionId: sharedId });
 		expect(done.transfer).toMatchObject({ newSessionId: newSession_.id, newSessionUrl: null });
-		expect(readIn(pair.workB, "FEATURE.md")).toBe("feature v1\n");
-		expect(readIn(pair.workB, "SCRATCH.txt")).toBe("scratch\n");
-		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(started.body.repo?.branch);
+		const worktreeB = worktreeOf(pair.b, sharedId);
+		expect(git(worktreeB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(started.body.repo?.branch);
+		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
 		expect(remoteBranches(pair.origin)).toContain(started.body.repo?.branch);
-		expect(git(pair.origin, "show", `${started.body.repo?.branch}:FEATURE.md`)).toBe("feature v1\n");
+		// the files were written in A's project folder BEFORE the session was shared: sharing never moves or commits them
+		expect(existsSync(path.join(worktreeB, "FEATURE.md"))).toBe(false);
+		expect(() => git(pair.origin, "show", `${started.body.repo?.branch}:FEATURE.md`)).toThrow();
+		expect(readIn(pair.workA, "FEATURE.md")).toBe("feature v1\n");
+		expect(git(pair.workA, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
 
 		// the continuation note wakes B's agent: everything was handed over, continue the same work
 		await eventually(async () => (await transcriptTexts(pair.b, newSession_.id)).some((t) => t.includes("handed over to this node")), "the continuation note on B", 30_000);
@@ -151,7 +158,7 @@ describe("a driver that is mid-turn", () => {
 
 		// the file written before the interrupted turn is in the checkpoint commit on the shared branch and on B
 		expect(git(pair.origin, "show", `${shared.repo?.branch}:PARTIAL.md`)).toBe("partial\n");
-		expect(readIn(pair.workB, "PARTIAL.md")).toBe("partial\n");
+		expect(readIn(worktreeOf(pair.b, shared.id), "PARTIAL.md")).toBe("partial\n");
 		const onB = await waitForShared(pair.b, shared.id, (s) => s.localRole === "driver" && s.epoch === 2, "B is the driver");
 		await eventually(async () => (await transcriptTexts(pair.b, onB.localSessionId as string)).some((t) => t.includes("handed over to this node")), "the continuation note", 30_000);
 		const note = (await transcriptTexts(pair.b, onB.localSessionId as string)).find((t) => t.includes("handed over to this node")) as string;
@@ -209,7 +216,9 @@ describe("waiting for B to accept", () => {
 		expect(accepted.status, JSON.stringify(accepted.body)).toBe(200);
 		const done = await waitForShared(pair.a, sharedId, (s) => s.transfer?.phase === "continuing", "the hand-over to finish after B accepted", 60_000);
 		expect(done.localRole).toBe("former_driver");
-		expect(readIn(pair.workB, "ONE.md")).toBe("one\n");
+		// written in A's project folder before the share: stays there
+		expect(existsSync(path.join(worktreeOf(pair.b, sharedId), "ONE.md"))).toBe(false);
+		expect(readIn(pair.workA, "ONE.md")).toBe("one\n");
 	});
 
 	it("fails when B declines, and when nobody accepts in time (the invitation stays open)", async () => {
@@ -247,7 +256,7 @@ describe("a hand-over that cannot complete loses nothing", () => {
 		expect(failed.transfer?.error?.code).toBe("push_failed");
 		expect(failed.transfer?.error?.message).toContain("Nothing was handed over");
 		expect(failed).toMatchObject({ localRole: "driver", epoch: 1 });
-		expect(readIn(pair.workA, "PRECIOUS.md")).toBe("precious\n");
+		expect(readIn(worktreeOf(pair.a, shared.id), "PRECIOUS.md")).toBe("precious\n");
 		// the failure is also in the thread, and a new attempt is possible once the remote works again
 		const thread = (await api(pair.a).get<{ messages: Array<{ kind: string; text: string; i18n?: { key: string; params?: Record<string, string | number> } }> }>(`/shared/${shared.id}`)).body.messages;
 		expect(thread.some((m) => m.text.includes("hand-over to node-b failed"))).toBe(true);
@@ -256,7 +265,7 @@ describe("a hand-over that cannot complete loses nothing", () => {
 		const retry = await api(pair.a).post<SharedSession>(`/shared/${shared.id}/transfer`, { toNodeId: pair.bId });
 		expect(retry.status).toBe(202);
 		await waitForShared(pair.a, shared.id, (s) => s.transfer?.phase === "continuing", "the second attempt to finish", 60_000);
-		expect(readIn(pair.workB, "PRECIOUS.md")).toBe("precious\n");
+		expect(readIn(worktreeOf(pair.b, shared.id), "PRECIOUS.md")).toBe("precious\n");
 	});
 
 	it("a node restart while a hand-over waits marks it failed (interrupted) and A keeps driving", async () => {

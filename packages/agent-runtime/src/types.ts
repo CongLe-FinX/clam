@@ -167,6 +167,8 @@ export interface UsageDelta {
 
 export interface RuntimeSession {
 	readonly sessionId: string;
+	/** What the process was started with (its working directory is fixed until the session is stopped and opened again). */
+	readonly spec: RuntimeSessionSpec;
 	status(): RuntimeStatus;
 	binding(): RuntimeBinding;
 

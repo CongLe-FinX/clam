@@ -119,9 +119,9 @@ const TurnFiles = memo(function TurnFiles({ stream, rowKey }: { stream: SessionS
 		if (!outputs) return [];
 		// A path touched by several turns of the same message is listed once (latest entry wins).
 		const byPath = new Map<string, RichFile>();
-		for (const o of outputs) for (const f of o.files) byPath.set(f.path, projectFile(env.projectId, f));
+		for (const o of outputs) for (const f of o.files) byPath.set(f.path, projectFile(o.projectId, f));
 		return [...byPath.values()];
-	}, [outputs, env.projectId]);
+	}, [outputs]);
 	const { openFile } = env;
 	const onOpen = useCallback(
 		(file: RichFile) => {
@@ -246,7 +246,7 @@ function UserFiles({ files }: { files: readonly AttachedFileRef[] }) {
 				const name = f.path.slice(f.path.lastIndexOf("/") + 1);
 				return (
 					<li key={f.path} className="min-w-0 max-w-full">
-						<FileChip file={projectFile(env.projectId, { path: f.path, name, size: 0, mimeType: "" })}>{name}</FileChip>
+						<FileChip file={projectFile(env.checkoutId, { path: f.path, name, size: 0, mimeType: "" })}>{name}</FileChip>
 					</li>
 				);
 			})}

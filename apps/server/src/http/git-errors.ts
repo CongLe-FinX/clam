@@ -27,6 +27,8 @@ export function gitEngineApiError(err: GitEngineError): ApiError {
 			return new ApiError(409, "git_dest_not_empty", message, details);
 		case "would_overwrite":
 			return new ApiError(409, "git_would_overwrite", message, details);
+		case "branch_in_worktree":
+			return new ApiError(409, "git_branch_in_worktree", message, details);
 		case "dirty_worktree":
 			return new ApiError(409, "git_dirty_worktree", message, details);
 		case "operation_in_progress":

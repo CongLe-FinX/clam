@@ -191,3 +191,8 @@ export function listFiles(dir: string): string[] {
 export function readIn(dir: string, file: string): string {
 	return readFileSync(path.join(dir, file), "utf8");
 }
+
+/** The git worktree a node keeps for a git-mode shared session (`<dataDir>/worktrees/<sharedId>`); it exists once that node drives (or took over) the session. */
+export function worktreeOf(node: FullHarness, sharedId: string): string {
+	return path.join(node.dataDir, "worktrees", sharedId);
+}

@@ -1,3 +1,4 @@
+import { parseCheckoutId } from "@clam/contracts";
 import { Bug, ChartColumn, Clapperboard, FileText, GitPullRequest, type LucideIcon, ListChecks, Search, Telescope } from "lucide-react";
 import { useGitStatus } from "@/features/git/hooks";
 import { msg, t, tr, type Msg } from "@/i18n";
@@ -48,10 +49,10 @@ const REPO: readonly Starter[] = [
 
 /** Example prompts for an empty conversation. Plain chats get research / chart / media / PDF ideas; repositories keep the code-oriented ones. */
 export function Starters({ onPick }: { onPick: (text: string) => void }) {
-	const { projectId } = useSessionEnv();
-	const project = useProject(projectId).data;
+	const { checkoutId } = useSessionEnv();
+	const project = useProject(parseCheckoutId(checkoutId).projectId).data;
 	const plainChat = project?.origin === "chat";
-	const git = useGitStatus(projectId, { enabled: project !== undefined && !plainChat }).data;
+	const git = useGitStatus(checkoutId, { enabled: project !== undefined && !plainChat }).data;
 	// Wait for the project: showing repo prompts for a plain chat (or the reverse) for a moment would be misleading.
 	if (!project) return null;
 	// A project folder without a repository gets the document-oriented cards.

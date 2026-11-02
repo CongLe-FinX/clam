@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { standardizeProjectDir } from "@clam/agent-runtime/omp";
 import path from "node:path";
 import type { AgentSession, Checkpoint, SharedSession } from "@clam/contracts";
@@ -22,6 +22,7 @@ import {
 	transcriptTexts,
 	waitForShared,
 	whenSettled,
+	worktreeOf,
 	type GitConfigIsolation,
 	type SharedPair,
 } from "./shared-fixtures.ts";
@@ -98,14 +99,18 @@ describe("manual takeover on B", () => {
 		expect(note).toContain("may be missing");
 		expect(note).toContain("DRIVER");
 
-		// B's clone is on the shared branch at the checkpoint commit, with A's file
-		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo?.branch);
-		expect(git(pair.workB, "rev-parse", "HEAD").trim()).toBe(checkpoint.commit);
-		expect(readIn(pair.workB, "SHARED_NOTES.md")).toBe("line one\n");
-		// `omp session unpack <archive> --cwd <B's clone, spelled the way omp spells it>` ran on B
+		// B works in its own worktree on the shared branch at the checkpoint commit, with A's file; B's clone itself is not switched
+		const worktreeB = worktreeOf(pair.b, shared.id);
+		expect(fresh.checkoutId).toBe(`${pair.projectB.id}~${shared.id}`);
+		expect(git(worktreeB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo?.branch);
+		expect(git(worktreeB, "rev-parse", "HEAD").trim()).toBe(checkpoint.commit);
+		expect(readIn(worktreeB, "SHARED_NOTES.md")).toBe("line one\n");
+		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
+		expect(existsSync(path.join(pair.workB, "SHARED_NOTES.md"))).toBe(false);
+		// `omp session unpack <archive> --cwd <B's worktree, spelled the way omp spells it>` ran on B
 		const unpack = calls(pair.b).find((argv) => argv.includes("unpack"));
 		expect(unpack).toBeDefined();
-		expect(unpack?.slice(unpack.indexOf("--cwd"))).toEqual(["--cwd", standardizeProjectDir(pair.workB)]);
+		expect(unpack?.slice(unpack.indexOf("--cwd"))).toEqual(["--cwd", standardizeProjectDir(realpathSync(worktreeB))]);
 
 		// retired: B's mirror of A and its participant session are archived (history kept)
 		const archived = (await api(pair.b).get<AgentSession[]>("/sessions?archived=true")).body.filter((s) => s.sharedSessionId === shared.id);
@@ -122,16 +127,17 @@ describe("manual takeover on B", () => {
 		expect(pending[0]?.body).toMatchObject({ epoch: 2, reason: "takeover", checkpointSeq: checkpoint.seq, commit: checkpoint.commit, sessionId: newSessionId });
 	});
 
-	it("refuses to touch overlapping local changes in B's clone and leaves everything as it was", async () => {
+	it("does not touch B's own uncommitted edits in its clone: the takeover works in a worktree and the clone keeps its branch and files", async () => {
 		const { shared } = await sharedWithNotes();
 		await pair.stop("a");
 		await waitForShared(pair.b, shared.id, (s) => s.takeoverAvailable, "takeover available", 20_000);
 		writeFileSync(path.join(pair.workB, "SHARED_NOTES.md"), "B's own unsaved notes\n");
-		const res = await api(pair.b).post<{ error: { code: string; message: string } }>(`/shared/${shared.id}/takeover`, {});
-		expect(res.status).toBe(409);
+		const res = await api(pair.b).post<SharedSession>(`/shared/${shared.id}/takeover`, {});
+		expect(res.status, JSON.stringify(res.body)).toBe(200);
 		expect(readIn(pair.workB, "SHARED_NOTES.md")).toBe("B's own unsaved notes\n");
-		expect((await sharedOn(pair.b, shared.id)).localRole).toBe("participant");
-		expect((await sessionsOn(pair.b)).filter((s) => s.kind === "local" && s.sharedSessionId === shared.id && s.title === "Add notes")).toEqual([]);
+		expect(git(pair.workB, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
+		expect(git(pair.workB, "status", "--porcelain").trim()).toBe("?? SHARED_NOTES.md");
+		expect(readIn(worktreeOf(pair.b, shared.id), "SHARED_NOTES.md")).toBe("line one\n");
 	});
 
 	it("forced takeover while the driver is online makes the driver a participant right away", async () => {
@@ -149,11 +155,12 @@ describe("manual takeover on B", () => {
 describe("the former driver returns", () => {
 	it("becomes read-only 'moved', saves its unpushed work on a rescue branch, mirrors B, and cannot act at the old epoch", async () => {
 		const { sessionId, shared, checkpoint } = await sharedWithNotes();
-		// work on A after its last checkpoint: an unpushed commit and an uncommitted file
-		writeFileSync(path.join(pair.workA, "LOCAL_COMMIT.md"), "committed on A, never pushed\n");
-		git(pair.workA, "add", "LOCAL_COMMIT.md");
-		git(pair.workA, "commit", "-m", "local only");
-		writeFileSync(path.join(pair.workA, "UNSAVED.md"), "uncommitted on A\n");
+		// work on A after its last checkpoint, in the shared worktree: an unpushed commit and an uncommitted file
+		const worktreeA = worktreeOf(pair.a, shared.id);
+		writeFileSync(path.join(worktreeA, "LOCAL_COMMIT.md"), "committed on A, never pushed\n");
+		git(worktreeA, "add", "LOCAL_COMMIT.md");
+		git(worktreeA, "commit", "-m", "local only");
+		writeFileSync(path.join(worktreeA, "UNSAVED.md"), "uncommitted on A\n");
 		await pair.stop("a");
 		await waitForShared(pair.b, shared.id, (s) => s.takeoverAvailable, "takeover available", 20_000);
 		const took = await api(pair.b).post<SharedSession>(`/shared/${shared.id}/takeover`, {});
@@ -178,8 +185,9 @@ describe("the former driver returns", () => {
 		expect(() => git(pair.origin, "show", `${shared.repo?.branch}:UNSAVED.md`)).toThrow();
 		expect(() => git(pair.origin, "show", `${shared.repo?.branch}:LOCAL_COMMIT.md`)).toThrow();
 		expect(git(pair.origin, "log", "-1", "--format=%B", rescue)).toContain(`Session: ${shared.id}`);
-		expect(git(pair.workA, "status", "--porcelain").trim()).toBe("");
-		expect(readIn(pair.workA, "UNSAVED.md")).toBe("uncommitted on A\n");
+		expect(git(worktreeA, "status", "--porcelain").trim()).toBe("");
+		expect(readIn(worktreeA, "UNSAVED.md")).toBe("uncommitted on A\n");
+		expect(git(pair.workA, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
 
 		// the driving session is a read-only moved copy with a link to B; its transcript is frozen and readable
 		const moved = await sessionOn(pair.a, sessionId);
@@ -262,7 +270,7 @@ describe("transfer with both nodes online", () => {
 		// the transfer checkpoint is the one B continued from
 		const last = onB.lastCheckpoint as Checkpoint;
 		expect(last.note).toContain("Hand-over to node-b");
-		expect(git(pair.workB, "rev-parse", "HEAD").trim()).toBe(last.commit);
+		expect(git(worktreeOf(pair.b, shared.id), "rev-parse", "HEAD").trim()).toBe(last.commit);
 
 		const former = await waitForShared(pair.a, shared.id, (s) => s.localRole === "former_driver" && s.mirrorSessionId !== null && s.rescueBranch === null, "A finished becoming a participant", 20_000);
 		expect((await sessionOn(pair.a, sessionId)).movedTo).toMatchObject({ nodeId: pair.bId, sessionId: fresh.id });

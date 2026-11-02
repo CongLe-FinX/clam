@@ -78,6 +78,11 @@ export const AgentSession = z.object({
 	kind: z.enum(["local", "mirror"]),
 	/** Set when this session belongs to a shared session (see `@clam/contracts` shared.ts). */
 	sharedSessionId: z.string().nullable(),
+	/**
+	 * Addresses the folder this session works in, for the git, file and terminal routes: `<projectId>` (the project's own folder) or
+	 * `<projectId>~<sharedSessionId>` (the git worktree of the shared session it drives on this node).
+	 */
+	checkoutId: z.string(),
 	/** Set when the work continued on another node (takeover / transfer); this copy is then read-only. */
 	movedTo: z.object({ nodeId: z.string(), nodeName: z.string(), url: z.string().nullable(), sessionId: z.string().nullable(), at: IsoDate }).nullable(),
 	/** Questions and approvals the agent is waiting on (drives the badge in session lists). */
@@ -217,6 +222,7 @@ export type TurnOutputFile = z.infer<typeof TurnOutputFile>;
 export const TurnOutputs = z.object({
 	id: z.string(),
 	sessionId: z.string(),
+	/** Checkout id of the folder the turn ran in (`<projectId>` or `<projectId>~<sharedSessionId>`); pass it to the file routes. */
 	projectId: z.string(),
 	anchorMessageId: z.string().nullable(),
 	anchorTimestamp: z.number().nullable(),

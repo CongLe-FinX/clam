@@ -9,6 +9,7 @@ import type { DecideInput, ShareInput, SharedHub, SharingApi } from "./hub.ts";
 import { newInviteId, newSharedId, type InviteRow, type SharedRow } from "./store.ts";
 import { candidateProjects } from "./views.ts";
 import { createManagedProject, projectVcs } from "../services/project-folders.ts";
+import { createWorktree, removeWorktree } from "./worktrees.ts";
 
 const NO_GOAL_TITLE = "New session";
 
@@ -113,7 +114,11 @@ export class SharingService implements SharingApi {
 		});
 	}
 
-	/** First share of a session: shared branch from the project's current HEAD (checked out, pushed), the shared-session rows. */
+	/**
+	 * First share of a session: the shared branch gets its own git worktree on this node (started from the project's current HEAD, pushed
+	 * from there) and the shared-session rows. The project's folder keeps its branch and its uncommitted changes; the driving session
+	 * moves into the worktree.
+	 */
 	private async createShared(session: typeof agentSessions.$inferSelect, project: ProjectRow, repoUrl: string): Promise<SharedRow> {
 		const { gitService } = this.ctx;
 		const status = await gitService.status(project.id);
@@ -122,21 +127,22 @@ export class SharingService implements SharingApi {
 		const suffix = session.id.replace(/[^a-z0-9]/gi, "").toLowerCase().slice(-6) || "shared";
 		const title = session.title === NO_GOAL_TITLE ? "Shared session" : session.title;
 		const branch = `clam/shared/${slugify(title, 40)}-${suffix}`;
+		const id = newSharedId();
+		let created = false;
 		try {
-			if (status.branch !== branch) {
-				const local = (await gitService.branches(project.id)).some((b) => !b.remote && (b.name === branch || b.name === `refs/heads/${branch}`));
-				if (local) await gitService.checkout(project.id, branch);
-				else await gitService.createBranch(project.id, { name: branch, checkout: true });
-			}
-			await gitService.push(project.id, { setUpstream: true });
+			const dir = await createWorktree(this.ctx, { id, branch, projectId: project.id }, { startPoint: status.headSha ?? "HEAD" });
+			created = true;
+			await gitService.pushNewWorktree(project.id, id, dir);
 		} catch (error) {
+			if (created) await removeWorktree(this.ctx, id, project.id);
+			if (error instanceof ApiError && error.code === "shared_branch_checked_out") throw error;
 			throw new ApiError(409, "shared_branch_failed", i18nMsg("Could not create and push the shared branch {branch}: {error}", { branch, error: errorText(error, 300) }), { branch });
 		}
 		const now = new Date().toISOString();
 		const owner = this.ctx.db.select({ name: agents.name }).from(agents).where(eq(agents.id, session.agentId)).get();
 		const shared = this.store.transaction(() => {
 			const row = this.store.insert({
-				id: newSharedId(),
+				id,
 				workspaceId: project.workspaceId,
 				title,
 				goal: title,
@@ -170,7 +176,9 @@ export class SharingService implements SharingApi {
 			return row;
 		});
 		this.ctx.sessions.setSharedSession(session.id, shared.id);
-		this.hub.discussion.note(shared.id, i18nMsg("Shared session created by {node} on branch {branch}.", { node: this.hub.nodeName(), branch }));
+		// A running agent reopens in the worktree (an agent in the middle of a turn finishes it where it is and moves at its next prompt).
+		await this.ctx.sessions.refreshWorkdir(session.id).catch((error: unknown) => this.hub.log.warn({ err: errorText(error), sessionId: session.id }, "could not move the driving session into the shared worktree"));
+		this.hub.discussion.note(shared.id, i18nMsg("Shared session created by {node} on branch {branch}. It works in its own folder (a git worktree); uncommitted changes in the project folder were not carried over.", { node: this.hub.nodeName(), branch }));
 		return shared;
 	}
 
@@ -257,7 +265,7 @@ export class SharingService implements SharingApi {
 		});
 	}
 
-	/** This node stops taking part: the mirror and the participant agent session are archived (history is kept), the row becomes `left`. */
+	/** This node stops taking part: the mirror and the participant agent session are archived (history is kept), its worktree of the shared session is removed, the row becomes `left`. */
 	private async tearDown(shared: SharedRow, state: "left"): Promise<void> {
 		this.hub.mirror.unpublish(shared.id);
 		const self = this.store.participant(shared.id, this.self);
@@ -273,6 +281,8 @@ export class SharingService implements SharingApi {
 			if (self) this.store.updateParticipant(shared.id, this.self, { state: "left" });
 			this.store.update(shared.id, { state, mirrorSessionId: null });
 		});
+		// This node's working tree of the shared session goes with its membership (never forced, never the branch; a dirty one stays and is logged).
+		await removeWorktree(this.ctx, shared.id);
 		this.hub.changed(shared.id);
 	}
 

@@ -57,6 +57,16 @@ export interface GitEngine {
 	push(dir: string, o: { auth?: GitAuth; setUpstream: boolean }): Promise<Omit<GitPushResult, "status">>;
 	conflicts(dir: string, o: { against?: string }): Promise<GitConflictReport>;
 	/**
+	 * Linked working tree of `dir` (the repository's main working tree) on `o.branch`. A branch another working tree already
+	 * holds is refused with `branch_in_worktree`.
+	 */
+	worktreeAdd(dir: string, o: WorktreeAddOptions): Promise<void>;
+	/** `git worktree remove` WITHOUT `--force`: a dirty, locked or unclean working tree is refused (`dirty_worktree`) and kept. The branch is never deleted. */
+	worktreeRemove(dir: string, path: string): Promise<void>;
+	worktreeList(dir: string): Promise<GitWorktree[]>;
+	/** Forgets linked working trees whose directory is gone. */
+	worktreePrune(dir: string): Promise<void>;
+	/**
 	 * `git format-patch --stdout --binary --no-color <base>..<head>` (head defaults to HEAD): the mbox of every commit in
 	 * the range, oldest first, plus the commit count. An empty range yields an empty buffer and 0 commits. Output over
 	 * 25 MiB throws `failed`. Needs no configured identity. Read-only.
@@ -65,6 +75,27 @@ export interface GitEngine {
 	configIdentity(dir: string): Promise<{ name: string; email: string } | null>;
 	githubRemote(dir: string): Promise<{ owner: string; repo: string } | null>;
 	dispose(): Promise<void>;
+}
+
+/** One entry of `git worktree list`; the first entry is the repository's main working tree. */
+export interface GitWorktree {
+	path: string;
+	/** Short branch name; null when HEAD is detached or the entry is bare. */
+	branch: string | null;
+	headSha: string | null;
+	/** Git marks the directory as gone (deleted by hand); `worktreePrune` forgets it. */
+	prunable: boolean;
+}
+
+export interface WorktreeAddOptions {
+	/** Absolute directory of the new linked working tree (must not exist or be empty). */
+	path: string;
+	branch: string;
+	/** Create `branch` (from `startPoint`, default HEAD). Without it `branch` must already exist locally. */
+	newBranch?: boolean;
+	startPoint?: string;
+	/** With `newBranch` and a remote-tracking `startPoint`: set it as the new branch's upstream. */
+	track?: boolean;
 }
 
 const EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
@@ -389,6 +420,64 @@ export async function createGitEngine(opts: GitEngineOptions): Promise<GitEngine
 		} catch (err) {
 			mapOperationError(err);
 		}
+	}
+
+	async function worktreeAdd(dir: string, o: WorktreeAddOptions): Promise<void> {
+		await ensureRoot(dir);
+		validateRef(o.branch, "branch");
+		if (!isAbsolute(o.path) || o.path.includes("\0")) throw new GitEngineError("invalid_ref", `Invalid worktree path: ${JSON.stringify(o.path)}`);
+		const check = await gitRun(["check-ref-format", "--branch", o.branch], { cwd: dir });
+		if (check.code !== 0) throw new GitEngineError("invalid_ref", `Invalid branch name: ${o.branch}`, check.stderr);
+		const startPoint = o.startPoint ? validateRef(o.startPoint, "start point") : undefined;
+		const exists = (await gitRun(["rev-parse", "--verify", "--quiet", `refs/heads/${o.branch}`], { cwd: dir })).code === 0;
+		if (o.newBranch && exists) throw new GitEngineError("invalid_ref", `Branch ${o.branch} already exists`);
+		if (!o.newBranch && !exists) throw new GitEngineError("invalid_ref", `Unknown branch: ${o.branch}`);
+		const args = ["worktree", "add"];
+		if (o.newBranch) args.push(...(o.track ? ["--track"] : ["--no-track"]), "-b", o.branch, o.path, ...(startPoint ? [startPoint] : []));
+		else args.push(o.path, o.branch);
+		await mkdir(dirname(o.path), { recursive: true });
+		await git(args, { cwd: dir });
+	}
+
+	async function worktreeRemove(dir: string, path: string): Promise<void> {
+		await ensureRoot(dir);
+		try {
+			await git(["worktree", "remove", path], { cwd: dir });
+		} catch (err) {
+			if (err instanceof GitEngineError && err.code === "failed" && /contains modified or untracked files|is dirty|locked|use --force/i.test(err.stderr)) {
+				throw new GitEngineError("dirty_worktree", firstMessage(err.stderr) || err.message, err.stderr);
+			}
+			throw err;
+		}
+	}
+
+	async function worktreeList(dir: string): Promise<GitWorktree[]> {
+		await ensureRoot(dir);
+		const out = await git(["worktree", "list", "--porcelain", "-z"], { cwd: dir });
+		const entries: GitWorktree[] = [];
+		let current: GitWorktree | null = null;
+		for (const field of out.split("\0")) {
+			if (field === "") {
+				if (current) entries.push(current);
+				current = null;
+				continue;
+			}
+			const space = field.indexOf(" ");
+			const key = space < 0 ? field : field.slice(0, space);
+			const value = space < 0 ? "" : field.slice(space + 1);
+			if (key === "worktree") current = { path: value, branch: null, headSha: null, prunable: false };
+			else if (!current) continue;
+			else if (key === "HEAD") current.headSha = /^0+$/.test(value) ? null : value;
+			else if (key === "branch") current.branch = value.replace(/^refs\/heads\//, "");
+			else if (key === "prunable") current.prunable = true;
+		}
+		if (current) entries.push(current);
+		return entries;
+	}
+
+	async function worktreePrune(dir: string): Promise<void> {
+		await ensureRoot(dir);
+		await git(["worktree", "prune"], { cwd: dir });
 	}
 
 	const pathspecStdin = ["--pathspec-from-file=-", "--pathspec-file-nul"];
@@ -731,6 +820,10 @@ export async function createGitEngine(opts: GitEngineOptions): Promise<GitEngine
 		branches,
 		log,
 		createBranch,
+		worktreeAdd,
+		worktreeRemove,
+		worktreeList,
+		worktreePrune,
 		checkout,
 		stage,
 		unstage,

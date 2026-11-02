@@ -888,11 +888,11 @@ export class SessionStream {
 		fire(this.logL);
 	};
 
-	/** The agent may have written files during the turn: refresh the file tree and any open previews of this session's project. */
+	/** The agent may have written files during the turn: refresh the file tree and any open previews of this session's folder (project or shared worktree). */
 	private refreshProjectFiles(): void {
-		const projectId = this.qc.getQueryData<AgentSession>(qk.session(this.sessionId))?.projectId;
-		if (!projectId) return;
-		void this.qc.invalidateQueries({ queryKey: ["local", "project", projectId], predicate: (q) => q.queryKey[3] === "files" || q.queryKey[3] === "file" });
+		const checkoutId = this.qc.getQueryData<AgentSession>(qk.session(this.sessionId))?.checkoutId;
+		if (!checkoutId) return;
+		void this.qc.invalidateQueries({ queryKey: ["local", "project", checkoutId], predicate: (q) => q.queryKey[3] === "files" || q.queryKey[3] === "file" });
 	}
 
 	private invalidateSoon(): void {

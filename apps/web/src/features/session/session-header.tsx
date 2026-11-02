@@ -247,7 +247,7 @@ export function SessionHeader({
 			{!compact && !readOnly ? (
 				<Tip label={t("Open terminal here")}>
 					<Button asChild variant="ghost" size="icon" aria-label={t("Open terminal here")} className="hidden shrink-0 md:inline-flex">
-						<Link to="/terminal" search={{ project: session.projectId }}>
+						<Link to="/terminal" search={{ project: session.checkoutId }}>
 							<Terminal />
 						</Link>
 					</Button>
@@ -279,7 +279,7 @@ export function SessionHeader({
 			{compact ? filesToggle : null}
 			{compact ? (
 				<SessionMenu
-					projectId={session.projectId}
+					checkoutId={session.checkoutId}
 					canAdd={canAdd}
 					readOnly={readOnly}
 					teamUnread={teamUnread}

@@ -4,16 +4,17 @@ import path from "node:path";
 import type { z } from "zod";
 import { i18nMsg, type ClmeshInitResult, type CloneProjectBody, type CreatePullRequestBody, type GitBranch, type GitCommit, type GitConflictReport, type GitDiff, type GitDiffQuery, type GitIdentity, type GitLogPage, type GitOperation, type GitPullResult, type GitPushResult, type GitStatus, type Project, type PullRequest, type RepositoryRef } from "@clam/contracts";
 import { agentSessions, agents, gitSyncStates, projects, settings, workspaces } from "@clam/database";
-import { type GitAuth, initClmesh } from "@clam/git-engine";
+import { type GitAuth, type WorktreeAddOptions, initClmesh } from "@clam/git-engine";
 import { and, eq } from "drizzle-orm";
 import type { ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
 import { failureText, toGitApiError } from "../http/git-errors.ts";
 import { toProject } from "../api/projects.ts";
 import { canonicalProjectDir, normalizeRelativePath } from "./files.ts";
+import { type Checkout, locateCheckout, resolveCheckout } from "./checkouts.ts";
+import { checkoutIdOf, parseCheckoutId } from "@clam/contracts";
 import { newId } from "./ids.ts";
 import { readNodeSettings } from "./settings.ts";
-
 type ProjectRow = typeof projects.$inferSelect;
 
 const WATCH_DEBOUNCE_MS = 300;
@@ -60,9 +61,10 @@ export function isIgnoredWatchPath(relative: string): boolean {
 }
 
 /**
- * Everything the Git routes do on top of `@clam/git-engine`: per-project serialized mutations, authentication from
+ * Everything the Git routes do on top of `@clam/git-engine`: per-checkout serialized mutations (a checkout is a project's own folder,
+ * `<projectId>`, or the git worktree of a shared session, `<projectId>~<sharedId>`), authentication from
  * the project's linked GitHub account (token handed only to the engine's askpass broker), commit identity,
- * `git:<projectId>` status events (after every mutation, on debounced working-tree changes and agent `tool_end`),
+ * `git:<checkoutId>` status events (after every mutation, on debounced working-tree changes and agent `tool_end`),
  * `git_sync_states` upkeep, clone operations and pull requests.
  */
 export class GitService {
@@ -81,8 +83,8 @@ export class GitService {
 		this.stops.push(
 			ctx.runtime.onEvent((sessionId, event) => {
 				if (event.type !== "tool_end") return;
-				const row = ctx.db.select({ projectId: agentSessions.projectId }).from(agentSessions).where(eq(agentSessions.id, sessionId)).get();
-				if (row && ctx.bus.hasSubscribers(`git:${row.projectId}`)) this.scheduleRefresh(row.projectId);
+				const checkoutId = ctx.sessions.checkoutIdOfSession(sessionId);
+				if (checkoutId && ctx.bus.hasSubscribers(`git:${checkoutId}`)) this.scheduleRefresh(checkoutId);
 			}),
 		);
 	}
@@ -98,33 +100,21 @@ export class GitService {
 		await Promise.allSettled([...this.queues.values()]);
 	}
 
-	// ---------------------------------------------------------------- project lookup
+	// ---------------------------------------------------------------- checkout lookup
 
-	/** The project row and its working directory. Only the stored (canonical) directory is ever used; client paths are never accepted. */
-	async resolve(projectId: string): Promise<{ row: ProjectRow; dir: string }> {
-		const row = this.ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
-		if (!row) throw ApiError.notFound("Project");
-		let real: string;
-		try {
-			real = await realpath(row.path);
-			if (!(await stat(real)).isDirectory()) throw new Error("not a directory");
-		} catch {
-			throw new ApiError(409, "project_dir_missing", i18nMsg("The project directory no longer exists: {path}", { path: row.path }));
-		}
-		if (real !== row.path) {
-			throw new ApiError(409, "project_dir_moved", i18nMsg("The project directory resolves elsewhere now ({path}); re-add the project at its new location.", { path: real }));
-		}
-		return { row, dir: row.path };
+	/** The project row and working directory a checkout id addresses (`<projectId>` or `<projectId>~<sharedId>`); see `resolveCheckout`. */
+	resolve(checkoutId: string): Promise<Checkout> {
+		return resolveCheckout(this.ctx, checkoutId);
 	}
 
-	/** Runs a mutation after every earlier mutation of the same project has settled (their failures do not block it). */
-	private serialize<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
-		const previous = this.queues.get(projectId) ?? Promise.resolve();
+	/** Runs a mutation after every earlier mutation of the same checkout has settled (their failures do not block it). */
+	private serialize<T>(queueKey: string, fn: () => Promise<T>): Promise<T> {
+		const previous = this.queues.get(queueKey) ?? Promise.resolve();
 		const run = previous.then(fn);
 		const tail = run.catch(() => undefined);
-		this.queues.set(projectId, tail);
+		this.queues.set(queueKey, tail);
 		void tail.then(() => {
-			if (this.queues.get(projectId) === tail) this.queues.delete(projectId);
+			if (this.queues.get(queueKey) === tail) this.queues.delete(queueKey);
 		});
 		return run;
 	}
@@ -138,15 +128,34 @@ export class GitService {
 	}
 
 	/** Resolve + serialize + error mapping in one: the shape of every mutating route. */
-	private mutate<T>(projectId: string, fn: (p: { row: ProjectRow; dir: string }) => Promise<T>): Promise<T> {
+	private mutate<T>(checkoutId: string, fn: (p: Checkout) => Promise<T>): Promise<T> {
 		return this.guarded(async () => {
-			await this.resolve(projectId); // 404/409 before queueing
-			return this.serialize(projectId, async () => fn(await this.resolve(projectId)));
+			await this.resolve(checkoutId); // 404/409 before queueing
+			return this.serialize(checkoutId, async () => fn(await this.resolve(checkoutId)));
 		});
 	}
 
-	private read<T>(projectId: string, fn: (p: { row: ProjectRow; dir: string }) => Promise<T>): Promise<T> {
-		return this.guarded(async () => fn(await this.resolve(projectId)));
+	private read<T>(checkoutId: string, fn: (p: Checkout) => Promise<T>): Promise<T> {
+		return this.guarded(async () => fn(await this.resolve(checkoutId)));
+	}
+
+	// ---------------------------------------------------------------- linked worktrees
+
+	/** Worktree management changes the repository itself, so it queues behind (and ahead of) the project folder's own mutations. */
+	addWorktree(projectId: string, o: WorktreeAddOptions): Promise<void> {
+		return this.mutate(projectId, ({ dir }) => this.ctx.git.worktreeAdd(dir, o));
+	}
+
+	/** Non-forced removal (a dirty worktree is a 409 `git_dirty_worktree` and stays), then prunes the project's stale entries. */
+	removeWorktree(projectId: string, worktreePath: string): Promise<void> {
+		return this.mutate(projectId, async ({ dir }) => {
+			await this.ctx.git.worktreeRemove(dir, worktreePath);
+			await this.ctx.git.worktreePrune(dir);
+		});
+	}
+
+	pruneWorktrees(projectId: string): Promise<void> {
+		return this.mutate(projectId, ({ dir }) => this.ctx.git.worktreePrune(dir));
 	}
 
 	// ---------------------------------------------------------------- accounts, auth, identity
@@ -201,19 +210,19 @@ export class GitService {
 		throw new ApiError(409, "no_git_identity", i18nMsg("No commit identity is available: connect a GitHub account, set user.name/user.email in the repository, or set an identity for this project."));
 	}
 
-	identity(projectId: string): Promise<GitIdentity> {
-		return this.read(projectId, ({ row, dir }) => this.identityOf(row, dir));
+	identity(checkoutId: string): Promise<GitIdentity> {
+		return this.read(checkoutId, ({ row, dir }) => this.identityOf(row, dir));
 	}
 
-	setIdentity(projectId: string, body: { name: string; email: string } | null): Promise<GitIdentity> {
+	setIdentity(checkoutId: string, body: { name: string; email: string } | null): Promise<GitIdentity> {
 		return this.guarded(async () => {
-			const { row, dir } = await this.resolve(projectId);
+			const { row, dir } = await this.resolve(checkoutId);
 			if (body === null) {
-				this.ctx.db.delete(settings).where(eq(settings.key, IDENTITY_KEY(projectId))).run();
+				this.ctx.db.delete(settings).where(eq(settings.key, IDENTITY_KEY(row.id))).run();
 			} else {
 				const value = JSON.stringify({ name: body.name, email: body.email });
 				const updatedAt = new Date().toISOString();
-				this.ctx.db.insert(settings).values({ key: IDENTITY_KEY(projectId), value, updatedAt }).onConflictDoUpdate({ target: settings.key, set: { value, updatedAt } }).run();
+				this.ctx.db.insert(settings).values({ key: IDENTITY_KEY(row.id), value, updatedAt }).onConflictDoUpdate({ target: settings.key, set: { value, updatedAt } }).run();
 			}
 			return this.identityOf(row, dir);
 		});
@@ -258,24 +267,24 @@ export class GitService {
 	}
 
 	/**
-	 * Read status, refresh the sync cache, and publish `git:<id>`. Mutations always publish; watcher/tool_end refreshes
-	 * publish only when something visible changed (so Git's own index refreshes cannot start an event loop).
+	 * Read status, refresh the sync cache (keyed by project id + branch), and publish `git:<checkoutId>`. Mutations always publish;
+	 * watcher/tool_end refreshes publish only when something visible changed (so Git's own index refreshes cannot start an event loop).
 	 */
-	private async observe(projectId: string, dir: string, opts: { publish: "always" | "on-change" | "never"; event?: "pushed" | "pulled" }): Promise<GitStatus> {
+	private async observe(checkoutId: string, dir: string, opts: { publish: "always" | "on-change" | "never"; event?: "pushed" | "pulled" }): Promise<GitStatus> {
 		const status = await this.ctx.git.status(dir);
-		await this.recordSync(projectId, dir, status, opts.event);
+		await this.recordSync(parseCheckoutId(checkoutId).projectId, dir, status, opts.event);
 		const signature = this.statusSignature(status);
-		const changed = this.lastPublished.get(projectId) !== signature;
+		const changed = this.lastPublished.get(checkoutId) !== signature;
 		if (opts.publish === "always" || (opts.publish === "on-change" && changed)) {
-			this.lastPublished.set(projectId, signature);
-			this.ctx.bus.publish(`git:${projectId}`, { type: "status", status });
+			this.lastPublished.set(checkoutId, signature);
+			this.ctx.bus.publish(`git:${checkoutId}`, { type: "status", status });
 		}
 		return status;
 	}
 
-	status(projectId: string): Promise<GitStatus> {
+	status(checkoutId: string): Promise<GitStatus> {
 		// A read the UI polls: refreshes the cache; publishes only a real change to other subscribers.
-		return this.read(projectId, ({ dir }) => this.observe(projectId, dir, { publish: "on-change" }));
+		return this.read(checkoutId, ({ dir }) => this.observe(checkoutId, dir, { publish: "on-change" }));
 	}
 
 	async overview(): Promise<OverviewEntry[]> {
@@ -303,58 +312,58 @@ export class GitService {
 
 	// ---------------------------------------------------------------- watching
 
-	private onDemand(projectId: string, active: boolean): void {
+	private onDemand(checkoutId: string, active: boolean): void {
 		if (!active) {
-			this.watchers.get(projectId)?.close();
-			this.watchers.delete(projectId);
-			clearTimeout(this.refreshTimers.get(projectId));
-			this.refreshTimers.delete(projectId);
+			this.watchers.get(checkoutId)?.close();
+			this.watchers.delete(checkoutId);
+			clearTimeout(this.refreshTimers.get(checkoutId));
+			this.refreshTimers.delete(checkoutId);
 			return;
 		}
-		if (this.disposed || this.watchers.has(projectId)) return;
-		const row = this.ctx.db.select().from(projects).where(eq(projects.id, projectId)).get();
-		if (!row) return;
+		if (this.disposed || this.watchers.has(checkoutId)) return;
+		const located = locateCheckout(this.ctx, checkoutId);
+		if (!located) return;
 		try {
-			const watcher = watch(row.path, { recursive: true, persistent: false }, (_event, filename) => {
+			const watcher = watch(located.dir, { recursive: true, persistent: false }, (_event, filename) => {
 				if (filename && isIgnoredWatchPath(filename.toString())) return;
-				this.scheduleRefresh(projectId);
+				this.scheduleRefresh(checkoutId);
 			});
 			watcher.on("error", (err) => {
-				this.ctx.log.debug({ err, projectId }, "git working-tree watcher stopped");
+				this.ctx.log.debug({ err, checkoutId }, "git working-tree watcher stopped");
 				watcher.close();
-				if (this.watchers.get(projectId) === watcher) this.watchers.delete(projectId);
+				if (this.watchers.get(checkoutId) === watcher) this.watchers.delete(checkoutId);
 			});
-			this.watchers.set(projectId, watcher);
+			this.watchers.set(checkoutId, watcher);
 		} catch (err) {
-			this.ctx.log.warn({ err, projectId }, "cannot watch the project directory; git status updates only after actions");
+			this.ctx.log.warn({ err, checkoutId }, "cannot watch the working directory; git status updates only after actions");
 		}
 	}
 
-	private scheduleRefresh(projectId: string): void {
-		if (this.disposed || this.refreshTimers.has(projectId)) return;
+	private scheduleRefresh(checkoutId: string): void {
+		if (this.disposed || this.refreshTimers.has(checkoutId)) return;
 		const timer = setTimeout(() => {
-			this.refreshTimers.delete(projectId);
-			if (!this.ctx.bus.hasSubscribers(`git:${projectId}`)) return;
-			void this.resolve(projectId)
-				.then(({ dir }) => this.observe(projectId, dir, { publish: "on-change" }))
-				.catch((err: unknown) => this.ctx.log.debug({ err, projectId }, "git status refresh failed"));
+			this.refreshTimers.delete(checkoutId);
+			if (!this.ctx.bus.hasSubscribers(`git:${checkoutId}`)) return;
+			void this.resolve(checkoutId)
+				.then(({ dir }) => this.observe(checkoutId, dir, { publish: "on-change" }))
+				.catch((err: unknown) => this.ctx.log.debug({ err, checkoutId }, "git status refresh failed"));
 		}, WATCH_DEBOUNCE_MS);
 		timer.unref();
-		this.refreshTimers.set(projectId, timer);
+		this.refreshTimers.set(checkoutId, timer);
 	}
 
 	// ---------------------------------------------------------------- operations registry
 
-	private publishOperation(op: GitOperation, projectId: string | null, project?: Project): void {
+	private publishOperation(op: GitOperation, checkoutId: string | null, project?: Project): void {
 		this.ctx.bus.publish(`git-op:${op.id}`, { type: "operation", operation: op, ...(project && { project }) });
-		if (projectId) this.ctx.bus.publish(`git:${projectId}`, { type: "operation", operation: op });
+		if (checkoutId) this.ctx.bus.publish(`git:${checkoutId}`, { type: "operation", operation: op });
 	}
 
-	private beginOperation(kind: GitOperation["kind"], projectId: string | null): GitOperation {
-		const op: GitOperation = { id: newId("gop"), kind, state: "running", phase: null, percent: null, error: null, projectId: kind === "clone" ? null : projectId, startedAt: new Date().toISOString(), finishedAt: null };
+	private beginOperation(kind: GitOperation["kind"], checkoutId: string | null): GitOperation {
+		const op: GitOperation = { id: newId("gop"), kind, state: "running", phase: null, percent: null, error: null, projectId: kind === "clone" || checkoutId === null ? null : parseCheckoutId(checkoutId).projectId, startedAt: new Date().toISOString(), finishedAt: null };
 		this.operations.set(op.id, op);
 		this.pruneOperations();
-		this.publishOperation({ ...op }, projectId);
+		this.publishOperation({ ...op }, checkoutId);
 		return op;
 	}
 
@@ -400,23 +409,23 @@ export class GitService {
 		return { ...op };
 	}
 
-	/** Runs a network/long mutation as a tracked operation (events on `git:<projectId>`); the operation's result is the caller's. */
-	private async tracked<T>(kind: "fetch" | "pull" | "push", projectId: string, run: (report: (p: { phase: string; percent: number | null }) => void) => Promise<T>, failed: (value: T) => string | null = () => null): Promise<T> {
-		const op = this.beginOperation(kind, projectId);
+	/** Runs a network/long mutation as a tracked operation (events on `git:<checkoutId>`); the operation's result is the caller's. */
+	private async tracked<T>(kind: "fetch" | "pull" | "push", checkoutId: string, run: (report: (p: { phase: string; percent: number | null }) => void) => Promise<T>, failed: (value: T) => string | null = () => null): Promise<T> {
+		const op = this.beginOperation(kind, checkoutId);
 		try {
-			const value = await run(this.progressReporter(op, projectId));
-			this.finishOperation(op, { error: failed(value) }, projectId);
+			const value = await run(this.progressReporter(op, checkoutId));
+			this.finishOperation(op, { error: failed(value) }, checkoutId);
 			return value;
 		} catch (err) {
-			this.finishOperation(op, { error: failureText(err) }, projectId);
+			this.finishOperation(op, { error: failureText(err) }, checkoutId);
 			throw err;
 		}
 	}
 
 	// ---------------------------------------------------------------- reads
 
-	diff(projectId: string, query: GitDiffQuery): Promise<GitDiff> {
-		return this.read(projectId, ({ dir }) => {
+	diff(checkoutId: string, query: GitDiffQuery): Promise<GitDiff> {
+		return this.read(checkoutId, ({ dir }) => {
 			const q: GitDiffQuery = { ...query };
 			if (q.path !== undefined) q.path = safeGitPaths([q.path])[0] as string;
 			for (const key of ["commit", "base", "head"] as const) if (q[key] !== undefined) q[key] = safeRef(q[key] as string, key);
@@ -426,69 +435,69 @@ export class GitService {
 		});
 	}
 
-	branches(projectId: string): Promise<GitBranch[]> {
-		return this.read(projectId, ({ dir }) => this.ctx.git.branches(dir));
+	branches(checkoutId: string): Promise<GitBranch[]> {
+		return this.read(checkoutId, ({ dir }) => this.ctx.git.branches(dir));
 	}
 
-	log(projectId: string, o: { ref?: string; limit: number; cursor?: string }): Promise<GitLogPage> {
-		return this.read(projectId, ({ dir }) => this.ctx.git.log(dir, { ...o, ...(o.ref !== undefined && { ref: safeRef(o.ref) }) }));
+	log(checkoutId: string, o: { ref?: string; limit: number; cursor?: string }): Promise<GitLogPage> {
+		return this.read(checkoutId, ({ dir }) => this.ctx.git.log(dir, { ...o, ...(o.ref !== undefined && { ref: safeRef(o.ref) }) }));
 	}
 
-	conflicts(projectId: string, against?: string): Promise<GitConflictReport> {
-		return this.read(projectId, ({ dir }) => this.ctx.git.conflicts(dir, { ...(against !== undefined && { against: safeRef(against, "against") }) }));
+	conflicts(checkoutId: string, against?: string): Promise<GitConflictReport> {
+		return this.read(checkoutId, ({ dir }) => this.ctx.git.conflicts(dir, { ...(against !== undefined && { against: safeRef(against, "against") }) }));
 	}
 
 	// ---------------------------------------------------------------- local mutations
 
-	private async after(projectId: string, dir: string): Promise<GitStatus> {
-		return this.observe(projectId, dir, { publish: "always" });
+	private async after(checkoutId: string, dir: string): Promise<GitStatus> {
+		return this.observe(checkoutId, dir, { publish: "always" });
 	}
 
-	createBranch(projectId: string, o: { name: string; from?: string; checkout: boolean }): Promise<GitStatus> {
-		return this.mutate(projectId, async ({ dir }) => {
+	createBranch(checkoutId: string, o: { name: string; from?: string; checkout: boolean }): Promise<GitStatus> {
+		return this.mutate(checkoutId, async ({ dir }) => {
 			await this.ctx.git.createBranch(dir, { name: safeRef(o.name, "branch name"), checkout: o.checkout, ...(o.from !== undefined && { from: safeRef(o.from, "start point") }) });
-			return this.after(projectId, dir);
+			return this.after(checkoutId, dir);
 		});
 	}
 
-	checkout(projectId: string, branch: string): Promise<GitStatus> {
-		return this.mutate(projectId, async ({ dir }) => {
+	checkout(checkoutId: string, branch: string): Promise<GitStatus> {
+		return this.mutate(checkoutId, async ({ dir }) => {
 			await this.ctx.git.checkout(dir, safeRef(branch, "branch"));
-			return this.after(projectId, dir);
+			return this.after(checkoutId, dir);
 		});
 	}
 
-	stage(projectId: string, paths: string[]): Promise<GitStatus> {
+	stage(checkoutId: string, paths: string[]): Promise<GitStatus> {
 		const safe = safeGitPaths(paths);
-		return this.mutate(projectId, async ({ dir }) => {
+		return this.mutate(checkoutId, async ({ dir }) => {
 			await this.ctx.git.stage(dir, safe);
-			return this.after(projectId, dir);
+			return this.after(checkoutId, dir);
 		});
 	}
 
-	unstage(projectId: string, paths: string[]): Promise<GitStatus> {
+	unstage(checkoutId: string, paths: string[]): Promise<GitStatus> {
 		const safe = safeGitPaths(paths);
-		return this.mutate(projectId, async ({ dir }) => {
+		return this.mutate(checkoutId, async ({ dir }) => {
 			await this.ctx.git.unstage(dir, safe);
-			return this.after(projectId, dir);
+			return this.after(checkoutId, dir);
 		});
 	}
 
 	/** Destructive; the route has already required `confirm: true`. Only the given paths are touched. */
-	discard(projectId: string, paths: string[]): Promise<GitStatus> {
+	discard(checkoutId: string, paths: string[]): Promise<GitStatus> {
 		const safe = safeGitPaths(paths);
-		return this.mutate(projectId, async ({ dir }) => {
+		return this.mutate(checkoutId, async ({ dir }) => {
 			await this.ctx.git.discard(dir, safe);
-			return this.after(projectId, dir);
+			return this.after(checkoutId, dir);
 		});
 	}
 
 	/** `extraTrailers` is for server-internal callers (the task engine adds `Task: <id>`); it is not part of the route body. */
-	commit(projectId: string, body: { message: string; paths?: string[]; sessionId?: string }, extraTrailers?: Record<string, string>): Promise<{ commit: GitCommit; status: GitStatus }> {
+	commit(checkoutId: string, body: { message: string; paths?: string[]; sessionId?: string }, extraTrailers?: Record<string, string>): Promise<{ commit: GitCommit; status: GitStatus }> {
 		const paths = body.paths ? safeGitPaths(body.paths) : undefined;
-		return this.mutate(projectId, async ({ row, dir }) => {
+		return this.mutate(checkoutId, async ({ row, dir }) => {
 			const author = await this.identityOf(row, dir);
-			const agentTrailer = body.sessionId ? { Agent: this.agentTrailer(projectId, body.sessionId) } : undefined;
+			const agentTrailer = body.sessionId ? { Agent: this.agentTrailer(row.id, body.sessionId) } : undefined;
 			const trailers = agentTrailer || extraTrailers ? { ...agentTrailer, ...extraTrailers } : undefined;
 			const commit = await this.ctx.git.commit(dir, {
 				message: body.message,
@@ -496,7 +505,7 @@ export class GitService {
 				...(paths && { paths }),
 				...(trailers && { trailers }),
 			});
-			return { commit, status: await this.after(projectId, dir) };
+			return { commit, status: await this.after(checkoutId, dir) };
 		});
 	}
 
@@ -515,25 +524,25 @@ export class GitService {
 
 	// ---------------------------------------------------------------- network mutations
 
-	fetch(projectId: string): Promise<GitStatus> {
-		return this.mutate(projectId, async ({ row, dir }) => {
+	fetch(checkoutId: string): Promise<GitStatus> {
+		return this.mutate(checkoutId, async ({ row, dir }) => {
 			const auth = await this.authFor(row, dir);
-			await this.tracked("fetch", projectId, (onProgress) => this.ctx.git.fetch(dir, { ...(auth && { auth }), onProgress }));
-			return this.observe(projectId, dir, { publish: "always" });
+			await this.tracked("fetch", checkoutId, (onProgress) => this.ctx.git.fetch(dir, { ...(auth && { auth }), onProgress }));
+			return this.observe(checkoutId, dir, { publish: "always" });
 		});
 	}
 
 	/** Fast-forward only. A refusal (dirty overlap, diverged, ...) is a 409 whose `details` is the full `GitPullResult`; nothing in the tree changed. */
-	pull(projectId: string): Promise<GitPullResult> {
-		return this.mutate(projectId, async ({ row, dir }) => {
+	pull(checkoutId: string): Promise<GitPullResult> {
+		return this.mutate(checkoutId, async ({ row, dir }) => {
 			const auth = await this.authFor(row, dir);
 			const result = await this.tracked(
 				"pull",
-				projectId,
+				checkoutId,
 				() => this.ctx.git.pull(dir, { ...(auth && { auth }) }),
 				(r) => (r.result === "refused" ? r.message : null),
 			);
-			const status = await this.observe(projectId, dir, { publish: "always", ...(result.result === "fast-forward" && { event: "pulled" as const }) });
+			const status = await this.observe(checkoutId, dir, { publish: "always", ...(result.result === "fast-forward" && { event: "pulled" as const }) });
 			const full: GitPullResult = { ...result, status };
 			if (result.result === "refused") throw new ApiError(409, "git_pull_refused", result.message, full);
 			return full;
@@ -541,32 +550,45 @@ export class GitService {
 	}
 
 	/** Never forced. A rejection is a 409 (403/401 for permission/SSO/auth) whose `details` is the full `GitPushResult` with the remote's verbatim message. */
-	push(projectId: string, body: { setUpstream: boolean }): Promise<GitPushResult> {
-		return this.mutate(projectId, async ({ row, dir }) => {
-			const auth = await this.authFor(row, dir);
-			const result = await this.tracked(
-				"push",
-				projectId,
-				() => this.ctx.git.push(dir, { ...(auth && { auth }), setUpstream: body.setUpstream }),
-				(r) => (r.result === "rejected" ? r.message : null),
-			);
-			const status = await this.observe(projectId, dir, { publish: "always", ...(result.result === "pushed" && { event: "pushed" as const }) });
-			const full: GitPushResult = { ...result, status };
-			if (result.result === "rejected") {
-				const http = result.reason === "permission" || result.reason === "sso" ? 403 : result.reason === "auth" ? 401 : 409;
-				throw new ApiError(http, "git_push_rejected", result.message, full);
-			}
-			return full;
+	push(checkoutId: string, body: { setUpstream: boolean }): Promise<GitPushResult> {
+		return this.mutate(checkoutId, (checkout) => this.pushFrom(checkoutId, checkout, body));
+	}
+
+	/**
+	 * Publishes the branch of a worktree that was just created for a shared session whose row does not exist yet (so its checkout id
+	 * cannot be resolved): same push, from `dir`, queued under the checkout id the session will have.
+	 */
+	pushNewWorktree(projectId: string, sharedId: string, dir: string): Promise<GitPushResult> {
+		const checkoutId = checkoutIdOf(projectId, sharedId);
+		return this.guarded(async () => {
+			const { row } = await this.resolve(projectId);
+			return this.serialize(checkoutId, () => this.pushFrom(checkoutId, { row, dir, sharedId, id: checkoutId }, { setUpstream: true }));
 		});
+	}
+
+	private async pushFrom(checkoutId: string, { row, dir }: Checkout, body: { setUpstream: boolean }): Promise<GitPushResult> {
+		const auth = await this.authFor(row, dir);
+		const result = await this.tracked(
+			"push",
+			checkoutId,
+			() => this.ctx.git.push(dir, { ...(auth && { auth }), setUpstream: body.setUpstream }),
+			(r) => (r.result === "rejected" ? r.message : null),
+		);
+		const status = await this.observe(checkoutId, dir, { publish: "always", ...(result.result === "pushed" && { event: "pushed" as const }) });
+		const full: GitPushResult = { ...result, status };
+		if (result.result === "rejected") {
+			const http = result.reason === "permission" || result.reason === "sso" ? 403 : result.reason === "auth" ? 401 : 409;
+			throw new ApiError(http, "git_push_rejected", result.message, full);
+		}
+		return full;
 	}
 
 	// ---------------------------------------------------------------- .clmesh
 
-	clmeshInit(projectId: string): Promise<ClmeshInitResult> {
-		return this.mutate(projectId, async ({ row, dir }) => {
-			const workspaceId = row.workspaceId;
-			const written = await initClmesh(this.ctx.git, dir, { workspaceId, projectId, projectName: row.name });
-			return { ...written, status: await this.after(projectId, dir) };
+	clmeshInit(checkoutId: string): Promise<ClmeshInitResult> {
+		return this.mutate(checkoutId, async ({ row, dir }) => {
+			const written = await initClmesh(this.ctx.git, dir, { workspaceId: row.workspaceId, projectId: row.id, projectName: row.name });
+			return { ...written, status: await this.after(checkoutId, dir) };
 		});
 	}
 
@@ -580,8 +602,8 @@ export class GitService {
 		return { owner: repository.owner, repo: repository.name, accountId };
 	}
 
-	createPullRequest(projectId: string, body: CreatePullRequestInput): Promise<PullRequest> {
-		return this.mutate(projectId, async ({ row, dir }) => {
+	createPullRequest(checkoutId: string, body: CreatePullRequestInput): Promise<PullRequest> {
+		return this.mutate(checkoutId, async ({ row, dir }) => {
 			const { owner, repo, accountId } = this.repoFor(row);
 			const status = await this.ctx.git.status(dir);
 			const head = safeRef(body.head ?? status.branch ?? "", "head branch");
@@ -595,15 +617,15 @@ export class GitService {
 		});
 	}
 
-	listPullRequests(projectId: string, state: "open" | "closed" | "all"): Promise<PullRequest[]> {
-		return this.read(projectId, async ({ row }) => {
+	listPullRequests(checkoutId: string, state: "open" | "closed" | "all"): Promise<PullRequest[]> {
+		return this.read(checkoutId, async ({ row }) => {
 			const { owner, repo, accountId } = this.repoFor(row);
 			return this.ctx.github.listPullRequests(accountId, owner, repo, state);
 		});
 	}
 
-	getPullRequest(projectId: string, number: number): Promise<PullRequest> {
-		return this.read(projectId, async ({ row }) => {
+	getPullRequest(checkoutId: string, number: number): Promise<PullRequest> {
+		return this.read(checkoutId, async ({ row }) => {
 			const { owner, repo, accountId } = this.repoFor(row);
 			return this.ctx.github.getPullRequest(accountId, owner, repo, number);
 		});

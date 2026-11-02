@@ -1,4 +1,4 @@
-import type { GitCommit, GitFileStatus, GitStatus } from "@clam/contracts";
+import { type GitCommit, type GitFileStatus, type GitStatus, parseCheckoutId } from "@clam/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { FolderGit2, GitCommitHorizontal, GitPullRequest, History, RefreshCw, Settings2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -104,7 +104,7 @@ function defaultView(status: GitStatus): DiffView {
 
 function Workbench({ projectId, sessionId, status, className }: GitWorkbenchProps & { status: GitStatus }) {
 	const qc = useQueryClient();
-	const project = useProject(projectId).data;
+	const project = useProject(parseCheckoutId(projectId).projectId).data;
 	const bp = useBreakpoint();
 	const mobile = bp === "mobile";
 	const [boxRef, width] = useElementWidth();

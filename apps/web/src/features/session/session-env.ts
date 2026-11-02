@@ -6,8 +6,9 @@ import type { AssetResolver } from "@/components/rich/assets";
  * `openFile` is a stable callback (it opens a project file in the Files panel).
  */
 export interface SessionEnv {
-	projectId: string;
-	/** Resolves relative markdown paths (`![chart](out/chart.png)`) against the project folder. Stable per project. */
+	/** The folder the session works in (`AgentSession.checkoutId`): the project's own, or the worktree of the shared session it drives. */
+	checkoutId: string;
+	/** Resolves relative markdown paths (`![chart](out/chart.png)`) against the session's folder. Stable per folder. */
 	assets: AssetResolver;
 	openFile: (path: string) => void;
 	agentName: string;

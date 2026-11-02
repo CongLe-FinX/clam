@@ -4,6 +4,7 @@ export type GitEngineErrorCode =
 	| "invalid_ref"
 	| "dest_not_empty"
 	| "would_overwrite"
+	| "branch_in_worktree"
 	| "dirty_worktree"
 	| "auth_failed"
 	| "network"
@@ -47,6 +48,9 @@ export function stripUrlCredentials(url: string): string {
 	return url.replace(USERINFO, "$1");
 }
 
+/** `git switch`/`git worktree add` refusing a branch another working tree holds ("already checked out at" / "already used by worktree at"). */
+export const BRANCH_IN_WORKTREE = /already (?:checked out|used by worktree) at/i;
+
 /** Maps git stderr to the closest engine error code. */
 export function classifyFailure(stderr: string): GitEngineErrorCode {
 	if (/not a git repository/i.test(stderr)) return "not_a_repo";
@@ -63,6 +67,7 @@ export function classifyFailure(stderr: string): GitEngineErrorCode {
 	)
 		return "network";
 	if (/would be overwritten/i.test(stderr)) return "would_overwrite";
+	if (BRANCH_IN_WORKTREE.test(stderr)) return "branch_in_worktree";
 	if (/unknown revision|not a valid (?:ref|object name|branch name)|invalid reference|couldn't find remote ref|bad revision/i.test(stderr))
 		return "invalid_ref";
 	return "failed";

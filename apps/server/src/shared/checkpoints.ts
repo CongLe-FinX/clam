@@ -1,13 +1,14 @@
 import { rm } from "node:fs/promises";
 import type { wire } from "@clam/agent-network";
 import { type Checkpoint, type SessionEvent, i18nMsg } from "@clam/contracts";
-import { agentSessions, projects } from "@clam/database";
+import { agentSessions } from "@clam/database";
 import { eq } from "drizzle-orm";
 import { ApiError } from "../http/errors.ts";
 import { KeyedLock, errorText } from "../network/util.ts";
 import type { CheckpointApi, SharedHub } from "./hub.ts";
 import { downloadSnapshot, SnapshotFiles, SnapshotRejectedError } from "./snapshots.ts";
 import type { CheckpointRow, SharedRow } from "./store.ts";
+import { ensureSharedCheckout, type SharedCheckout } from "./worktrees.ts";
 
 /** How many snapshots of one shared session a node keeps on disk (the newest); older files are deleted, their rows stay. */
 const KEEP_SNAPSHOTS = 3;
@@ -201,15 +202,22 @@ export class CheckpointService implements CheckpointApi {
 		return this.hub.views.checkpoint(row);
 	}
 
-	/** Commit everything in the working tree to the shared branch and push it. Problems become part of the checkpoint note. */
+	/** Commit everything in the shared session's working tree to the shared branch and push it. Problems become part of the checkpoint note. */
 	private async commitAndPush(shared: SharedRow, seq: number, note: string | undefined): Promise<GitOutcome> {
-		const projectId = shared.localProjectId as string;
 		const sessionId = shared.localSessionId as string;
 		const { gitService } = this.ctx;
 		const outcome: GitOutcome = { commit: null, pushed: false, problems: [] };
+		let checkout: SharedCheckout;
+		try {
+			checkout = await ensureSharedCheckout(this.ctx, shared);
+		} catch (error) {
+			outcome.problems.push(`could not prepare the working tree of the shared session: ${errorText(error, 160)}`);
+			return outcome;
+		}
+		const checkoutId = checkout.checkoutId;
 		let status;
 		try {
-			status = await gitService.status(projectId);
+			status = await gitService.status(checkoutId);
 		} catch (error) {
 			outcome.problems.push(`git: ${errorText(error, 160)}`);
 			return outcome;
@@ -220,11 +228,15 @@ export class CheckpointService implements CheckpointApi {
 		}
 		outcome.commit = status.headSha;
 		if (status.operation) {
-			outcome.problems.push(`a ${status.operation} is in progress in the project, so nothing was committed`);
+			outcome.problems.push(`a ${status.operation} is in progress in the working tree, so nothing was committed`);
 			return outcome;
 		}
 		try {
-			if (status.branch !== shared.branch) status = await gitService.checkout(projectId, shared.branch as string);
+			if (status.branch !== shared.branch) {
+				// The project folder of a share that predates worktrees is never switched.
+				if (!checkout.worktree) throw new Error(`the project folder is on ${status.branch ?? "a detached HEAD"}`);
+				status = await gitService.checkout(checkoutId, shared.branch as string);
+			}
 		} catch (error) {
 			outcome.problems.push(`could not switch to ${shared.branch}: ${errorText(error, 160)}`);
 			return outcome;
@@ -232,10 +244,10 @@ export class CheckpointService implements CheckpointApi {
 		try {
 			// A staged rename carries its old path, which `git add` cannot address any more; as delete + add both paths can be committed.
 			const renamed = status.files.flatMap((f) => (f.origPath ? [f.path, f.origPath] : []));
-			if (renamed.length > 0) status = await gitService.unstage(projectId, renamed);
+			if (renamed.length > 0) status = await gitService.unstage(checkoutId, renamed);
 			if (status.files.length > 0) {
 				const message = `${shared.title} — checkpoint ${seq}${note?.trim() ? `: ${note.trim()}` : ""}`;
-				const committed = await gitService.commit(projectId, { message, paths: status.files.map((f) => f.path), sessionId }, { Session: shared.id, Epoch: String(shared.epoch) });
+				const committed = await gitService.commit(checkoutId, { message, paths: status.files.map((f) => f.path), sessionId }, { Session: shared.id, Epoch: String(shared.epoch) });
 				status = committed.status;
 			}
 		} catch (error) {
@@ -245,7 +257,7 @@ export class CheckpointService implements CheckpointApi {
 		}
 		outcome.commit = status.headSha;
 		try {
-			const pushed = await gitService.push(projectId, { setUpstream: true });
+			const pushed = await gitService.push(checkoutId, { setUpstream: true });
 			outcome.pushed = true;
 			outcome.commit = pushed.status.headSha;
 		} catch (error) {
@@ -526,11 +538,5 @@ export class CheckpointService implements CheckpointApi {
 		}, timeoutMs);
 		this.waiters.add(waiter);
 		return promise;
-	}
-
-	/** Local project path of a shared session (used by takeover for `omp session unpack --cwd`). */
-	projectPath(shared: SharedRow): string | null {
-		if (!shared.localProjectId) return null;
-		return this.ctx.db.select({ path: projects.path }).from(projects).where(eq(projects.id, shared.localProjectId)).get()?.path ?? null;
 	}
 }

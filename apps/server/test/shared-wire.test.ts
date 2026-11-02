@@ -19,6 +19,7 @@ import {
 	transcriptTexts,
 	waitForShared,
 	whenSettled,
+	worktreeOf,
 	type GitConfigIsolation,
 	type SharedPair,
 } from "./shared-fixtures.ts";
@@ -698,8 +699,8 @@ describe("snapshot download", () => {
 		const everything = git(pair.origin, "log", "--all", "--name-only", "--format=").split("\n").filter(Boolean);
 		expect(everything.filter((f) => /\.tar$/.test(f))).toEqual([]);
 		expect(() => git(pair.origin, "grep", "-q", token, branch)).toThrow();
-		expect(git(pair.workA, "ls-files").split("\n").filter((f) => f.endsWith(".tar"))).toEqual([]);
-		expect(git(pair.workA, "status", "--porcelain").trim()).toBe("");
+		expect(git(worktreeOf(pair.a, shared.id), "ls-files").split("\n").filter((f) => f.endsWith(".tar"))).toEqual([]);
+		expect(git(worktreeOf(pair.a, shared.id), "status", "--porcelain").trim()).toBe("");
 		// the transcript text itself is untouched on both sides
 		expect((await transcript(pair.a, sessionId)).some((m) => textOf(m).includes(token))).toBe(true);
 	});

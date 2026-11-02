@@ -19,16 +19,19 @@ import {
 	type SubagentsPage,
 	type UiResponseBody,
 	type PromptBody,
+	checkoutIdOf as joinCheckoutId,
 	i18nMsg,
 } from "@clam/contracts";
 import type { z } from "zod";
-import { agentSessions, agents, nodeEvents, projects, providerUsage } from "@clam/database";
+import { agentSessions, agents, nodeEvents, projects, providerUsage, sharedSessions } from "@clam/database";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
 import { CHAT_RENDERING_GUIDANCE } from "./agent-guidance.ts";
 import { newId } from "./ids.ts";
 import { deleteManagedFolder } from "./project-folders.ts";
+import { resolveCheckout } from "./checkouts.ts";
+import { drivesGitShare, ensureSharedCheckout, hasWorktree, removeWorktree } from "../shared/worktrees.ts";
 
 type SessionRow = typeof agentSessions.$inferSelect;
 
@@ -221,6 +224,52 @@ export class SessionService {
 		return row;
 	}
 
+	/** The git-mode shared session this node drives, when `row` is the session that works for it; undefined for every other session. */
+	private drivenShare(row: SessionRow): typeof sharedSessions.$inferSelect | undefined {
+		if (!row.sharedSessionId || this.isViewed(row)) return undefined;
+		const shared = this.ctx.db.select().from(sharedSessions).where(eq(sharedSessions.id, row.sharedSessionId)).get();
+		return shared && drivesGitShare(shared) && shared.localProjectId === row.projectId ? shared : undefined;
+	}
+
+	/**
+	 * Which folder the session works in, as a checkout id: `<projectId>~<sharedId>` for the session that drives a git-mode shared session
+	 * whose worktree exists on this node, otherwise `<projectId>` (the project's own folder). The same rule decides the runtime's cwd.
+	 */
+	checkoutIdOf(row: SessionRow): string {
+		const shared = this.drivenShare(row);
+		return shared && hasWorktree(this.ctx, shared.id) ? joinCheckoutId(row.projectId, shared.id) : row.projectId;
+	}
+
+	checkoutIdOfSession(id: string): string | null {
+		const row = this.find(id);
+		return row ? this.checkoutIdOf(row) : null;
+	}
+
+	/**
+	 * The directory the session works in. A driver of a share made before worktrees existed gets its worktree created here, on demand;
+	 * when that is impossible the project folder is used as it was (a problem is logged, never thrown).
+	 */
+	async workdir(row: SessionRow): Promise<{ dir: string; checkoutId: string }> {
+		const shared = this.drivenShare(row);
+		if (shared) {
+			try {
+				const checkout = await ensureSharedCheckout(this.ctx, shared);
+				if (checkout.worktree) return { dir: (await resolveCheckout(this.ctx, checkout.checkoutId)).dir, checkoutId: checkout.checkoutId };
+			} catch (error) {
+				this.ctx.log.warn({ err: error instanceof Error ? error.message : String(error), sessionId: row.id, sharedId: shared.id }, "could not prepare the worktree of a shared session; working in the project folder");
+			}
+		}
+		const project = this.ctx.db.select().from(projects).where(eq(projects.id, row.projectId)).get();
+		if (!project) throw ApiError.notFound("Project");
+		return { dir: project.path, checkoutId: project.id };
+	}
+
+	/** The session's folder may have changed (it started driving a shared session): publish it and move an idle runtime there. */
+	async refreshWorkdir(id: string): Promise<void> {
+		this.publishUpsert(id);
+		if (this.ctx.runtime.get(id)) await this.runtime(id);
+	}
+
 	toSession(row: SessionRow): AgentSession {
 		return {
 			id: row.id,
@@ -236,6 +285,7 @@ export class SessionService {
 			archived: row.archived,
 			kind: row.kind === "mirror" ? "mirror" : "local",
 			sharedSessionId: row.sharedSessionId,
+			checkoutId: this.checkoutIdOf(row),
 			movedTo: row.movedTo ?? null,
 			pendingRequests: this.isViewed(row) ? (this.views?.pendingRequests(row.id).length ?? 0) : (this.ctx.runtime.get(row.id)?.pendingUiRequests().length ?? 0),
 			createdAt: row.createdAt,
@@ -442,8 +492,20 @@ export class SessionService {
 		const dir = path.resolve(row.sessionDir);
 		const rel = path.relative(this.sessionsRoot, dir);
 		if (rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel)) await rm(dir, { recursive: true, force: true });
+		await this.releaseSharedWorktree(row.sharedSessionId);
 		await this.releaseChatProject(row.projectId, options.keepFiles === true);
 		this.ctx.bus.publish("sessions", { type: "remove", sessionId: id });
+	}
+
+	/** The worktree of a shared session goes (never forced, never its branch) once no session of this node that works in it is left. */
+	private async releaseSharedWorktree(sharedId: string | null): Promise<void> {
+		if (!sharedId || !hasWorktree(this.ctx, sharedId)) return;
+		const remaining = this.ctx.db
+			.select({ id: agentSessions.id })
+			.from(agentSessions)
+			.where(and(eq(agentSessions.sharedSessionId, sharedId), eq(agentSessions.kind, "local")))
+			.get();
+		if (!remaining) await removeWorktree(this.ctx, sharedId);
 	}
 
 	private async releaseChatProject(projectId: string, keepFiles: boolean): Promise<void> {
@@ -465,12 +527,14 @@ export class SessionService {
 	async runtime(id: string): Promise<RuntimeSession> {
 		const row = this.get(id);
 		if (this.isViewed(row)) throw this.readOnlyError(row);
-		const project = this.ctx.db.select().from(projects).where(eq(projects.id, row.projectId)).get();
-		if (!project) throw ApiError.notFound("Project");
+		const { dir: cwd } = await this.workdir(row);
 		await mkdir(row.sessionDir, { recursive: true });
+		// A live process keeps the directory it started in: when the session's folder changed (it became a shared session's driver) an idle one restarts there.
+		const live = this.ctx.runtime.get(id);
+		if (live && live.spec.cwd !== cwd && !this.isBusy(id)) await this.ctx.runtime.stop(id);
 		const session = await this.ctx.runtime.open({
 			sessionId: id,
-			cwd: project.path,
+			cwd,
 			sessionDir: row.sessionDir,
 			// Only a brand-new conversation takes the requested model; a resumed one keeps what it was using.
 			model: row.runtimeSessionId ? null : row.model,

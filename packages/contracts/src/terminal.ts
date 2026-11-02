@@ -28,7 +28,7 @@ export const TerminalSession = z.object({
 	title: z.string(),
 	shell: z.string(),
 	cwd: z.string(),
-	/** Set when the terminal was opened in a project (or chat) folder. */
+	/** Set when the terminal was opened in a project (or chat) folder or a shared session's worktree: the checkout id it was created with. */
 	projectId: z.string().nullable(),
 	cols: z.number().int(),
 	rows: z.number().int(),
@@ -61,7 +61,7 @@ export const TerminalInfo = z.object({
 export type TerminalInfo = z.infer<typeof TerminalInfo>;
 
 export const CreateTerminalBody = z.object({
-	/** Working directory = the project's (or chat's) folder; default is the user's home. */
+	/** Working directory = the project's (or chat's) folder, or `<projectId>~<sharedSessionId>` for a shared session's worktree; default is the user's home. */
 	projectId: z.string().min(1).optional(),
 	/** One of `TerminalInfo.shells`; default is the user's login shell. */
 	shell: z.string().min(1).max(512).optional(),

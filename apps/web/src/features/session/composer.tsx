@@ -89,8 +89,8 @@ export function Composer({
 	const [sending, setSending] = useState(false);
 	const [paste, setPaste] = useState<{ start: number; text: string; stats: LargePaste } | null>(null);
 	const ref = useRef<HTMLTextAreaElement>(null);
-	const { projectId } = useSessionEnv();
-	const files = useComposerFiles(projectId, draft.files);
+	const { checkoutId } = useSessionEnv();
+	const files = useComposerFiles(checkoutId, draft.files);
 	const vision = useVisionInput(stream);
 	const fileInput = useRef<HTMLInputElement>(null);
 	const { dragging, handlers: drop } = useFileDrop(files.add);
@@ -158,7 +158,7 @@ export function Composer({
 			let taken: ComposerFile[] = [];
 			try {
 				const ready = files.items.filter((i) => i.status === "ready");
-				const seen = vision.supported ? await visionImages(ready, projectId) : new Map<number, PromptImage>();
+				const seen = vision.supported ? await visionImages(ready, checkoutId) : new Map<number, PromptImage>();
 				if (vision.supported && ready.some((f) => f.kind === "image" && isVisionImage({ type: f.type }) && !seen.has(f.id))) {
 					toast.warning(t("Some pictures could not be prepared for the model; only their file paths are sent."));
 				}
@@ -184,7 +184,7 @@ export function Composer({
 				setSending(false);
 			}
 		},
-		[value, readyCount, sendBlocked, files, vision.supported, projectId, sessionId, stream],
+		[value, readyCount, sendBlocked, files, vision.supported, checkoutId, sessionId, stream],
 	);
 
 	const attachPasteAsFile = () => {

@@ -1,7 +1,7 @@
 import { lstat, readdir, realpath, stat } from "node:fs/promises";
 import path from "node:path";
 import type { RuntimeStatus, SessionEvent, TurnOutputFile, TurnOutputs } from "@clam/contracts";
-import { agentSessions, projects, turnOutputs } from "@clam/database";
+import { agentSessions, turnOutputs } from "@clam/database";
 import { DEFAULT_EXCLUDES, IgnoreMatcher, parseIgnoreLines } from "@clam/workspace-files";
 import { asc, desc, eq } from "drizzle-orm";
 import type { ServerContext } from "../context.ts";
@@ -165,9 +165,8 @@ function toRow(row: typeof turnOutputs.$inferSelect): TurnOutputs {
 /** One agent turn in progress: from `agent_start` until `agent_end`. */
 interface OpenTurn {
 	startedAt: number;
+	/** Checkout id of the folder the turn ran in (`<projectId>` or `<projectId>~<sharedId>`): what opens the files later. */
 	projectId: string;
-	/** Project folder as configured (resolved to its real path once the turn starts). */
-	projectPath: string;
 	root: Promise<string | null>;
 	before: Promise<Snapshot | null>;
 	explicit: Set<string>;
@@ -289,19 +288,17 @@ export class TurnOutputService {
 	private begin(sessionId: string): void {
 		const state = this.state(sessionId);
 		if (state.open) return; // a continuation of the turn that is open
-		const row = this.ctx.db
-			.select({ kind: agentSessions.kind, projectId: projects.id, projectPath: projects.path })
-			.from(agentSessions)
-			.innerJoin(projects, eq(projects.id, agentSessions.projectId))
-			.where(eq(agentSessions.id, sessionId))
-			.get();
+		const row = this.ctx.db.select().from(agentSessions).where(eq(agentSessions.id, sessionId)).get();
 		// A mirror shows another node's session: it has no folder of its own to watch.
 		if (!row || row.kind === "mirror") return;
-		const root = realpath(row.projectPath).catch(() => null);
+		const root = this.ctx.sessions
+			.workdir(row)
+			.then((w) => realpath(w.dir))
+			.catch(() => null);
 		// Started now, not when somebody asks: the walk races the agent's first write, not the user's patience.
 		const before = root.then((r) => (r === null ? null : snapshotFolder(r, this.snapshotLimits)));
 		before.catch(() => undefined);
-		state.open = { startedAt: Date.now(), projectId: row.projectId, projectPath: row.projectPath, root, before, explicit: new Set(), anchor: null };
+		state.open = { startedAt: Date.now(), projectId: this.ctx.sessions.checkoutIdOf(row), root, before, explicit: new Set(), anchor: null };
 	}
 
 	private async noteTool(open: OpenTurn, toolName: string, args: unknown): Promise<void> {

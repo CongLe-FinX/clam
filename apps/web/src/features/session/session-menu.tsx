@@ -17,7 +17,7 @@ const DISMISS_PX = 72;
  * does not fight it for focus.
  */
 export function SessionMenu({
-	projectId,
+	checkoutId,
 	canAdd,
 	readOnly,
 	teamUnread,
@@ -29,7 +29,7 @@ export function SessionMenu({
 	onToggleRight,
 	onDelete,
 }: {
-	projectId: string;
+	checkoutId: string;
 	canAdd: boolean;
 	readOnly: boolean;
 	teamUnread: number;
@@ -113,7 +113,7 @@ export function SessionMenu({
 					{canAdd ? <Row icon={<UserPlus />} label={t("Add agent")} onClick={run(onAddAgent)} /> : null}
 					{canAdd ? <Row icon={<ArrowRightLeft />} label={t("Hand over…")} onClick={run(onHandover)} /> : null}
 					{readOnly ? null : (
-						<Link to="/terminal" search={{ project: projectId }} onClick={() => setOpen(false)} className={item}>
+						<Link to="/terminal" search={{ project: checkoutId }} onClick={() => setOpen(false)} className={item}>
 							<Terminal />
 							<span className="flex-1">{t("Open terminal here")}</span>
 						</Link>

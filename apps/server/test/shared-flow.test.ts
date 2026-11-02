@@ -18,6 +18,7 @@ import {
 	transcriptTexts,
 	waitForShared,
 	whenSettled,
+	worktreeOf,
 	type GitConfigIsolation,
 	type SharedPair,
 } from "./shared-fixtures.ts";
@@ -47,7 +48,9 @@ describe("sharing a session and joining it", () => {
 		expect(shared).toMatchObject({ epoch: 1, localRole: "driver", localSessionId: sessionId, localProjectId: pair.projectA.id, driverNodeId: pair.aId, title: "Add notes" });
 		expect(shared.repo).toEqual({ url: "https://github.com/acme/demo", branch: expect.stringMatching(/^clam\/shared\/add-notes-[a-z0-9]{6}$/) });
 		expect(remoteBranches(pair.origin)).toContain(shared.repo?.branch);
-		expect(git(pair.workA, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo?.branch);
+		// the project folder keeps its branch; the shared branch lives in the session's own worktree
+		expect(git(pair.workA, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
+		expect(git(worktreeOf(pair.a, shared.id), "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(shared.repo?.branch);
 		expect((await sessionOn(pair.a, sessionId)).sharedSessionId).toBe(shared.id);
 
 		// B: participant, with a read-only mirror and its own briefed participant session in its clone

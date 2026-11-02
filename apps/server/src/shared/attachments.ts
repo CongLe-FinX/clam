@@ -7,7 +7,7 @@ import { pipeline } from "node:stream/promises";
 import type { wire } from "@clam/agent-network";
 import { ATTACHMENT_MAX_BYTES, type FileEntry, i18nMsg, PROMPT_IMAGES_MAX_BASE64_BYTES, PROMPT_IMAGES_MAX_COUNT, type PromptImage, type SaveAttachmentBody, type SharedAttachment } from "@clam/contracts";
 import type { z } from "zod";
-import { agentSessions, projects } from "@clam/database";
+import { agentSessions } from "@clam/database";
 import { eq } from "drizzle-orm";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { ApiError } from "../http/errors.ts";
@@ -16,6 +16,7 @@ import { errorText } from "../network/util.ts";
 import { sniffImageMime } from "../services/prompt-images.ts";
 import { copyIntoFolder, bodyStream, limitBytes, refuseGitDir } from "../services/file-writes.ts";
 import { resolveInsideRoot } from "../services/files.ts";
+import { checkoutFolder } from "../services/checkouts.ts";
 import type { AttachmentApi, SharedHub } from "./hub.ts";
 import { downloadSnapshot } from "./snapshots.ts";
 import { newAttachmentId, type AttachmentRow } from "./store.ts";
@@ -346,24 +347,20 @@ export class AttachmentService implements AttachmentApi {
 
 	// ------------------------------------------------------------------ into project folders
 
-	private projectOf(sessionId: string): { id: string; path: string } {
-		const project = this.ctx.db
-			.select({ id: projects.id, path: projects.path })
-			.from(agentSessions)
-			.innerJoin(projects, eq(projects.id, agentSessions.projectId))
-			.where(eq(agentSessions.id, sessionId))
-			.get();
-		if (!project) throw ApiError.notFound("Project");
-		return project;
+	/** The folder the session's agent works in (the shared session's worktree for its driving session, else the project's folder). */
+	private async projectOf(sessionId: string): Promise<{ path: string }> {
+		const row = this.ctx.db.select().from(agentSessions).where(eq(agentSessions.id, sessionId)).get();
+		if (!row) throw ApiError.notFound("Project");
+		return { path: (await this.ctx.sessions.workdir(row)).dir };
 	}
 
 	async save(sharedId: string, attachmentId: string, body: z.infer<typeof SaveAttachmentBody>): Promise<FileEntry> {
 		const row = this.requireRow(sharedId, attachmentId);
-		const project = this.ctx.db.select({ path: projects.path }).from(projects).where(eq(projects.id, body.projectId)).get();
-		if (!project) throw ApiError.notFound("Project");
+		// `projectId` is a checkout id: a project id, or the worktree of a shared session.
+		const folder = await checkoutFolder(this.ctx, body.projectId);
 		await this.ensureStored(row);
-		const rel = await copyIntoFolder(project.path, body.path ?? `attachments/${safeFileName(row.name)}`, this.blobPath(row.sha256));
-		const info = await stat((await resolveInsideRoot(project.path, rel)).abs);
+		const rel = await copyIntoFolder(folder, body.path ?? `attachments/${safeFileName(row.name)}`, this.blobPath(row.sha256));
+		const info = await stat((await resolveInsideRoot(folder, rel)).abs);
 		return { name: path.posix.basename(rel), path: rel, kind: "file", size: info.size, modifiedAt: info.mtime.toISOString() };
 	}
 
@@ -389,7 +386,7 @@ export class AttachmentService implements AttachmentApi {
 	}
 
 	async placeInFolder(sessionId: string, files: readonly AttachmentRow[]): Promise<Array<{ file: AttachmentRow; relativePath: string | null }>> {
-		const project = this.projectOf(sessionId);
+		const project = await this.projectOf(sessionId);
 		const placed: Array<{ file: AttachmentRow; relativePath: string | null }> = [];
 		for (const file of files) {
 			// Already in this folder (injected before, or the agent itself shared it from here): reuse, never copy twice.
@@ -419,7 +416,7 @@ export class AttachmentService implements AttachmentApi {
 	 */
 	async registerFromFolder(sharedId: string, sessionId: string, wantedPath: string, options: { maxBytes?: number; skipIfPosted?: boolean } = {}): Promise<AttachmentRow | null> {
 		const maxBytes = options.maxBytes ?? ATTACHMENT_MAX_BYTES;
-		const project = this.projectOf(sessionId);
+		const project = await this.projectOf(sessionId);
 		const root = await resolveInsideRoot(project.path, ".");
 		// Agents think in absolute paths too: accept one when it lies inside the working folder.
 		const wanted = path.isAbsolute(wantedPath) ? path.relative(root.abs, wantedPath) : wantedPath;

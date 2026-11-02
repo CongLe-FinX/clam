@@ -1,4 +1,4 @@
-import { type GitStatus, type PullRequest, routes } from "@clam/contracts";
+import { type GitStatus, parseCheckoutId, type PullRequest, routes } from "@clam/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, CircleDashed, ExternalLink, GitMerge, GitPullRequest, GitPullRequestClosed, GitPullRequestDraft, Plus, RefreshCw, UploadCloud, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -187,7 +187,7 @@ export function CreatePullRequestDialog({
 	onCreated: (pr: PullRequest) => void;
 }) {
 	const qc = useQueryClient();
-	const project = useProject(projectId).data;
+	const project = useProject(parseCheckoutId(projectId).projectId).data;
 	const branches = useBranches(projectId);
 	const head = status.branch;
 	const defaultBase = project?.repository?.defaultBranch ?? "main";

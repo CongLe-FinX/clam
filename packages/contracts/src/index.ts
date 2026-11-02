@@ -1,5 +1,6 @@
 export * from "./access.ts";
 export * from "./browser.ts";
+export * from "./checkout.ts";
 export * from "./common.ts";
 export * from "./context.ts";
 export * from "./files.ts";

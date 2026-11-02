@@ -12,6 +12,8 @@ import { injectIntoSession } from "../tasks/session-injection.ts";
 import type { EpochApi, SharedHub } from "./hub.ts";
 import type { CheckpointRow, SharedRow } from "./store.ts";
 import { postCheckpointTail } from "./tail.ts";
+import { ensureSharedCheckout, hasWorktree, worktreeDir, type SharedCheckout } from "./worktrees.ts";
+import { resolveCheckout } from "../services/checkouts.ts";
 import { FaultInjected } from "../handoff/fault.ts";
 import { withSetupSection } from "../handoff/session-kind.ts";
 
@@ -138,11 +140,11 @@ export class EpochService implements EpochApi {
 		const filesMode = shared.vcs === "files";
 		if (filesMode && !held.filesPath) throw new ApiError(409, "no_files", i18nMsg("No folder bundle has been received for that checkpoint yet; wait for the driver's next checkpoint."));
 		// Git mode: align the clone with the shared branch. Files mode: restore the folder from the checkpoint's bundle (refuses on local edits unless forced; nothing is deleted).
-		const aligned = filesMode ? { headCommit: null, treeNote: null } : await this.alignWorkingTree(shared, held);
+		const aligned: { headCommit: string | null; treeNote: string | null; dir: string } = filesMode ? { headCommit: null, treeNote: null, dir: project.path } : await this.alignWorkingTree(shared, held, project);
 		const restored = filesMode ? await this.hub.files.restore(shared, held, { force: options.force, reason: options.reason }) : null;
 		let sessionFile: string;
 		try {
-			sessionFile = (await this.ctx.ompCli.sessionUnpack(this.hub.checkpoints.snapshotFile(sharedId, held.seq).path, project.path)).sessionFile;
+			sessionFile = (await this.ctx.ompCli.sessionUnpack(this.hub.checkpoints.snapshotFile(sharedId, held.seq).path, aligned.dir)).sessionFile;
 		} catch (error) {
 			if (error instanceof AgentRuntimeError && error.code === "invalid_archive") throw new ApiError(409, "snapshot_invalid", i18nMsg("The session snapshot is not usable: {error}", { error: error.message }));
 			throw error;
@@ -175,6 +177,8 @@ export class EpochService implements EpochApi {
 			this.store.updateParticipant(sharedId, shared.driverNodeId, { role: "participant" });
 			return this.store.participants(sharedId).filter((p) => p.nodeId !== this.self && p.state === "active");
 		});
+		// The adopted session works in the worktree as of the role change above: tell the clients its folder.
+		await this.ctx.sessions.refreshWorkdir(session.id);
 		const notice: wire.SharedDriverNotice = {
 			epoch,
 			reason: options.reason,
@@ -216,7 +220,7 @@ export class EpochService implements EpochApi {
 		});
 		// The continuation note opens the continued conversation. This node's dependency setup runs first (it may wait for the user's approval), so
 		// the note goes out in the background: the takeover itself does not wait, and failing to send it must not undo it.
-		this.continueSession({ shared, sessionId: session.id, projectId: project.id, dir: project.path, agentName: agent?.name ?? null, fromAgentName: oldDriverAgent, epoch, reason: options.reason, headCommit: aligned.headCommit, text });
+		this.continueSession({ shared, sessionId: session.id, projectId: project.id, dir: aligned.dir, agentName: agent?.name ?? null, fromAgentName: oldDriverAgent, epoch, reason: options.reason, headCommit: aligned.headCommit, text });
 	}
 
 	/**
@@ -287,37 +291,53 @@ export class EpochService implements EpochApi {
 		}
 	}
 
-	/** Fetch, check out the shared branch and fast-forward it. Refuses (409) when local changes overlap; never discards anything. */
-	private async alignWorkingTree(shared: SharedRow, held: CheckpointRow): Promise<{ headCommit: string | null; treeNote: string | null }> {
-		const projectId = shared.localProjectId as string;
+	/**
+	 * Fetch, then put the shared branch into this node's own worktree for the shared session (created tracking `origin/<branch>`, or the
+	 * existing one switched to the branch) and fast-forward it there. The project folder is never switched. Refuses (409) when local
+	 * changes of the worktree overlap; never discards anything.
+	 */
+	private async alignWorkingTree(shared: SharedRow, held: CheckpointRow, project: typeof projects.$inferSelect): Promise<{ headCommit: string | null; treeNote: string | null; dir: string }> {
+		const projectId = project.id;
 		const { gitService } = this.ctx;
-		if (!held.commit) return { headCommit: null, treeNote: "The checkpoint recorded no commit, so the working tree was left as it is." };
-		let status = await gitService.status(projectId);
-		if (!status.isRepo) throw new ApiError(409, "not_a_git_repo", i18nMsg("The local clone is not a git repository"));
-		if (status.operation) throw new ApiError(409, "git_operation_in_progress", i18nMsg("A {operation} is in progress in the local clone; finish or abort it, then continue.", { operation: status.operation }));
+		if (!held.commit) {
+			const dir = hasWorktree(this.ctx, shared.id) ? worktreeDir(this.ctx, shared.id) : project.path;
+			return { headCommit: null, treeNote: "The checkpoint recorded no commit, so the working tree was left as it is.", dir };
+		}
+		const root = await gitService.status(projectId);
+		if (!root.isRepo) throw new ApiError(409, "not_a_git_repo", i18nMsg("The local clone is not a git repository"));
 		try {
 			await gitService.fetch(projectId);
 		} catch (error) {
 			throw new ApiError(409, "git_fetch_failed", i18nMsg("Could not fetch the repository (is origin reachable?): {error}", { error: errorText(error, 200) }));
 		}
-		if (status.branch !== shared.branch) {
+		let checkout: SharedCheckout;
+		try {
+			checkout = await ensureSharedCheckout(this.ctx, shared);
+		} catch (error) {
+			throw new ApiError(409, "git_checkout_failed", i18nMsg("Could not check out {branch}: {error} Local changes were left untouched.", { branch: String(shared.branch), error: errorText(error, 300) }));
+		}
+		let status = await gitService.status(checkout.checkoutId);
+		if (status.operation) throw new ApiError(409, "git_operation_in_progress", i18nMsg("A {operation} is in progress in the local clone; finish or abort it, then continue.", { operation: status.operation }));
+		if (status.branch !== shared.branch && checkout.worktree) {
 			try {
-				status = await gitService.checkout(projectId, shared.branch as string);
+				status = await gitService.checkout(checkout.checkoutId, shared.branch as string);
 			} catch (error) {
 				throw new ApiError(409, "git_checkout_failed", i18nMsg("Could not check out {branch}: {error} Local changes were left untouched.", { branch: String(shared.branch), error: errorText(error, 300) }));
 			}
 		}
 		try {
-			status = (await gitService.pull(projectId)).status;
+			status = (await gitService.pull(checkout.checkoutId)).status;
 		} catch (error) {
 			const details = error instanceof ApiError ? error.details : undefined;
 			const noUpstream = typeof details === "object" && details !== null && "reason" in details && details.reason === "no-upstream";
 			if (!noUpstream) throw error;
 		}
+		const dir = checkout.worktree ? (await resolveCheckout(this.ctx, checkout.checkoutId)).dir : project.path;
 		const head = status.headSha;
-		if (head === held.commit) return { headCommit: head, treeNote: null };
+		if (head === held.commit) return { headCommit: head, treeNote: null, dir };
 		return {
 			headCommit: head,
+			dir,
 			treeNote: held.pushed
 				? `The branch ${shared.branch} is at ${head?.slice(0, 12) ?? "?"}, not exactly at the checkpoint commit ${held.commit.slice(0, 12)} (it moved on after the snapshot).`
 				: `The checkpoint commit ${held.commit.slice(0, 12)} was never pushed, so it is not in this clone; the branch is at ${head?.slice(0, 12) ?? "?"}. Files changed after the previous push may be missing.`,
@@ -490,13 +510,16 @@ export class EpochService implements EpochApi {
 		});
 	}
 
-	/** Commit uncommitted changes and push unpushed commits to `clam/rescue/<sharedId>-<node>`; null when there was nothing to save. */
+	/**
+	 * Commit uncommitted changes and push unpushed commits to `clam/rescue/<sharedId>-<node>`, from the shared session's worktree (the
+	 * project folder is never switched); null when there was nothing to save.
+	 */
 	private async rescue(shared: SharedRow, newDriverName: string): Promise<string | null> {
-		const projectId = shared.localProjectId;
-		if (!projectId) return null;
+		if (!shared.localProjectId) return null;
 		const { gitService } = this.ctx;
 		try {
-			let status = await gitService.status(projectId);
+			const { checkoutId } = await ensureSharedCheckout(this.ctx, shared);
+			let status = await gitService.status(checkoutId);
 			if (!status.isRepo) return null;
 			const dirty = status.files.length > 0;
 			const unpushed = status.upstream !== null && status.ahead > 0;
@@ -507,21 +530,21 @@ export class EpochService implements EpochApi {
 			}
 			const name = `clam/rescue/${shared.id}-${slugify(this.hub.nodeName(), 30)}`;
 			if (status.branch !== name) {
-				const local = (await gitService.branches(projectId)).some((b) => !b.remote && (b.name === name || b.name === `refs/heads/${name}`));
-				status = local ? await gitService.checkout(projectId, name) : await gitService.createBranch(projectId, { name, checkout: true });
+				const local = (await gitService.branches(checkoutId)).some((b) => !b.remote && (b.name === name || b.name === `refs/heads/${name}`));
+				status = local ? await gitService.checkout(checkoutId, name) : await gitService.createBranch(checkoutId, { name, checkout: true });
 			}
 			this.store.update(shared.id, { rescueBranch: name });
 			if (dirty) {
 				const renamed = status.files.flatMap((f) => (f.origPath ? [f.path, f.origPath] : []));
-				if (renamed.length > 0) status = await gitService.unstage(projectId, renamed);
+				if (renamed.length > 0) status = await gitService.unstage(checkoutId, renamed);
 				await gitService.commit(
-					projectId,
+					checkoutId,
 					{ message: `Rescue: ${shared.title} — work of ${this.hub.nodeName()} that is not on ${shared.branch} (${newDriverName} drives now)`, paths: status.files.map((f) => f.path), ...(shared.localSessionId && { sessionId: shared.localSessionId }) },
 					{ Session: shared.id, Epoch: String(shared.epoch) },
 				);
 			}
 			try {
-				await gitService.push(projectId, { setUpstream: true });
+				await gitService.push(checkoutId, { setUpstream: true });
 			} catch (error) {
 				this.hub.discussion.note(shared.id, i18nMsg("The rescue branch {name} could not be pushed ({error}); it is committed locally.", { name, error: errorText(error, 160) }));
 			}

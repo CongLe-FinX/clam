@@ -2,8 +2,7 @@ import { chmodSync, existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { TERMINAL_CLOSE, TERMINAL_LIMITS, type CreateTerminalBody, type TerminalInfo, type TerminalServerMessage, type TerminalSession, i18nMsg } from "@clam/contracts";
-import { projects } from "@clam/database";
-import { eq } from "drizzle-orm";
+import { checkoutFolder } from "../services/checkouts.ts";
 import type { IPty } from "node-pty";
 import type { ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
@@ -121,7 +120,7 @@ export class TerminalService {
 	private ptyModule: Promise<typeof import("node-pty")> | null = null;
 
 	constructor(
-		private readonly ctx: Pick<ServerContext, "db" | "log">,
+		private readonly ctx: Pick<ServerContext, "db" | "log" | "config">,
 		options: TerminalOptions = {},
 	) {
 		this.maxSessions = options.maxSessions ?? TERMINAL_LIMITS.maxSessions;
@@ -177,11 +176,10 @@ export class TerminalService {
 		let cwd = info.home;
 		let projectId: string | null = null;
 		if (body.projectId) {
-			const project = this.ctx.db.select().from(projects).where(eq(projects.id, body.projectId)).get();
-			if (!project) throw ApiError.notFound("Project");
-			if (!dirExists(project.path)) throw new ApiError(409, "project_folder_missing", i18nMsg("That project's folder no longer exists on this machine"));
-			cwd = project.path;
-			projectId = project.id;
+			const folder = await checkoutFolder(this.ctx, body.projectId);
+			if (!dirExists(folder)) throw new ApiError(409, "project_folder_missing", i18nMsg("That project's folder no longer exists on this machine"));
+			cwd = folder;
+			projectId = body.projectId;
 		}
 		if (!dirExists(cwd)) throw new ApiError(409, "cwd_missing", i18nMsg("The folder {path} does not exist", { path: cwd }));
 		this.makeRoom();

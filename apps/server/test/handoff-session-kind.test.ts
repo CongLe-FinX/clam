@@ -6,7 +6,7 @@ import { writeNodeSettings } from "../src/services/settings.ts";
 import { api, type FullHarness } from "./full-harness.ts";
 import { installFakeNpm, type FakeNpm } from "./fake-npm.ts";
 import { eventually } from "./net-helpers.ts";
-import { isolateGitConfig, promptAndWait, startSharedPair, transcriptTexts, waitForShared, type GitConfigIsolation, type SharedPair } from "./shared-fixtures.ts";
+import { git, isolateGitConfig, promptAndWait, startSharedPair, transcriptTexts, waitForShared, worktreeOf, type GitConfigIsolation, type SharedPair } from "./shared-fixtures.ts";
 
 /** M7: an M5 takeover is also a `kind: session` handoff (target on the new driver, source on the former one) and runs dependency setup before the continuation note. */
 
@@ -59,10 +59,16 @@ const noteOn = async (sessionId: string): Promise<string | undefined> => (await 
 
 const waitForNote = (sessionId: string): Promise<string> => eventually(() => noteOn(sessionId), "the continuation note in the new session", 30_000);
 
-/** A tiny npm project in B's clone (untracked: the takeover does not touch it): the detected install command is `npm install`. */
-function npmProject(extra: Record<string, unknown> = {}, lockfile?: string): void {
-	writeFileSync(path.join(pair.workB, "package.json"), JSON.stringify({ name: "tiny-session-kind", version: "1.0.0", private: true, ...extra }));
-	if (lockfile !== undefined) writeFileSync(path.join(pair.workB, "package-lock.json"), lockfile);
+/**
+ * A tiny npm project in B's worktree of the shared session (untracked: the takeover does not touch it): the detected install command is `npm install`.
+ * The takeover works in that worktree, so it is created ahead of the takeover (the way a node that took the session before has one).
+ */
+function npmProject(shared: SharedSession, extra: Record<string, unknown> = {}, lockfile?: string): void {
+	const worktree = worktreeOf(pair.b, shared.id);
+	git(pair.workB, "fetch", "origin");
+	git(pair.workB, "worktree", "add", "--track", "-b", shared.repo?.branch as string, worktree, `origin/${shared.repo?.branch}`);
+	writeFileSync(path.join(worktree, "package.json"), JSON.stringify({ name: "tiny-session-kind", version: "1.0.0", private: true, ...extra }));
+	if (lockfile !== undefined) writeFileSync(path.join(worktree, "package-lock.json"), lockfile);
 }
 
 /** Asserting that something does NOT happen (the held-back note) needs a real delay: there is no event to await. */
@@ -140,7 +146,7 @@ describe("dependency setup before the continuation note", () => {
 	it("auto: the install ran, the note comes after it and carries the report", async () => {
 		const { shared } = await sharedWithNotes();
 		writeNodeSettings(pair.b.ctx.db, { dependencySetup: "auto" });
-		npmProject();
+		npmProject(shared);
 		const took = await forceTakeover(shared.id);
 
 		const note = await waitForNote(took.localSessionId as string);
@@ -149,12 +155,12 @@ describe("dependency setup before the continuation note", () => {
 		const target = await handoffOn(pair.b, "target", shared.id, (h) => h.state === "completed");
 		expect(target.setup).toEqual([expect.objectContaining({ command: "npm install", state: "succeeded", exitCode: 0 })]);
 		expect(target.environment?.packageManager?.installCommand).toBe("npm install");
-		expect(existsSync(path.join(pair.workB, "package-lock.json"))).toBe(true);
+		expect(existsSync(path.join(worktreeOf(pair.b, shared.id), "package-lock.json"))).toBe(true);
 	});
 
 	it("ask: the takeover returns at once, the note is held back until the user approves", async () => {
 		const { shared } = await sharedWithNotes();
-		npmProject();
+		npmProject(shared);
 		const took = await forceTakeover(shared.id);
 		const sessionId = took.localSessionId as string;
 		expect(took).toMatchObject({ localRole: "driver", epoch: 2 });
@@ -164,7 +170,7 @@ describe("dependency setup before the continuation note", () => {
 		expect(waiting.actions).toEqual(expect.arrayContaining(["approve_setup", "deny_setup"]));
 		await sleep(1_500);
 		expect(await noteOn(sessionId)).toBeUndefined();
-		expect(existsSync(path.join(pair.workB, "package-lock.json"))).toBe(false);
+		expect(existsSync(path.join(worktreeOf(pair.b, shared.id), "package-lock.json"))).toBe(false);
 
 		const command = waiting.setup[0];
 		const approved = await api(pair.b).post<Handoff>(`/handoffs/${waiting.id}/setup`, { approve: [command?.id] });
@@ -178,7 +184,7 @@ describe("dependency setup before the continuation note", () => {
 
 	it("ask + deny: the note arrives with the command reported as skipped, the handoff is not failed", async () => {
 		const { shared } = await sharedWithNotes();
-		npmProject();
+		npmProject(shared);
 		const took = await forceTakeover(shared.id);
 		const sessionId = took.localSessionId as string;
 		const waiting = await handoffOn(pair.b, "target", shared.id, (h) => h.setup.some((s) => s.state === "pending_approval"));
@@ -190,14 +196,14 @@ describe("dependency setup before the continuation note", () => {
 		expect(note).toMatch(/Skipped `npm install`/);
 		const done = await handoffOn(pair.b, "target", shared.id, (h) => h.state === "completed");
 		expect(done.failure).toBeNull();
-		expect(existsSync(path.join(pair.workB, "package-lock.json"))).toBe(false);
+		expect(existsSync(path.join(worktreeOf(pair.b, shared.id), "package-lock.json"))).toBe(false);
 	});
 
 	it("a failing setup fails the record but never blocks the continuation note, which carries the warning", async () => {
 		const { shared } = await sharedWithNotes();
 		writeNodeSettings(pair.b.ctx.db, { dependencySetup: "auto" });
 		// package.json and lockfile out of sync: `npm ci` (the detected install command) refuses before touching the network
-		npmProject({ dependencies: { "left-pad": "1.3.0" } }, JSON.stringify({ name: "tiny-session-kind", version: "1.0.0", lockfileVersion: 3, requires: true, packages: {} }));
+		npmProject(shared, { dependencies: { "left-pad": "1.3.0" } }, JSON.stringify({ name: "tiny-session-kind", version: "1.0.0", lockfileVersion: 3, requires: true, packages: {} }));
 		const took = await forceTakeover(shared.id);
 
 		const note = await waitForNote(took.localSessionId as string);
@@ -210,7 +216,7 @@ describe("dependency setup before the continuation note", () => {
 
 	it("a restart while an approval is pending re-arms it: after the approval exactly one note goes out", async () => {
 		const { shared } = await sharedWithNotes();
-		npmProject();
+		npmProject(shared);
 		const took = await forceTakeover(shared.id);
 		const sessionId = took.localSessionId as string;
 		const waiting = await handoffOn(pair.b, "target", shared.id, (h) => h.setup.some((s) => s.state === "pending_approval"));

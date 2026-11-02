@@ -9,6 +9,7 @@ import { canonicalProjectDir, listDirectory, readProjectFile } from "../services
 import { autoLinkRepository } from "../services/git-link.ts";
 import { newId } from "../services/ids.ts";
 import { publishSessionRemovals, teardownProjectSessions } from "../services/project-cleanup.ts";
+import { checkoutFolder } from "../services/checkouts.ts";
 import { createManagedProject, deleteManagedFolder, projectVcs } from "../services/project-folders.ts";
 
 type Row = typeof projects.$inferSelect;
@@ -123,13 +124,12 @@ export default async function projectRoutes(app: FastifyInstance, { ctx }: Route
 		return reply.status(204).send();
 	});
 
+	// `:id` is a checkout id here: a project id, or `<projectId>~<sharedSessionId>` for the worktree of a shared session.
 	app.get<{ Params: { id: string } }>(routes.projectFiles(":id"), async (req) => {
-		const row = requireProject(ctx, req.params.id);
-		return listDirectory(row.path, PathQuery.parse(req.query).path);
+		return listDirectory(await checkoutFolder(ctx, req.params.id), PathQuery.parse(req.query).path);
 	});
 
 	app.get<{ Params: { id: string } }>(routes.projectFile(":id"), async (req) => {
-		const row = requireProject(ctx, req.params.id);
-		return readProjectFile(row.path, PathQuery.parse(req.query).path);
+		return readProjectFile(await checkoutFolder(ctx, req.params.id), PathQuery.parse(req.query).path);
 	});
 }

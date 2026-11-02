@@ -135,19 +135,27 @@ export class BrowserService {
 		return {
 			home: homedir(),
 			isProjectFile: (file) => {
+				const roots: string[] = [];
 				for (const row of this.ctx.db.select({ path: projects.path }).from(projects).all()) {
-					const roots = [row.path];
+					roots.push(row.path);
 					try {
 						roots.push(realpathSync(row.path));
 					} catch {
 						// a project folder that is gone allows nothing
 					}
-					for (const root of roots) {
-						const rel = path.relative(root, file);
-						if (rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel)) return true;
-					}
 				}
-				return false;
+				// The worktrees of shared sessions live under the data dir, outside every project folder.
+				const worktrees = path.join(this.ctx.config.dataDir, "worktrees");
+				roots.push(worktrees);
+				try {
+					roots.push(realpathSync(worktrees));
+				} catch {
+					// no shared session has a worktree yet
+				}
+				return roots.some((root) => {
+					const rel = path.relative(root, file);
+					return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+				});
 			},
 		};
 	}
