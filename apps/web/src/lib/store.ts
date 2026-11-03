@@ -29,6 +29,9 @@ interface UiState {
 	setSessionPanels(kind: SessionKind, choice: SessionPanelChoice): void;
 	sidebarCollapsed: boolean;
 	expandedWorkspaces: string[];
+	/** The sidebar's Chats list is open (collapsed by default). */
+	chatsExpanded: boolean;
+	setChatsExpanded(v: boolean): void;
 	drawerOpen: boolean;
 	paletteOpen: boolean;
 	dialog: GlobalDialog;
@@ -47,6 +50,8 @@ export const useUi = create<UiState>()(
 			setSessionPanels: (kind, choice) => set((s) => ({ sessionPanels: { ...s.sessionPanels, [kind]: choice } })),
 			sidebarCollapsed: false,
 			expandedWorkspaces: [],
+			chatsExpanded: false,
+			setChatsExpanded: (v) => set({ chatsExpanded: v }),
 			drawerOpen: false,
 			paletteOpen: false,
 			dialog: null,
@@ -66,7 +71,7 @@ export const useUi = create<UiState>()(
 		{
 			name: "clam.ui",
 			version: 1,
-			partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, expandedWorkspaces: s.expandedWorkspaces, sessionPanels: s.sessionPanels }),
+			partialize: (s) => ({ sidebarCollapsed: s.sidebarCollapsed, expandedWorkspaces: s.expandedWorkspaces, chatsExpanded: s.chatsExpanded, sessionPanels: s.sessionPanels }),
 		},
 	),
 );

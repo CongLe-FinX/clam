@@ -236,30 +236,43 @@ function ChatNavItem({ session: s, current, qc }: { session: AgentSession; curre
 
 const CHATS_SHOWN = 6;
 
-/** Recent chats (sessions without a repository) under their own heading, not mixed into the project tree. */
+/** Recent chats (sessions without a repository) under their own heading, not mixed into the project tree. Collapsed until opened (remembered). */
 function ChatsSection() {
 	const { chats, isPending } = useChats();
 	const params = useParams({ strict: false }) as { sessionId?: string };
 	const qc = useQueryClient();
+	const expanded = useUi((s) => s.chatsExpanded);
+	const setExpanded = useUi((s) => s.setChatsExpanded);
 	const shown = chats.slice(0, CHATS_SHOWN);
+	const waiting = chats.some((c) => c.pendingRequests > 0);
 	return (
 		<>
-			<SectionLabel
-				action={
-					<Link to="/chats" preload="intent" className="rounded-md px-1 text-2xs font-medium normal-case tracking-normal text-subtle outline-none hover:text-foreground">
-						{chats.length > CHATS_SHOWN ? t("All {count}", { count: chats.length }) : t("All")}
-					</Link>
-				}
-			>
-				{t("Chats")}
-			</SectionLabel>
-			<div className="flex flex-col gap-px">
-				{isPending ? <Skeleton className="mx-1 my-1 h-6" /> : null}
-				{shown.map((s) => (
-					<ChatNavItem key={s.id} session={s} current={params.sessionId === s.id} qc={qc} />
-				))}
-				{!isPending && chats.length === 0 ? <span className="px-2 py-1 text-2xs text-subtle">{t("No chats yet — start one above")}</span> : null}
+			<div className="mb-1 mt-4 flex items-center justify-between gap-1 px-1">
+				<button
+					type="button"
+					aria-expanded={expanded}
+					aria-controls="sidebar-chats"
+					onClick={() => setExpanded(!expanded)}
+					className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-2xs font-semibold uppercase tracking-wider text-subtle outline-none transition-colors hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:py-2"
+				>
+					<ChevronRight aria-hidden className={cn("size-3 shrink-0 transition-transform duration-200", expanded && "rotate-90")} />
+					<span>{t("Chats")}</span>
+					{chats.length > 0 ? <span className="tabular rounded bg-surface-3 px-1 font-mono text-[10px] font-medium normal-case tracking-normal text-muted-foreground">{chats.length}</span> : null}
+					{!expanded && waiting ? <span role="img" aria-label={t("Waiting for your answer")} className="size-1.5 rounded-full bg-warning" /> : null}
+				</button>
+				<Link to="/chats" preload="intent" className="rounded-md px-1 text-2xs font-medium text-subtle outline-none hover:text-foreground">
+					{chats.length > CHATS_SHOWN ? t("All {count}", { count: chats.length }) : t("All")}
+				</Link>
 			</div>
+			{expanded ? (
+				<div id="sidebar-chats" className="animate-fade-in flex flex-col gap-px">
+					{isPending ? <Skeleton className="mx-1 my-1 h-6" /> : null}
+					{shown.map((s) => (
+						<ChatNavItem key={s.id} session={s} current={params.sessionId === s.id} qc={qc} />
+					))}
+					{!isPending && chats.length === 0 ? <span className="px-2 py-1 text-2xs text-subtle">{t("No chats yet — start one above")}</span> : null}
+				</div>
+			) : null}
 		</>
 	);
 }
