@@ -105,7 +105,6 @@ const vi: Catalog = {
 	"Thinking level: {level}. Change": "Mức suy nghĩ: {level}. Thay đổi",
 	"Auto · {level}": "Tự động · {level}",
 	"off": "tắt",
-	"auto": "tự động",
 	"Could not change thinking level: {error}": "Không đổi được mức suy nghĩ: {error}",
 	"Model {name}, thinking {thinking}. Change": "Model {name}, suy nghĩ {thinking}. Thay đổi",
 	"Model {name}. Change": "Model {name}. Thay đổi",

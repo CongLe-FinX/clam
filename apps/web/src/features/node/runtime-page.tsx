@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { ChevronRight, Cpu, RefreshCw, RotateCw, Square } from "lucide-react";
 import { Fragment, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
+import { NodeStatusCard } from "@/app/shell/node-status";
 import { RUNTIME_STATE_LABEL, runtimeDot } from "@/components/session-status";
 import { useIsMobile } from "@/hooks/use-breakpoint";
 import { api, errorMessage } from "@/lib/api";
@@ -146,6 +147,9 @@ export default function NodeRuntimePage() {
 	return (
 		<PageContainer wide>
 			<PageHeader title={t("Runtime")} description={t("OMP processes backing your sessions. They start on demand and stop when idle.")} />
+
+			{/* Phones have no sidebar: the same CPU/RAM/disk card sits here for a quick look, and opens the System page. */}
+			{mobile ? <NodeStatusCard /> : null}
 
 			<NodeSummary active={runtime.data ? activeCount : null} crashed={runtime.data ? crashedCount : null} />
 

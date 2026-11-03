@@ -345,28 +345,34 @@ export function Composer({
 								<div role="radiogroup" aria-label={t("Delivery while the agent is working")} className="flex shrink-0 rounded-lg bg-surface-2 p-0.5 shadow-[inset_0_0_0_1px_var(--border)]">
 									{(
 										[
-											["steer", t("Steer"), t("Redirect the agent after its current step")],
-											["followUp", t("Queue"), t("Send after the agent finishes this turn")],
+											["steer", CornerDownRight, t("Steer"), t("Redirect the agent after its current step")],
+											["followUp", Clock, t("Queue"), t("Send after the agent finishes this turn")],
 										] as const
-									).map(([id, label, tip]) => (
-										<Tip key={id} label={tip}>
+									).map(([id, Icon, label, tip]) => (
+										<Tip key={id} label={`${label} · ${tip}`}>
 											<button
 												type="button"
 												role="radio"
 												aria-checked={mode === id}
 												onClick={() => setMode(id)}
 												className={cn(
-													"h-6 rounded-md px-2.5 text-2xs font-medium outline-none transition-colors coarse:h-9 coarse:px-3",
-													mode === id ? "bg-surface-3 text-foreground" : "text-muted-foreground hover:text-foreground",
+													// Phones show the icon alone (the same arrow/clock that marks steering and queued messages above); wider screens add the word.
+													"inline-flex h-6 items-center justify-center gap-1 rounded-md px-2 text-2xs font-medium outline-none transition-[background-color,color,box-shadow] duration-200 focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-9 max-sm:w-8 max-sm:px-0 sm:coarse:px-3 [&_svg]:size-3.5 max-sm:[&_svg]:size-4",
+													mode === id
+														? id === "steer"
+															? "bg-accent-soft text-accent shadow-[0_1px_2px_rgb(0_0_0/0.06)]"
+															: "bg-surface-3 text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.06)]"
+														: "text-muted-foreground hover:text-foreground",
 												)}
 											>
-												{label}
+												<Icon aria-hidden className={cn("transition-transform duration-200 ease-[var(--ease-spring)]", mode === id && "scale-110")} />
+												<span className="max-sm:sr-only">{label}</span>
 											</button>
 										</Tip>
 									))}
 								</div>
 							) : null}
-							<ModelSettings stream={stream} className="max-w-[10.5rem] sm:hidden" />
+							<ModelSettings stream={stream} className="sm:hidden" />
 							<div className="hidden min-w-0 items-center gap-1.5 sm:flex md:hidden">
 								<ModelPicker stream={stream} className="max-w-[9.5rem]" />
 								<ThinkingPicker stream={stream} />

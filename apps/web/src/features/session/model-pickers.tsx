@@ -241,8 +241,8 @@ function ThinkingLevels({ stream }: { stream: SessionStream }) {
 }
 
 /**
- * One compact chip ("Haiku 5.5 · low") for phones: opens a bottom sheet holding the thinking level and the model list, so the
- * composer keeps a single row.
+ * One compact chip for phones: the model name on top, the thinking level under it, so the name gets the chip's whole width instead of
+ * sharing one line. Opens a bottom sheet holding the thinking level and the model list, so the composer keeps a single row.
  */
 export function ModelSettings({ stream, className }: { stream: SessionStream; className?: string }) {
 	const model = useStreamMeta(stream, (m) => m.live?.model ?? null);
@@ -252,17 +252,25 @@ export function ModelSettings({ stream, className }: { stream: SessionStream; cl
 	const hasLevels = useStreamMeta(stream, (m) => (m.live?.availableThinkingLevels?.length ?? 0) > 0);
 	const [open, setOpen] = useState(false);
 	const name = model ? (model.name ?? model.id) : ready ? t("No model") : "—";
-	const thinking = hasLevels ? (auto ? t("auto") : (level ?? t("off"))) : null;
+	const thinking = hasLevels ? (auto ? t("Auto · {level}", { level: level ?? t("off") }) : (level ?? t("off"))) : null;
 	return (
 		<Sheet open={open} onOpenChange={setOpen}>
 			<SheetTrigger asChild>
-				<button type="button" disabled={!ready} aria-label={thinking ? t("Model {name}, thinking {thinking}. Change", { name, thinking }) : t("Model {name}. Change", { name })} className={cn(chip, "min-w-0", className)}>
-					<Cpu aria-hidden />
-					<span className="min-w-0 truncate">
-						{name}
-						{thinking ? <span className="text-subtle"> · {thinking}</span> : null}
+				<button
+					type="button"
+					disabled={!ready}
+					aria-label={thinking ? t("Model {name}, thinking {thinking}. Change", { name, thinking }) : t("Model {name}. Change", { name })}
+					className={cn(chip, "min-w-0 coarse:px-2.5", className)}
+				>
+					{/* The name keeps the whole first line; the thinking level and the chevron share the small second one. */}
+					<span className="flex min-w-0 flex-col items-start">
+						<span className="max-w-full truncate text-xs font-semibold leading-4 text-foreground">{name}</span>
+						<span className="flex max-w-full items-center gap-0.5 text-[10px] font-medium leading-3 text-subtle">
+							{thinking ? <Brain aria-hidden className="!size-2.5" /> : null}
+							<span className="truncate">{thinking ?? t("Model")}</span>
+							<ChevronDown className="!size-2.5 opacity-70" aria-hidden />
+						</span>
 					</span>
-					<ChevronDown className="!size-3 opacity-60" aria-hidden />
 				</button>
 			</SheetTrigger>
 			<SheetContent side="bottom" aria-describedby={undefined} className="p-0">

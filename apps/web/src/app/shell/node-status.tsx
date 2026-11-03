@@ -82,8 +82,8 @@ function Gauge({ kind, label, sub, percent, level }: { kind: keyof typeof HUE; l
 					<span className="text-[8px] font-medium text-muted-foreground">%</span>
 				</span>
 			</div>
-			<span className={cn("text-[10px] font-semibold uppercase leading-none tracking-wider", level ? tone : "text-muted-foreground")}>{label}</span>
-			<span className="max-w-full truncate font-mono text-[10px] leading-none text-subtle">{sub}</span>
+			<span className={cn("text-[10px] font-semibold uppercase leading-3 tracking-wider", level ? tone : "text-muted-foreground")}>{label}</span>
+			<span className="max-w-full truncate font-mono text-[10px] leading-3 text-subtle">{sub}</span>
 		</div>
 	);
 }
