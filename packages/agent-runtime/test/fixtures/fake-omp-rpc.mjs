@@ -1445,6 +1445,26 @@ export async function runRpc(argv, env) {
 				ok(id, type, { savedPath });
 				return;
 			}
+			case "compact": {
+				// Like the real command: refused mid-response or with nothing to summarise; afterwards the context holds only the summary.
+				if (run !== undefined) {
+					fail(id, type, "Cannot compact while a response is in progress");
+					return;
+				}
+				if (messages.length < 2) {
+					fail(id, type, "Nothing to compact (no messages yet)");
+					return;
+				}
+				const tokensBefore = contextUsage().tokens;
+				const summary = `Summary of ${messages.length} messages.${command.customInstructions ? ` Focus: ${command.customInstructions}` : ""}`;
+				emit({ type: "manual_compaction_start" });
+				messages.push({ role: "compactionSummary", summary, tokensBefore, timestamp: Date.now() });
+				totals = { input: 0, output: 0 };
+				persist();
+				emit({ type: "manual_compaction_end", result: { summary, tokensBefore } });
+				ok(id, type, { summary, firstKeptEntryId: "", tokensBefore });
+				return;
+			}
 			default:
 				fail(id, type, `Unknown command: ${type}`);
 		}

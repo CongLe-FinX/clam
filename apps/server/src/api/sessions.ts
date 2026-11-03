@@ -1,4 +1,5 @@
 import {
+	CompactBody,
 	CreateSessionBody,
 	PromptBody,
 	SetModelBody,
@@ -148,6 +149,11 @@ export default async function sessionRoutes(app: FastifyInstance, { ctx }: Route
 	app.post(routes.sessionThinking(":id"), async (req) => {
 		const { id } = IdParams.parse(req.params);
 		return sessions.setThinking(id, SetThinkingBody.parse(req.body));
+	});
+
+	app.post(routes.sessionCompact(":id"), async (req) => {
+		const { id } = IdParams.parse(req.params);
+		return sessions.compact(id, CompactBody.parse(req.body ?? {}));
 	});
 
 	app.post(routes.sessionUiResponse(":id"), async (req, reply) => {

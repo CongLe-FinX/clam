@@ -160,5 +160,16 @@ const vi: Catalog = {
 	"Background job": "Tác vụ nền",
 	"exit {code}": "exit {code}",
 	"Copy output": "Sao chép kết quả",
+	"Context compacted": "Đã thu gọn ngữ cảnh",
+	"{before} → {after} of the context window": "{before} → {after} cửa sổ ngữ cảnh",
+	"Could not compact the context": "Không thu gọn được ngữ cảnh",
+	"Compact": "Thu gọn",
+	"Available when the agent is not working": "Dùng được khi agent không làm việc",
+	"Compact the context": "Thu gọn ngữ cảnh",
+	"The agent summarises the conversation so far and continues from the summary, freeing room in its context. The chat here keeps every message.": "Agent tóm tắt cuộc trò chuyện đến giờ rồi làm tiếp từ bản tóm tắt, giải phóng chỗ trong ngữ cảnh. Khung chat ở đây vẫn giữ mọi tin nhắn.",
+	"Optional focus, e.g. keep the API decisions and the open bugs": "Trọng tâm (không bắt buộc), vd: giữ các quyết định về API và các bug còn mở",
+	"Cancel": "Hủy",
+	"Compacting…": "Đang thu gọn…",
+	"Compact now": "Thu gọn ngay",
 };
 export default vi;

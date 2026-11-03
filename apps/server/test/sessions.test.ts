@@ -221,6 +221,27 @@ describe("sessions", () => {
 		expect(full.ctx.runtime.get(idle.id)).toBeUndefined();
 	});
 
+	it("compacts the context on demand: the context shrinks, the transcript keeps every message, refused mid-turn and on a fresh session", async () => {
+		const session = await createSession();
+		expect((await http.post<any>(`/sessions/${session.id}/compact`, {})).body.error.code).toBe("runtime_rejected"); // nothing to compact yet
+		const ws = await subscribe(`session:${session.id}`);
+		await http.post(`/sessions/${session.id}/prompt`, { message: "remember this", clientId: "c1" });
+		await ws.waitFor((f) => f.event?.type === "settled", "settled");
+		const before = (await http.get<SessionLiveState>(`/sessions/${session.id}/state`)).body;
+		expect(before.contextUsage?.tokens).toBeGreaterThan(0);
+		const compacted = await http.post<SessionLiveState>(`/sessions/${session.id}/compact`, { instructions: "keep the decisions" });
+		expect(compacted.status, JSON.stringify(compacted.body)).toBe(200);
+		expect(compacted.body.contextUsage?.tokens).toBe(0);
+		expect((await http.get<MessagesPage>(`/sessions/${session.id}/messages`)).body.messages.filter((m) => m.role === "user" || m.role === "assistant")).toHaveLength(2);
+
+		await http.post(`/sessions/${session.id}/prompt`, { message: "__slow__", clientId: "slow" });
+		await ws.waitFor((f) => f.event?.type === "message_delta", "streaming");
+		const busy = await http.post<any>(`/sessions/${session.id}/compact`, {});
+		expect(busy.status).toBe(409);
+		expect(busy.body.error.code).toBe("runtime_invalid_state");
+		await http.post(`/sessions/${session.id}/abort`);
+	});
+
 	it("sends the optional first prompt of a new session once the runtime is ready", async () => {
 		const ws = await subscribe("sessions");
 		const session = await createSession({ prompt: "hello from create" });

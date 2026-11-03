@@ -13,6 +13,7 @@ import {
 	type SessionStats,
 	type SetModelBody,
 	type SetThinkingBody,
+	type CompactBody,
 	type UpdateSessionBody,
 	type CancelSubagentResult,
 	type SubagentMessagesPage,
@@ -72,6 +73,7 @@ export type UpdateSessionInput = z.infer<typeof UpdateSessionBody>;
 export type PromptInput = z.infer<typeof PromptBody>;
 export type SetModelInput = z.infer<typeof SetModelBody>;
 export type SetThinkingInput = z.infer<typeof SetThinkingBody>;
+export type CompactInput = z.infer<typeof CompactBody>;
 export type UiResponseInput = z.infer<typeof UiResponseBody>;
 
 function liveStatus(state: RuntimeStatus["state"] | undefined): AgentSession["status"] {
@@ -694,6 +696,22 @@ export class SessionService {
 	async setThinking(id: string, input: SetThinkingInput): Promise<SessionLiveState> {
 		const rt = await this.runtime(id);
 		await rt.setThinkingLevel(input.level);
+		const state = await rt.getState();
+		this.persistFromState(id, state);
+		return state;
+	}
+
+	/**
+	 * Summarise the conversation into the agent's context now (what auto-compaction does near the limit). Refused like a prompt while
+	 * the session is being handed over or its task is fenced: the context must not change under a checkpoint.
+	 */
+	async compact(id: string, input: CompactInput): Promise<SessionLiveState> {
+		const row = this.get(id);
+		if (this.isViewed(row)) throw this.readOnlyError(row);
+		this.promptGuard?.(row, { clientId: "compact" });
+		for (const guard of this.extraPromptGuards) guard(row, { clientId: "compact" });
+		const rt = await this.runtime(id);
+		await rt.compact(input.instructions || undefined);
 		const state = await rt.getState();
 		this.persistFromState(id, state);
 		return state;

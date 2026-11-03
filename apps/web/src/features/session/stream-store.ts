@@ -995,6 +995,14 @@ export class SessionStream {
 		void this.fetchState();
 		return status;
 	};
+
+	/** Summarise the conversation into the agent's context now; the live state that comes back carries the smaller context. */
+	compact = async (instructions?: string): Promise<void> => {
+		const next = await api.post<SessionLiveState>(routes.sessionCompact(this.sessionId), instructions ? { instructions } : {});
+		this.liveFromEvent = true;
+		this.applyState(next);
+		this.invalidateSoon();
+	};
 }
 
 // ───────────────────────────── React bindings ─────────────────────────────

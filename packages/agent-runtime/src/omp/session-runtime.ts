@@ -752,6 +752,17 @@ export class OmpSessionRuntime implements RuntimeSession {
 		return toSessionStats(await transport.request("get_session_stats"));
 	}
 
+	async compact(customInstructions?: string): Promise<void> {
+		const transport = await this.connected();
+		if (this.agentRunning || !this.settled || this.inflight.size > 0) {
+			throw new AgentRuntimeError("invalid_state", "Cannot compact while a response is in progress; let the agent settle or abort it first", { state: this.stateName });
+		}
+		// A summary is a model call over the whole conversation: as slow as a long answer.
+		await transport.request("compact", customInstructions === undefined ? {} : { customInstructions }, { timeoutMs: HANDOFF_TIMEOUT_MS });
+		this.touch();
+		await this.getState();
+	}
+
 	async handoffSummary(customInstructions?: string): Promise<{ text: string | null; savedPath: string | null }> {
 		const transport = await this.connected();
 		if (this.agentRunning || !this.settled || this.inflight.size > 0) {

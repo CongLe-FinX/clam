@@ -140,6 +140,7 @@ export const routes = {
 	sessionAbort: (id: string) => `/sessions/${id}/abort`, // POST → 204
 	sessionModel: (id: string) => `/sessions/${id}/model`, // POST SetModelBody → SessionLiveState
 	sessionThinking: (id: string) => `/sessions/${id}/thinking`, // POST SetThinkingBody → SessionLiveState
+	sessionCompact: (id: string) => `/sessions/${id}/compact`, // POST CompactBody → SessionLiveState (summarises the conversation into the agent's context; the transcript keeps every message)
 	sessionUiResponse: (id: string) => `/sessions/${id}/ui-response`, // POST UiResponseBody → 204 (on a mirror of a shared session: forwarded to the driver, 409 already_answered when somebody was first)
 	sessionUiRequests: (id: string) => `/sessions/${id}/ui-requests`, // GET PendingUiRequest[] (unanswered)
 	sessionSubagents: (id: string) => `/sessions/${id}/subagents`, // GET SubagentsPage (live registry, or the last known snapshot while the runtime is stopped)

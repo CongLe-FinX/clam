@@ -151,6 +151,9 @@ export const PromptBody = z.object({
 export const PromptAccepted = z.object({ promptId: z.string(), clientId: z.string() });
 export const SetModelBody = z.object({ selector: ModelSelector });
 export const SetThinkingBody = z.object({ level: z.string().min(1) });
+/** Manual compaction: optional focus for the summary ("keep the API decisions", …). */
+export const CompactBody = z.object({ instructions: z.string().trim().max(2000).optional() });
+export type CompactBody = z.infer<typeof CompactBody>;
 
 // ---------------------------------------------------------------- messages
 

@@ -1,5 +1,5 @@
 import type { AgentSession, Project, TodoPhase } from "@clam/contracts";
-import { RotateCw, X } from "lucide-react";
+import { RotateCw, Shrink, X } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { toast } from "sonner";
 import { CopyButton } from "@/components/code-block";
@@ -11,8 +11,11 @@ import { cn, formatCompact, formatCost, formatDuration, formatNumber, formatPerc
 import { Button } from "@/ui/button";
 import { Progress } from "@/ui/progress";
 import { StatusDot } from "@/ui/status-dot";
+import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
+import { Textarea } from "@/ui/textarea";
+import { Tip } from "@/ui/tooltip";
 import { ModelPicker, ThinkingPicker } from "./model-pickers.tsx";
-import { type SessionStream, useStreamMeta, useToolRec } from "./stream-store.ts";
+import { isBusy, type SessionStream, useStreamMeta, useToolRec } from "./stream-store.ts";
 import { StatusGlyph, ToolDetails, toolDuration, useNow } from "./tool-card.tsx";
 import { summarizeArgs } from "./tool-meta.tsx";
 import { PlanSection } from "./omp/plan-ui.tsx";
@@ -90,7 +93,74 @@ function ToolInspector({ stream, id }: { stream: SessionStream; id: string }) {
 
 // ── context usage
 
-function ContextMeter({ stream, session }: { stream: SessionStream; session: AgentSession }) {
+/**
+ * "Compact": the agent summarises the conversation so far and continues from the summary (what auto-compaction does near the limit,
+ * whenever the user wants). An optional focus steers the summary. The chat on screen keeps every message.
+ */
+function CompactButton({ stream, pct }: { stream: SessionStream; pct: number }) {
+	const busy = useStreamMeta(stream, isBusy);
+	const [open, setOpen] = useState(false);
+	const [focus, setFocus] = useState("");
+	const [pending, setPending] = useState(false);
+	const run = async () => {
+		setPending(true);
+		try {
+			await stream.compact(focus.trim() || undefined);
+			const after = stream.getMeta().live?.contextUsage;
+			const now = after?.contextWindow ? Math.min(100, (after.tokens / after.contextWindow) * 100) : null;
+			toast.success(t("Context compacted"), { description: now === null ? undefined : t("{before} → {after} of the context window", { before: formatPercent(pct / 100, 0), after: formatPercent(now / 100, now < 10 ? 1 : 0) }) });
+			setOpen(false);
+			setFocus("");
+		} catch (e) {
+			toast.error(t("Could not compact the context"), { description: errorText(e) });
+		} finally {
+			setPending(false);
+		}
+	};
+	const trigger = (
+		<Button size="sm" variant="ghost" disabled={busy || pending} loading={pending} className="-my-1 -mr-1.5 h-6 gap-1 px-2 text-2xs text-muted-foreground coarse:h-9">
+			<Shrink className="size-3" /> {t("Compact")}
+		</Button>
+	);
+	return (
+		<Popover open={open} onOpenChange={(o) => !pending && setOpen(o)}>
+			{busy ? (
+				<Tip label={t("Available when the agent is not working")}>
+					<span>{trigger}</span>
+				</Tip>
+			) : (
+				<PopoverTrigger asChild>{trigger}</PopoverTrigger>
+			)}
+			<PopoverContent align="end" className="flex w-80 flex-col gap-2.5">
+				<div className="flex flex-col gap-1">
+					<p className="text-[13px] font-semibold">{t("Compact the context")}</p>
+					<p className="text-xs text-muted-foreground">{t("The agent summarises the conversation so far and continues from the summary, freeing room in its context. The chat here keeps every message.")}</p>
+				</div>
+				<Textarea
+					value={focus}
+					onChange={(e) => setFocus(e.target.value)}
+					onKeyDown={(e) => {
+						if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void run();
+					}}
+					rows={2}
+					maxLength={2000}
+					placeholder={t("Optional focus, e.g. keep the API decisions and the open bugs")}
+					className="min-h-14 text-xs"
+				/>
+				<div className="flex items-center justify-end gap-2">
+					<Button size="sm" variant="ghost" disabled={pending} onClick={() => setOpen(false)}>
+						{t("Cancel")}
+					</Button>
+					<Button size="sm" variant="primary" loading={pending} onClick={() => void run()}>
+						<Shrink /> {pending ? t("Compacting…") : t("Compact now")}
+					</Button>
+				</div>
+			</PopoverContent>
+		</Popover>
+	);
+}
+
+function ContextMeter({ stream, session, viewOnly }: { stream: SessionStream; session: AgentSession; viewOnly: boolean }) {
 	const usage = useStreamMeta(stream, (m) => m.live?.contextUsage) ?? session.stats?.contextUsage ?? null;
 	const tps = useStreamMeta(stream, (m) => m.live?.tokensPerSecond ?? null);
 	if (!usage || !usage.contextWindow) {
@@ -103,7 +173,7 @@ function ContextMeter({ stream, session }: { stream: SessionStream; session: Age
 	const pct = Math.min(100, (usage.tokens / usage.contextWindow) * 100);
 	const tone = pct >= 90 ? "danger" : pct >= 70 ? "warning" : "accent";
 	return (
-		<Section title={t("Context")}>
+		<Section title={t("Context")} actions={viewOnly || usage.tokens === 0 ? null : <CompactButton stream={stream} pct={pct} />}>
 			<div className="flex items-baseline justify-between gap-2">
 				<span className={cn("tabular text-2xl font-semibold tracking-tight", tone === "danger" && "text-danger", tone === "warning" && "text-warning")}>{formatPercent(pct / 100, pct < 10 ? 1 : 0)}</span>
 				<span className="tabular font-mono text-2xs text-muted-foreground">
@@ -257,7 +327,7 @@ export function ContextPanel({ stream, session, project, className }: { stream: 
 	return (
 		<div className={cn("scrollbar-thin h-full min-h-0 overflow-y-auto overscroll-contain bg-surface-1", className)}>
 			{selectedToolId ? <ToolInspector key={selectedToolId} stream={stream} id={selectedToolId} /> : null}
-			<ContextMeter stream={stream} session={session} />
+			<ContextMeter stream={stream} session={session} viewOnly={viewOnly} />
 			{viewOnly ? null : (
 				<Section title={t("Model")}>
 					<div className="flex flex-wrap items-center gap-1.5">

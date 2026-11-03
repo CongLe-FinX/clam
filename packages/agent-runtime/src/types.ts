@@ -199,6 +199,12 @@ export interface RuntimeSession {
 	 */
 	handoffSummary(customInstructions?: string): Promise<{ text: string | null; savedPath: string | null }>;
 	/**
+	 * OMP `compact {customInstructions?}`: summarise the conversation so far into the runtime's context (what auto-compaction does near
+	 * the context limit, on demand). The transcript shown to the user keeps every message. Rejects with `invalid_state` while a turn is
+	 * in progress and with `rejected` when the runtime refuses (for example nothing to compact yet).
+	 */
+	compact(customInstructions?: string): Promise<void>;
+	/**
 	 * Transcript page, newest page first. `messages` inside a page are chronological; `nextCursor`
 	 * points at the older page. Served from an in-memory transcript that includes the in-flight message.
 	 */
