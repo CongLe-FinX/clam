@@ -15,6 +15,8 @@ import { checkoutFolder } from "../services/checkouts.ts";
 const RawQuery = z.object({
 	path: z.string().min(1, "path is required"),
 	download: z.enum(["1", "0", "true", "false"]).optional(),
+	/** `1`: an HTML file is served as a runnable page in a script sandbox (the viewer's preview); otherwise scripts never run. */
+	page: z.enum(["1", "0", "true", "false"]).optional(),
 });
 const UploadQuery = z.object({
 	path: z.string().min(1, "path is required"),
@@ -31,7 +33,7 @@ export default async function projectFileRoutes(app: FastifyInstance, { ctx }: R
 		refuseGitDir(rel);
 		const info = await stat(abs);
 		if (!info.isFile()) throw ApiError.badRequest(i18nMsg('"{rel}" is not a regular file', { rel }));
-		return sendFile(req, reply, { abs, size: info.size, name: path.posix.basename(rel), download: query.download === "1" || query.download === "true" });
+		return sendFile(req, reply, { abs, size: info.size, name: path.posix.basename(rel), download: query.download === "1" || query.download === "true", page: query.page === "1" || query.page === "true" });
 	});
 
 	// Raw uploads live in their own scope: that scope hands the request stream over untouched (no JSON parsing, no buffering).

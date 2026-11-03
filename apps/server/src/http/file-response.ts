@@ -75,6 +75,24 @@ const ACTIVE = /^(text\/html|image\/svg\+xml|application\/xml)\b/;
 const FILE_CSP = "frame-ancestors 'self'";
 /** Pages a browser would open as documents: no scripts, no network, opaque origin. */
 const ACTIVE_CSP = `sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; ${FILE_CSP}`;
+/**
+ * An HTML file the person asked to *run* (the viewer's page preview): its scripts, inline styles and https resources (CDN scripts,
+ * web fonts, pictures) work, but it stays in an opaque-origin sandbox with no network calls (`connect-src 'none'`), no forms and
+ * no top navigation, so it can neither read nor drive this node's API.
+ */
+const PAGE_CSP = [
+	"sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals",
+	"default-src 'none'",
+	"script-src 'unsafe-inline' 'unsafe-eval' https:",
+	"style-src 'unsafe-inline' https:",
+	"font-src https: data:",
+	"img-src https: data: blob:",
+	"media-src https: data: blob:",
+	"connect-src 'none'",
+	"form-action 'none'",
+	"base-uri 'none'",
+	FILE_CSP,
+].join("; ");
 
 export function contentTypeFor(fileName: string): string {
 	const dot = fileName.lastIndexOf(".");
@@ -117,6 +135,8 @@ export interface FileResponse {
 	download: boolean;
 	/** The bytes are not on disk yet but arrive as this stream (a lazily fetched file served while it is being stored): sent whole as a 200, `Range` is ignored. */
 	live?: Readable | undefined;
+	/** Serve HTML as a runnable page (`PAGE_CSP`) instead of the script-less sandbox. Other types are unaffected. */
+	page?: boolean | undefined;
 }
 
 /**
@@ -132,7 +152,7 @@ export function sendFile(request: FastifyRequest, reply: FastifyReply, file: Fil
 		.header("Content-Type", type)
 		.header("Content-Disposition", contentDisposition(file.name, file.download ? "attachment" : "inline"))
 		.header("X-Content-Type-Options", "nosniff")
-		.header("Content-Security-Policy", ACTIVE.test(type) ? ACTIVE_CSP : FILE_CSP);
+		.header("Content-Security-Policy", ACTIVE.test(type) ? (file.page && type.startsWith("text/html") ? PAGE_CSP : ACTIVE_CSP) : FILE_CSP);
 	if (file.live) return reply.status(200).header("Content-Length", file.size).send(file.live);
 	const range = parseRange(request.headers.range, file.size);
 	if (range === "unsatisfiable") return reply.status(416).header("Content-Range", `bytes */${file.size}`).send();

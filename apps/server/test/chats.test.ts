@@ -176,6 +176,24 @@ describe("projectRaw", () => {
 		await res.arrayBuffer();
 	});
 
+	it("runs an HTML page only on request, still isolated: opaque origin, no network calls, no forms; other types ignore page=1", async () => {
+		await upload(project, "app.html", Buffer.from("<script>document.title='ran'</script>"));
+		const res = await fetch(`${node.url}/api/local/projects/${project.id}/raw?path=app.html&page=1`);
+		const policy = (res.headers.get("content-security-policy") as string).split("; ");
+		await res.arrayBuffer();
+		const sandbox = policy.find((d) => d.startsWith("sandbox")) as string;
+		expect(sandbox.split(" ")).toContain("allow-scripts");
+		// allow-same-origin would give the page this node's origin (its API, the owner's cookies): never granted
+		expect(sandbox).not.toContain("allow-same-origin");
+		expect(sandbox).not.toContain("allow-forms");
+		expect(sandbox).not.toContain("allow-top-navigation");
+		expect(policy).toEqual(expect.arrayContaining(["connect-src 'none'", "form-action 'none'", "frame-ancestors 'self'"]));
+		await upload(project, "pic.svg", Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>"));
+		const svg = await fetch(`${node.url}/api/local/projects/${project.id}/raw?path=pic.svg&page=1`);
+		expect(svg.headers.get("content-security-policy")).toMatch(/^sandbox; default-src 'none'/);
+		await svg.arrayBuffer();
+	});
+
 	it("refuses traversal, absolute paths, symlinks that leave the project, the .git directory, folders and missing files", async () => {
 		const outside = mkdtempSync(path.join(tmpdir(), "clam-outside-"));
 		try {
