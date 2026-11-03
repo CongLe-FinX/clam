@@ -236,27 +236,25 @@ export class SessionService {
 	}
 
 	/**
-	 * The git-mode shared session whose worktree `row` works in: the session that drives it on this node, and — once this node lost the
-	 * driver role — the same session while its worktree is still here (moving its conversation back to the project folder mid-hand-over
-	 * would race the `moved` bookkeeping). Undefined for every other session.
+	 * The git-mode shared session whose worktree `row` runs in: the session that drives it on this node (the worktree is created on
+	 * demand, see `workdir`), and every other local session of the share while this node keeps its worktree — the former driver's
+	 * session mid-hand-over and this node's participant agent, which then works on the shared branch beside the lead. Undefined for
+	 * every other session: a participant on a node without the worktree works in the project folder.
 	 */
-	private drivenShare(row: SessionRow): typeof sharedSessions.$inferSelect | undefined {
+	private worktreeShare(row: SessionRow): typeof sharedSessions.$inferSelect | undefined {
 		if (this.isViewed(row)) return undefined;
 		const shared = this.gitShareOf(row);
-		if (!shared) return undefined;
-		if (drivesGitShare(shared)) return shared;
-		return shared.localSessionId === row.id && hasWorktree(this.ctx, shared.id) ? shared : undefined;
+		return shared && (drivesGitShare(shared) || hasWorktree(this.ctx, shared.id)) ? shared : undefined;
 	}
 
 	/**
 	 * Which folder the session shows and works in, as a checkout id: `<projectId>~<sharedId>` when it belongs to a git-mode shared session
 	 * whose worktree exists on this node, otherwise `<projectId>` (the project's own folder). For a session that runs here this is the
-	 * runtime's folder (`drivenShare`, see `workdir`). A live copy of another node's session and a session that moved to another node run
-	 * nothing here: they show the share's worktree while this node keeps one (the shared branch and its history, as this node last had it),
-	 * never the project folder, whose branch has nothing to do with the share.
+	 * runtime's folder (`worktreeShare`, see `workdir`); a live copy of another node's session and a session that moved to another node
+	 * run nothing here and show the worktree too (the shared branch as this node last had it), never the project folder.
 	 */
 	checkoutIdOf(row: SessionRow): string {
-		const shared = this.isViewed(row) ? this.gitShareOf(row) : this.drivenShare(row);
+		const shared = this.gitShareOf(row);
 		return shared && hasWorktree(this.ctx, shared.id) ? joinCheckoutId(row.projectId, shared.id) : row.projectId;
 	}
 
@@ -270,7 +268,7 @@ export class SessionService {
 	 * when that is impossible the project folder is used as it was (a problem is logged, never thrown).
 	 */
 	async workdir(row: SessionRow): Promise<{ dir: string; checkoutId: string }> {
-		const shared = this.drivenShare(row);
+		const shared = this.worktreeShare(row);
 		if (shared) {
 			try {
 				const checkout = await ensureSharedCheckout(this.ctx, shared);

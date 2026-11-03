@@ -1,5 +1,5 @@
 import type { wire } from "@clam/agent-network";
-import { i18nMsg, type SharedInvite, type SharedSession } from "@clam/contracts";
+import { i18nMsg, parseCheckoutId, type SharedInvite, type SharedSession } from "@clam/contracts";
 import { agentSessions, agents, peerAgents, projects, workspaceMembers } from "@clam/database";
 import { buildSharedBrief, formatParticipant, normalizeRepoUrl, slugify } from "@clam/task-engine";
 import { and, eq, isNull } from "drizzle-orm";
@@ -587,7 +587,7 @@ export class SharingService implements SharingApi {
 				goal: shared.goal,
 				driver: { agentName: driver?.agentName ?? null, nodeName: shared.driverNodeName },
 				self: { agentName: self.agentName, nodeName: this.hub.nodeName() },
-				repo: shared.repoUrl && shared.branch ? { url: shared.repoUrl, branch: shared.branch } : null,
+				repo: shared.repoUrl && shared.branch ? { url: shared.repoUrl, branch: shared.branch, worktree: parseCheckoutId(this.ctx.sessions.checkoutIdOfSession(self.agentSessionId) ?? "").sharedSessionId !== null } : null,
 				others,
 				agentMessageLimit: shared.agentMessageLimit,
 			});

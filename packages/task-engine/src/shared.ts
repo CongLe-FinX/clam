@@ -71,6 +71,28 @@ export function parseSharedHostToolCall(name: string, raw: unknown): { ok: true;
 	return { ok: true, call: { name: key, args: parsed.data } as SharedHostToolCall };
 }
 
+/**
+ * How a participant agent whose working directory is this node's worktree of the shared branch shares that branch with the lead: it may
+ * change it, and the two keep each other's commits by pulling with rebase and pushing at once (never forced). The lead's checkpoints push
+ * to the same branch; a refused push is resolved the same way.
+ */
+export function participantWorktreeRules(branch: string): string {
+	return `Your working directory is this node's worktree of the shared branch ${branch}, which the lead commits and pushes to as well. You may change it: run \`git pull --rebase\` before you edit, commit each change with a clear message and push it right away; if the push is refused, \`git pull --rebase\`, resolve the conflicts (keep both sides' intent), run the checks that matter and push again. Never force-push. Then say in the group which commit you pushed, so the lead pulls it.`;
+}
+
+/**
+ * To the lead when a checkpoint could not be pushed because the shared branch moved on (a participant pushed to it): pull those commits
+ * in, resolve, and the next checkpoint pushes. Sent once until a checkpoint pushes again.
+ */
+export function buildPushRefusedNotice(i: { sharedSessionId: string; title: string; branch: string; commit: string | null }): string {
+	return [
+		`${MESH_MARKER} shared session ${i.sharedSessionId} · "${i.title.replace(/\s+/g, " ").replace(/"/g, "'").trim()}" · checkpoint not pushed`,
+		"",
+		`The last checkpoint${i.commit ? ` (commit ${i.commit.slice(0, 12)})` : ""} is committed in this worktree but could not be pushed: ${i.branch} on the remote has commits this worktree does not have — another participant pushed to the shared branch.`,
+		`Run \`git pull --rebase\`, resolve any conflicts (keep both sides' intent), run the checks that matter, then carry on with your work. Do NOT force-push. The next checkpoint pushes the branch; if you changed something the participant is working on, tell it in the group.`,
+	].join("\n");
+}
+
 /** What an agent session of a group chat is told about how a message reached it. */
 export interface SharedInjectionInput {
 	sharedSessionId: string;
@@ -82,13 +104,21 @@ export interface SharedInjectionInput {
 	role: "driver" | "participant";
 	/** What the group said that was not addressed to this agent since its last addressed turn (`buildSinceLastTurnBlock`). */
 	sinceLastTurn?: string | null;
-	/** A participant agent woken because the lead cannot be reached: the lead's node (it must not edit the shared branch). */
+	/** A participant agent woken because the lead cannot be reached: the lead's node. */
 	leadOffline?: { nodeName: string } | null;
+	/** A participant whose working directory is this node's worktree of the shared branch (this branch): it may push there too. */
+	worktreeBranch?: string | null;
 }
 
 /** A group message addressed to this agent as it receives it (see `buildMeshMessage`); `ref` is `shared session <id>`. */
 export function buildSharedMessageInjection(i: SharedInjectionInput): string {
-	const who = i.role === "driver" ? "you are the lead: the work on the shared branch happens in this session" : "the lead agent does the main work, you help from your own clone";
+	const inWorktree = i.role === "participant" && Boolean(i.worktreeBranch);
+	const who =
+		i.role === "driver"
+			? "you are the lead: the work on the shared branch happens in this session"
+			: inWorktree
+				? "the lead agent does the main work, you help on the same shared branch"
+				: "the lead agent does the main work, you help from your own clone";
 	const posting = "The final text of your turn is posted to the group automatically; use mesh_say only in the middle of a turn. To wake another agent, write an at-sign right before its agent name or node name (or before the word all, for everybody) in your text; without a mention nobody is woken.";
 	const reminder =
 		i.kind === "question"
@@ -96,10 +126,13 @@ export function buildSharedMessageInjection(i: SharedInjectionInput): string {
 			: i.kind === "instruction"
 				? `Carry it out; ${who}. ${posting}`
 				: `It is addressed to you in the group chat; ${who}. ${posting}`;
+	const branchRules = inWorktree ? `\n${participantWorktreeRules(i.worktreeBranch as string)}` : "";
 	const offline = i.leadOffline
-		? `\nThe lead (${i.leadOffline.nodeName}) is offline right now, so this message was routed to you instead. You may answer, plan and review, but do NOT edit, commit or push code on the shared branch: only the lead edits it. If the work must continue here, a human has to take over on this node (then this agent becomes the lead).`
+		? inWorktree
+			? `\nThe lead (${i.leadOffline.nodeName}) is offline right now, so this message was routed to you instead. Push what you change, so the lead finds it when it returns.`
+			: `\nThe lead (${i.leadOffline.nodeName}) is offline right now, so this message was routed to you instead. You may answer, plan and review, but do NOT edit, commit or push code on the shared branch: only the lead edits it. If the work must continue here, a human has to take over on this node (then this agent becomes the lead).`
 		: "";
-	return buildMeshMessage({ ref: `shared session ${i.sharedSessionId}`, title: i.title, author: i.author, kind: i.kind, text: i.text, reminder: `${reminder}${offline}`, ...(i.sinceLastTurn ? { before: `${i.sinceLastTurn}\n\nAddressed to you now:` } : {}) });
+	return buildMeshMessage({ ref: `shared session ${i.sharedSessionId}`, title: i.title, author: i.author, kind: i.kind, text: i.text, reminder: `${reminder}${branchRules}${offline}`, ...(i.sinceLastTurn ? { before: `${i.sinceLastTurn}\n\nAddressed to you now:` } : {}) });
 }
 
 /** Header of `buildSharedMessageInjection` text, for the UI to recognise a group message in a transcript. */
@@ -117,8 +150,8 @@ export interface SharedBriefInput {
 	driver: { agentName: string | null; nodeName: string };
 	/** The agent being briefed and its node. */
 	self: { agentName: string | null; nodeName: string };
-	/** git mode; null in files mode (no repository: the working folder travels as bundles). */
-	repo: { url: string; branch: string } | null;
+	/** git mode; null in files mode (no repository: the working folder travels as bundles). `worktree`: this session works in this node's worktree of the shared branch. */
+	repo: { url: string; branch: string; worktree?: boolean } | null;
 	/** Other participants (agent@node) besides the driver and self. */
 	others: string[];
 	agentMessageLimit: number;
@@ -131,7 +164,10 @@ export function buildSharedBrief(i: SharedBriefInput): string {
 	L.push(`Driver: ${i.driver.agentName ?? "agent"}@${i.driver.nodeName} (their agent does the main work in its own session)`);
 	if (i.others.length > 0) L.push(`Other participants: ${i.others.join(", ")}`);
 	L.push("", "## Goal", "", i.goal.trim() || i.title);
-	if (i.repo) {
+	if (i.repo?.worktree) {
+		L.push("", "## Repository", "", `- Repo: ${i.repo.url}`, `- Shared branch: ${i.repo.branch} (the lead's checkpoints are committed and pushed there)`);
+		L.push(`- You are NOT the lead, but you work on the same branch: ${participantWorktreeRules(i.repo.branch)} Only a takeover or hand-over (done by a human) makes this node the lead.`);
+	} else if (i.repo) {
 		L.push("", "## Repository", "", `- Repo: ${i.repo.url}`, `- Shared branch: ${i.repo.branch} (the driver commits checkpoints there; do not commit to it yourself)`);
 		L.push("- You are NOT the lead: you may answer, plan, review and try things in your own clone of the repository on this node, but you must not edit, commit or push the shared branch: only the lead's checkpoints go there, and what you change here stays local unless you are asked to deliver it. Only a takeover or hand-over (done by a human) makes this node the lead.");
 	} else {

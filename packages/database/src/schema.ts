@@ -693,6 +693,8 @@ export interface SharedMeta {
 	transfer?: SharedTransferMeta | null;
 	/** Files mode: the checkpoint whose folder bundle this node last made (driver) or applied (participant); undefined = the folder never received one. */
 	appliedFilesSeq?: number;
+	/** Driver: a checkpoint push was refused because a participant pushed to the shared branch, and the lead was told (until a push succeeds). */
+	pushBlocked?: boolean;
 	/** Participant: the node already fetched the shared branch once. */
 	[key: string]: unknown;
 }

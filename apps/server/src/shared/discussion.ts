@@ -1,6 +1,6 @@
 import { NetworkError, wire as wireSchemas } from "@clam/agent-network";
 import type { wire } from "@clam/agent-network";
-import { ATTACHMENT_EAGER_MAX_BYTES, type I18nMessage, type I18nText, i18nMsg, type MentionCandidate, type PromptImage, type SessionEvent, type SharedMessage, type TurnOutputFile } from "@clam/contracts";
+import { ATTACHMENT_EAGER_MAX_BYTES, type I18nMessage, type I18nText, i18nMsg, type MentionCandidate, parseCheckoutId, type PromptImage, type SessionEvent, type SharedMessage, type TurnOutputFile } from "@clam/contracts";
 import { agents, agentSessions } from "@clam/database";
 import {
 	buildSharedMessageInjection,
@@ -556,6 +556,8 @@ export class DiscussionService implements DiscussionApi {
 				text: withFiles(trigger),
 				role: target.role,
 				leadOffline: target.role === "participant" ? this.offlineLead(shared) : null,
+				// A participant that works in this node's worktree of the shared branch is reminded how it shares that branch with the lead.
+				worktreeBranch: target.role === "participant" && shared.branch && parseCheckoutId(this.ctx.sessions.checkoutIdOfSession(sessionId) ?? "").sharedSessionId !== null ? shared.branch : null,
 				sinceLastTurn: buildSinceLastTurnBlock(
 					buffered.map((row) => ({ author: { kind: row.authorKind as "human" | "agent" | "system", agentName: row.authorAgentName, nodeName: row.authorNodeName }, kind: row.kind as GroupMessageKind, text: withFiles(row) })),
 				),

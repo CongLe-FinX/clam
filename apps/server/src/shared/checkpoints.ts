@@ -1,10 +1,12 @@
 import { rm } from "node:fs/promises";
 import type { wire } from "@clam/agent-network";
 import { type Checkpoint, type SessionEvent, i18nMsg } from "@clam/contracts";
+import { buildPushRefusedNotice } from "@clam/task-engine";
 import { agentSessions } from "@clam/database";
 import { eq } from "drizzle-orm";
 import { ApiError } from "../http/errors.ts";
 import { KeyedLock, errorText } from "../network/util.ts";
+import { injectIntoSession } from "../tasks/session-injection.ts";
 import type { CheckpointApi, SharedHub } from "./hub.ts";
 import { downloadSnapshot, SnapshotFiles, SnapshotRejectedError } from "./snapshots.ts";
 import type { CheckpointRow, SharedRow } from "./store.ts";
@@ -18,6 +20,8 @@ const MAX_RETRY_FACTOR = 12;
 interface GitOutcome {
 	commit: string | null;
 	pushed: boolean;
+	/** The push was refused because the shared branch on the remote has commits the worktree does not have (a participant pushed). */
+	diverged?: boolean;
 	problems: string[];
 }
 
@@ -182,6 +186,7 @@ export class CheckpointService implements CheckpointApi {
 		await this.prune(shared.id);
 		for (const participant of this.store.activePeers(shared.id)) this.enqueueNotice(row, participant.nodeId, participant.joinedAt ?? "");
 		this.hub.changed(shared.id, { checkpoints: [row] });
+		if (!filesMode) await this.followPushState(shared, git);
 		// Low noise: a line for a checkpoint someone asked for or that moved the shared branch, not for every automatic one that found nothing new.
 		if (filesMode) {
 			if (options.manual) {
@@ -262,8 +267,36 @@ export class CheckpointService implements CheckpointApi {
 			outcome.commit = pushed.status.headSha;
 		} catch (error) {
 			outcome.problems.push(`push refused or failed, the commit is kept locally: ${errorText(error, 160)}`);
+			const details = error instanceof ApiError ? (error.details as { reason?: string } | undefined) : undefined;
+			outcome.diverged = details?.reason === "non-fast-forward";
 		}
 		return outcome;
+	}
+
+	/**
+	 * Participants that work in a worktree of the shared branch push to it too, so a checkpoint push can be refused because the branch moved
+	 * on. The lead's agent is then told once to pull with rebase and resolve (its next checkpoint pushes), and the group sees why the
+	 * checkpoint is not on the remote yet; the next pushed checkpoint clears the flag.
+	 */
+	private async followPushState(shared: SharedRow, git: GitOutcome): Promise<void> {
+		const blocked = this.store.get(shared.id).meta.pushBlocked === true;
+		if (git.pushed) {
+			if (blocked) this.store.patchMeta(shared.id, { pushBlocked: false });
+			return;
+		}
+		if (!git.diverged || blocked || !shared.localSessionId || !shared.branch) return;
+		this.store.patchMeta(shared.id, { pushBlocked: true });
+		this.hub.discussion.note(shared.id, i18nMsg("The checkpoint could not be pushed: {branch} has commits another participant pushed. The lead was asked to pull them in; the next checkpoint pushes.", { branch: shared.branch }));
+		try {
+			await injectIntoSession(this.ctx, {
+				sessionId: shared.localSessionId,
+				clientId: `shared_push_refused_${shared.id}_${this.store.get(shared.id).lastCheckpointSeq}`,
+				text: buildPushRefusedNotice({ sharedSessionId: shared.id, title: shared.title, branch: shared.branch, commit: git.commit }),
+				kind: "instruction",
+			});
+		} catch (error) {
+			this.hub.log.warn({ err: errorText(error), sharedId: shared.id }, "could not tell the lead that the checkpoint push was refused");
+		}
 	}
 
 	/** Pack the driving session while its runtime is released; `snapshot` stays null with a note when that is not possible. */
