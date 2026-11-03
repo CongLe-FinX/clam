@@ -1,0 +1,777 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLAM — CL Agent Mesh · Architecture</title>
+<meta name="description" content="Interactive architecture of CLAM (CL Agent Mesh): one machine in detail, the Cloudflare-tunnelled mesh, the prompt data flow and the package map.">
+<meta name="color-scheme" content="dark light">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --sans:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --bg:#05080f;--bg2:#0a1020;--panel:rgba(15,22,40,.72);--card:#0d1426;--card2:#111a30;
+  --line:rgba(148,163,184,.16);--line2:rgba(148,163,184,.30);
+  --text:#e8edf7;--muted:#a3afc7;--dim:#7a87a3;
+  --cyan:#22d3ee;--violet:#a78bfa;--amber:#fbbf24;--green:#34d399;--pink:#f472b6;--blue:#60a5fa;--orange:#fb923c;--gray:#94a3b8;
+  --tipbg:rgba(10,15,30,.94);--glowA:.55;--grid:rgba(148,163,184,.05);
+}
+[data-theme=light]{
+  --bg:#f4f6fb;--bg2:#e9eef8;--panel:rgba(255,255,255,.8);--card:#ffffff;--card2:#f6f8fd;
+  --line:rgba(15,23,42,.12);--line2:rgba(15,23,42,.24);
+  --text:#0b1324;--muted:#3f4b63;--dim:#5b6780;
+  --cyan:#0e7490;--violet:#6d28d9;--amber:#b45309;--green:#047857;--pink:#be185d;--blue:#1d4ed8;--orange:#c2410c;--gray:#64748b;
+  --tipbg:rgba(255,255,255,.97);--glowA:.28;--grid:rgba(15,23,42,.045);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.6 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(900px 520px at 12% -6%,color-mix(in srgb,var(--cyan) 16%,transparent),transparent 70%),
+  radial-gradient(800px 600px at 92% 4%,color-mix(in srgb,var(--violet) 18%,transparent),transparent 70%),
+  radial-gradient(900px 700px at 50% 110%,color-mix(in srgb,var(--blue) 10%,transparent),transparent 70%),
+  linear-gradient(var(--grid) 1px,transparent 1px) 0 0/40px 40px,linear-gradient(90deg,var(--grid) 1px,transparent 1px) 0 0/40px 40px,var(--bg)}
+a{color:var(--cyan)}
+code,.mono{font-family:var(--mono);font-size:.88em}
+.wrap{max-width:1320px;margin:0 auto;padding:0 28px}
+header.top{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);background:color-mix(in srgb,var(--bg) 72%,transparent);border-bottom:1px solid var(--line)}
+.bar{display:flex;align-items:center;gap:18px;height:60px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:800;letter-spacing:.02em;color:var(--text);text-decoration:none}
+.brand svg{width:28px;height:28px}
+nav.links{display:flex;gap:4px;margin-left:12px;flex-wrap:wrap}
+nav.links a{color:var(--muted);text-decoration:none;font-size:13.5px;padding:6px 10px;border-radius:8px}
+nav.links a:hover{color:var(--text);background:var(--line)}
+.ctrls{margin-left:auto;display:flex;gap:8px;align-items:center}
+.seg{display:inline-flex;border:1px solid var(--line2);border-radius:10px;padding:2px;background:var(--panel)}
+.seg button,.btn{font:600 12.5px var(--sans);color:var(--muted);background:none;border:0;padding:6px 10px;border-radius:8px;cursor:pointer}
+.seg button[aria-pressed=true]{background:color-mix(in srgb,var(--cyan) 20%,transparent);color:var(--text)}
+.btn{border:1px solid var(--line2);background:var(--panel);display:inline-flex;gap:6px;align-items:center}
+.btn:hover,.seg button:hover{color:var(--text)}
+button:focus-visible,a:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+#skip:focus{left:12px!important;top:12px;z-index:60}
+.hero{padding:72px 0 28px}
+.eyebrow{display:inline-flex;gap:8px;align-items:center;font:600 12px var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--cyan);padding:6px 12px;border:1px solid color-mix(in srgb,var(--cyan) 40%,transparent);border-radius:99px;background:color-mix(in srgb,var(--cyan) 8%,transparent)}
+.eyebrow i{width:7px;height:7px;border-radius:50%;background:var(--cyan);box-shadow:0 0 12px var(--cyan);animation:blink 2s ease-in-out infinite}
+h1{font-size:clamp(34px,5.2vw,64px);line-height:1.04;margin:20px 0 14px;letter-spacing:-.03em;font-weight:800}
+h1 .grad{background:linear-gradient(92deg,var(--cyan),var(--violet) 55%,var(--pink));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lead{font-size:clamp(16px,1.6vw,19px);color:var(--muted);max-width:880px;margin:0}
+.stats{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+.stat{display:flex;gap:10px;align-items:center;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:var(--panel);font-size:13.5px;color:var(--muted)}
+.stat b{color:var(--text);font-weight:700}
+.stat i{width:9px;height:9px;border-radius:3px;flex:none}
+section.sec{padding:44px 0 20px}
+.sec-h{display:flex;align-items:baseline;gap:14px;margin-bottom:6px}
+.sec-h .n{font:600 13px var(--mono);color:var(--dim)}
+h2{font-size:clamp(24px,2.6vw,34px);margin:0;letter-spacing:-.02em}
+.sec p.sub{color:var(--muted);margin:4px 0 20px;max-width:960px}
+.panel{border:1px solid var(--line);border-radius:22px;background:var(--panel);box-shadow:0 30px 80px -40px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.04);position:relative}
+.diagram{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:22px}
+.diagram svg{display:block;width:100%;height:auto;min-width:900px}
+.scrollhint{display:none;font-size:12px;color:var(--dim);padding:8px 16px 0}
+.mesh-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:0}
+.mesh-grid>*{min-width:0}
+.flows{display:flex;flex-wrap:wrap;gap:8px;padding:16px 18px 0}
+.flows button{font:600 13px var(--sans);color:var(--muted);background:var(--card);border:1px solid var(--line2);padding:7px 12px;border-radius:99px;cursor:pointer;display:inline-flex;gap:8px;align-items:center}
+.flows button i{width:8px;height:8px;border-radius:50%}
+.flows button[aria-pressed=true]{color:var(--text);border-color:currentColor;background:color-mix(in srgb,var(--fc) 16%,var(--card));box-shadow:0 0 0 3px color-mix(in srgb,var(--fc) 18%,transparent)}
+.steps{border-left:1px solid var(--line);padding:22px 22px 24px}
+.steps h3{margin:0 0 4px;font-size:18px}
+.steps .tag{font:500 12px var(--mono);color:var(--dim)}
+.steps ol{list-style:none;counter-reset:s;margin:14px 0 0;padding:0;display:grid;gap:10px}
+.steps li{counter-increment:s;position:relative;padding:10px 12px 10px 44px;border:1px solid var(--line);border-radius:12px;background:var(--card);font-size:13.5px;color:var(--muted);line-height:1.5}
+.steps li::before{content:counter(s);position:absolute;left:12px;top:10px;width:22px;height:22px;border-radius:7px;display:grid;place-items:center;font:700 12px var(--mono);color:var(--bg);background:var(--fc)}
+.steps li code{color:var(--text)}
+.seq-cap{display:flex;gap:14px;align-items:center;padding:14px 20px;border-top:1px solid var(--line);min-height:58px}
+.seq-cap .num{font:700 13px var(--mono);color:var(--bg);background:var(--cyan);border-radius:8px;padding:3px 9px;flex:none}
+.seq-cap .txt{color:var(--muted);font-size:14px}
+.seq-cap .btn{margin-left:auto;flex:none}
+.mods{position:relative;padding:20px}
+.mods svg.wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+.layer{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:stretch;padding:8px 0}
+.layer+.layer{border-top:1px dashed var(--line)}
+.layer .ln{font:600 11.5px var(--mono);text-transform:uppercase;letter-spacing:.1em;color:var(--dim);padding-top:12px}
+.layer .row{display:grid;grid-template-columns:repeat(auto-fill,minmax(205px,1fr));gap:10px}
+.mod{position:relative;z-index:1;border:1px solid var(--line2);border-radius:14px;padding:11px 13px 12px;background:var(--card);transition:opacity .25s,border-color .25s,transform .25s,box-shadow .25s;cursor:default;outline:none}
+.mod::before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;border-radius:3px;background:var(--mc)}
+.mod b{display:block;font:600 13px var(--mono);color:var(--text)}
+.mod span{display:block;font-size:12.5px;color:var(--muted);line-height:1.45;margin-top:3px}
+.mods.focus .mod{opacity:.28}
+.mods.focus .mod.on,.mods.focus .mod.dep,.mods.focus .mod.rdep{opacity:1}
+.mod.on{border-color:var(--mc);box-shadow:0 0 0 3px color-mix(in srgb,var(--mc) 22%,transparent),0 10px 30px -10px color-mix(in srgb,var(--mc) 60%,transparent);transform:translateY(-2px)}
+.mod.dep{border-color:color-mix(in srgb,var(--cyan) 70%,transparent)}
+.mod.rdep{border-color:color-mix(in srgb,var(--amber) 70%,transparent)}
+.wires path{fill:none;stroke-width:1.6;stroke-dasharray:5 6;animation:dash 1s linear infinite}
+.modkey{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--dim);padding:0 20px 18px}
+.modkey i{display:inline-block;width:18px;height:0;border-top:2px dashed;vertical-align:middle;margin-right:6px}
+.sgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.scard{padding:18px 18px 16px;border:1px solid var(--line);border-radius:16px;background:var(--panel);position:relative;overflow:hidden}
+.scard::after{content:"";position:absolute;right:-40px;top:-40px;width:120px;height:120px;border-radius:50%;background:radial-gradient(closest-side,color-mix(in srgb,var(--sc) 26%,transparent),transparent)}
+.scard h3{margin:0 0 6px;font-size:15.5px;display:flex;gap:10px;align-items:center}
+.scard h3 svg{width:20px;height:20px;color:var(--sc);flex:none}
+.scard p{margin:0;color:var(--muted);font-size:13.5px;line-height:1.55}
+footer{margin-top:40px;border-top:1px solid var(--line);padding:28px 0 40px;color:var(--dim);font-size:13.5px}
+footer .wrap{display:flex;gap:14px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+footer a{color:var(--muted)}
+/* SVG */
+svg text{font-family:var(--sans)}
+.bx{fill:var(--card);stroke:var(--line2);stroke-width:1.2}
+.frame{fill:color-mix(in srgb,var(--card) 42%,transparent);stroke:color-mix(in srgb,var(--blue) 45%,transparent);stroke-width:1.4;stroke-dasharray:2 6;stroke-linecap:round}
+.tt{fill:var(--text);font-weight:650;font-size:14px}
+.ts{fill:var(--muted);font-family:var(--mono);font-size:11px}
+.tc{fill:var(--text);font-weight:600;font-size:12.5px}
+.tcs{fill:var(--dim);font-family:var(--mono);font-size:10px}
+.tl{fill:var(--dim);font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+.lbl{fill:var(--muted);font-family:var(--mono);font-size:10.5px}
+#meshSvg .ts{font-size:12.5px}#meshSvg .tt{font-size:15.5px}#meshSvg .lbl{font-size:12px}
+.pill rect{stroke-width:1}
+.pill text{font-family:var(--mono);font-size:10.5px;font-weight:500}
+[data-tip]{cursor:help;outline:none}
+[data-tip] .bx{transition:stroke .2s,filter .2s}
+[data-tip]:hover .bx,[data-tip]:focus-visible .bx,[data-tip].hl .bx{stroke:var(--c,var(--cyan));stroke-width:2;filter:drop-shadow(0 0 10px color-mix(in srgb,var(--c,var(--cyan)) 55%,transparent))}
+[data-tip]:focus-visible .bx{stroke-width:2.6}
+.glowbx{stroke:var(--c);stroke-opacity:.55;animation:pulse 3.6s ease-in-out infinite}
+.link{fill:none;stroke:var(--c);stroke-width:2;stroke-opacity:.9;stroke-dasharray:7 7;animation:dash 1.1s linear infinite}
+.link.slow{animation-duration:2.2s}
+.link.git{stroke-dasharray:3 6;stroke-opacity:.7}
+.base{fill:none;stroke:var(--c);stroke-opacity:.14;stroke-width:7;stroke-linecap:round}
+.mlink{fill:none;stroke:var(--c);stroke-width:2;stroke-opacity:.35;stroke-dasharray:6 8;animation:dash 1.6s linear infinite;transition:stroke-opacity .3s,stroke-width .3s}
+.mlink.hot{stroke-opacity:1;stroke-width:2.6}
+.mbase{fill:none;stroke:var(--c);stroke-opacity:.08;stroke-width:9;stroke-linecap:round;transition:stroke-opacity .3s}
+.mbase.hot{stroke-opacity:.22}
+.pkt{fill:var(--c)}
+.dot{fill:var(--c);animation:blink 2.4s ease-in-out infinite}
+.shimmer{animation:shim 3.2s linear infinite}
+.seqline{stroke:var(--line2);stroke-dasharray:3 5}
+.msg line{stroke:var(--dim);stroke-width:1.4;transition:stroke .3s}
+.msg text{fill:var(--muted);font-family:var(--mono);font-size:11px;transition:fill .3s}
+.msg .n{fill:var(--dim);font-weight:700}
+.msg.ret line{stroke-dasharray:5 4}
+.msg.on line{stroke:var(--c);stroke-width:2.2}
+.msg.on text{fill:var(--text)}
+.msg.on .n{fill:var(--c)}
+.msg .ah{fill:var(--dim)}
+.msg .self{fill:none;stroke:var(--dim);stroke-width:1.4;transition:stroke .3s}
+.msg.on .self{stroke:var(--c);stroke-width:2.2}
+.msg.on .ah{fill:var(--c)}
+@keyframes dash{to{stroke-dashoffset:-28}}
+@keyframes pulse{0%,100%{stroke-opacity:.35}50%{stroke-opacity:1}}
+@keyframes blink{0%,100%{opacity:.35}50%{opacity:1}}
+@keyframes shim{from{transform:translateX(-700px)}to{transform:translateX(700px)}}
+/* tooltip */
+#tip{position:fixed;z-index:50;max-width:360px;padding:14px 16px 13px;border-radius:14px;background:var(--tipbg);border:1px solid var(--line2);box-shadow:0 20px 50px -12px rgba(0,0,0,.55);backdrop-filter:blur(10px);pointer-events:none;opacity:0;transform:translateY(6px) scale(.98);transition:opacity .16s,transform .16s}
+#tip.show{opacity:1;transform:none}
+#tip h4{margin:0 0 6px;font-size:14.5px;display:flex;gap:8px;align-items:center}
+#tip h4 i{width:9px;height:9px;border-radius:3px;background:var(--c,var(--cyan));box-shadow:0 0 10px var(--c,var(--cyan))}
+#tip p{margin:0;font-size:13px;line-height:1.55;color:var(--muted)}
+#tip code{display:block;margin-top:8px;font-size:11.5px;color:var(--text);background:color-mix(in srgb,var(--card) 70%,transparent);border:1px solid var(--line);padding:5px 8px;border-radius:8px;white-space:pre-wrap}
+/* reveal + motion */
+.js .reveal{opacity:0;transform:translateY(26px);transition:opacity .8s cubic-bezier(.2,.7,.2,1),transform .8s cubic-bezier(.2,.7,.2,1)}
+.js .reveal.in{opacity:1;transform:none}
+.still *,.still *::before,.still *::after{animation:none!important;transition:none!important}
+.still .pkt,.still .seqpkt{display:none}
+.still .js .reveal,.still .reveal{opacity:1!important;transform:none!important}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@media (max-width:1100px){.mesh-grid{grid-template-columns:minmax(0,1fr)}.steps{border-left:0;border-top:1px solid var(--line)}.sgrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:760px){
+  .wrap{padding:0 16px}nav.links{display:none}.hero{padding:44px 0 16px}
+  .scrollhint{display:block}.layer{grid-template-columns:1fr}.layer .ln{padding-top:4px}
+  .sgrid{grid-template-columns:1fr}.bar{gap:10px}.brand span{display:none}
+  .seq-cap{flex-wrap:wrap}.seq-cap .btn{margin-left:0}
+}
+</style>
+</head>
+<body>
+<a href="#mesh" class="btn" style="position:absolute;left:-9999px" id="skip">Skip to diagram</a>
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="#top" aria-label="CLAM">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient></defs><circle cx="16" cy="6" r="4" fill="url(#lg)"/><circle cx="6" cy="24" r="4" fill="url(#lg)"/><circle cx="26" cy="24" r="4" fill="url(#lg)"/><path d="M16 6L6 24H26Z" fill="none" stroke="url(#lg)" stroke-width="2"/></svg>
+      <span>CLAM</span>
+    </a>
+    <nav class="links" aria-label="Sections">
+      <a href="#mesh" data-i18n="nav.mesh">The mesh</a>
+      <a href="#node" data-i18n="nav.node">One machine</a>
+      <a href="#flow" data-i18n="nav.flow">Prompt flow</a>
+      <a href="#modules" data-i18n="nav.mods">Modules</a>
+      <a href="#security" data-i18n="nav.sec">Security</a>
+    </nav>
+    <div class="ctrls">
+      <div class="seg" role="group" aria-label="Language">
+        <button type="button" data-lang="en" aria-pressed="true">EN</button>
+        <button type="button" data-lang="vi" aria-pressed="false">VI</button>
+      </div>
+      <button type="button" class="btn" id="theme" aria-label="Toggle light/dark theme"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg><span data-i18n="ui.theme">Theme</span></button>
+      <button type="button" class="btn" id="motion" aria-pressed="false"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path id="motionIco" d="M7 5h3v14H7zM14 5h3v14h-3z"/></svg><span id="motionTxt">Pause</span></button>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+<div class="wrap">
+  <section class="hero">
+    <span class="eyebrow"><i></i><span data-i18n="hero.eyebrow">Architecture · interactive</span></span>
+    <h1><span class="grad">CLAM</span> — CL Agent Mesh</h1>
+    <p class="lead" data-i18n="hero.lead">Distributed AI agents, one shared workspace. Every machine runs its own <a href="https://github.com/can1357/oh-my-pi">OMP</a> agents behind a loopback web UI; machines pair through Cloudflare Tunnels and work together over Ed25519-signed requests — group chat, task delegation, shared sessions, handoffs and shared memory.</p>
+    <div class="stats">
+      <div class="stat"><i style="background:var(--green)"></i><span data-i18n="st.1"><b>Local-first</b> · SQLite on every machine</span></div>
+      <div class="stat"><i style="background:var(--cyan)"></i><span data-i18n="st.2"><b>2 listeners</b> · 1 server process</span></div>
+      <div class="stat"><i style="background:var(--amber)"></i><span data-i18n="st.3"><b>1 OMP process</b> per active session</span></div>
+      <div class="stat"><i style="background:var(--violet)"></i><span data-i18n="st.4"><b>Ed25519-signed</b> node-to-node API</span></div>
+      <div class="stat"><i style="background:var(--pink)"></i><span data-i18n="st.5"><b>No control plane</b> · pairing is machine to machine</span></div>
+    </div>
+  </section>
+
+  <section class="sec reveal" id="mesh" aria-labelledby="h-mesh">
+    <div class="sec-h"><span class="n">01</span><h2 id="h-mesh" data-i18n="mesh.h">The mesh</h2></div>
+    <p class="sub" data-i18n="mesh.sub">Machines reach each other only through their Cloudflare Tunnel domains. No machine reads another machine's database: they exchange signed <code>/api/v1</code> messages and Git content. Pick a flow to watch it travel.</p>
+    <div class="panel">
+      <div class="mesh-grid">
+        <div>
+          <div class="flows" role="group" aria-label="Flows" id="flowBtns"></div>
+          <div class="scrollhint" data-i18n="ui.scroll">Scroll sideways to see the whole diagram →</div>
+          <div class="diagram"><svg id="meshSvg" viewBox="0 0 1200 610" role="group" aria-labelledby="meshT"><title id="meshT">Mesh of three CLAM machines, a phone and GitHub connected through Cloudflare Tunnels</title></svg></div>
+        </div>
+        <aside class="steps" aria-live="polite" id="steps"></aside>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec reveal" id="node" aria-labelledby="h-node">
+    <div class="sec-h"><span class="n">02</span><h2 id="h-node" data-i18n="node.h">One machine, in detail</h2></div>
+    <p class="sub" data-i18n="node.sub">One Node.js process (<code>apps/server</code>, Fastify 5) with two loopback listeners, a set of services, local storage, and one supervised OMP child per active session. Hover or focus any box for details.</p>
+    <div class="panel">
+      <div class="scrollhint" data-i18n="ui.scroll">Scroll sideways to see the whole diagram →</div>
+      <div class="diagram"><svg id="nodeSvg" viewBox="0 0 1200 820" role="group" aria-labelledby="nodeT"><title id="nodeT">Anatomy of one CLAM machine</title></svg></div>
+    </div>
+  </section>
+
+  <section class="sec reveal" id="flow" aria-labelledby="h-flow">
+    <div class="sec-h"><span class="n">03</span><h2 id="h-flow" data-i18n="flow.h">A prompt, end to end</h2></div>
+    <p class="sub" data-i18n="flow.sub">From the composer to the agent and back: REST admits the prompt, OMP streams frames over stdio, the EventBus fans normalized events out over <code>/ws</code>.</p>
+    <div class="panel">
+      <div class="scrollhint" data-i18n="ui.scroll">Scroll sideways to see the whole diagram →</div>
+      <div class="diagram"><svg id="seqSvg" viewBox="0 0 1200 650" role="group" aria-labelledby="seqT"><title id="seqT">Sequence diagram of sending a prompt</title></svg></div>
+      <div class="seq-cap" aria-live="polite"><span class="num" id="seqNum">1/13</span><span class="txt" id="seqTxt"></span><button type="button" class="btn" id="seqBtn"></button></div>
+    </div>
+  </section>
+
+  <section class="sec reveal" id="modules" aria-labelledby="h-mods">
+    <div class="sec-h"><span class="n">04</span><h2 id="h-mods" data-i18n="mods.h">Module map</h2></div>
+    <p class="sub" data-i18n="mods.sub">A pnpm monorepo: two apps and fourteen <code>@clam/*</code> packages. Domain packages never import an app; the web app imports only the contracts. Hover a package to trace its imports.</p>
+    <div class="panel"><div class="mods" id="mods"><svg class="wires" id="wires" aria-hidden="true"></svg></div>
+      <div class="modkey"><span><i style="color:var(--cyan)"></i><span data-i18n="mods.k1">imports</span></span><span><i style="color:var(--amber)"></i><span data-i18n="mods.k2">imported by</span></span></div>
+    </div>
+  </section>
+
+  <section class="sec reveal" id="security" aria-labelledby="h-sec">
+    <div class="sec-h"><span class="n">05</span><h2 id="h-sec" data-i18n="sec.h">Security boundaries</h2></div>
+    <p class="sub" data-i18n="sec.sub">An owner session controls agents that run commands as the local user, so exposure is minimal by default and every hop is authenticated.</p>
+    <div class="sgrid" id="sgrid"></div>
+  </section>
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>CLAM — CL Agent Mesh · MIT License</span>
+    <span><a href="https://github.com/CongLe-FinX/clam">github.com/CongLe-FinX/clam</a> · <span data-i18n="ft.rt">Agent runtime:</span> <a href="https://github.com/can1357/oh-my-pi">OMP</a></span>
+  </div>
+</footer>
+<div id="tip" role="tooltip" aria-hidden="true"></div>
+
+<script>
+"use strict";
+document.documentElement.classList.add("js");
+const NS = "http://www.w3.org/2000/svg";
+const qs = new URLSearchParams(location.search);
+let lang = "en";
+const VI = {
+  "nav.mesh":"Mạng lưới","nav.node":"Một máy","nav.flow":"Luồng prompt","nav.mods":"Mô-đun","nav.sec":"Bảo mật",
+  "ui.theme":"Giao diện","ui.scroll":"Vuốt ngang để xem toàn bộ sơ đồ →",
+  "hero.eyebrow":"Kiến trúc · tương tác",
+  "hero.lead":"Tác tử AI phân tán, một không gian làm việc chung. Mỗi máy chạy các tác tử <a href=\"https://github.com/can1357/oh-my-pi\">OMP</a> riêng sau một giao diện web loopback; các máy ghép cặp qua Cloudflare Tunnel và làm việc cùng nhau bằng request ký Ed25519 — chat nhóm, ủy thác tác vụ, phiên chia sẻ, bàn giao và bộ nhớ chung.",
+  "st.1":"<b>Ưu tiên cục bộ</b> · SQLite trên mỗi máy","st.2":"<b>2 listener</b> · 1 tiến trình server","st.3":"<b>1 tiến trình OMP</b> cho mỗi phiên đang chạy","st.4":"<b>API giữa các máy</b> ký Ed25519","st.5":"<b>Không có control plane</b> · ghép cặp trực tiếp giữa các máy",
+  "mesh.h":"Mạng lưới","mesh.sub":"Các máy chỉ gặp nhau qua domain Cloudflare Tunnel của mình. Không máy nào đọc cơ sở dữ liệu của máy khác: chúng trao đổi thông điệp <code>/api/v1</code> có chữ ký và nội dung Git. Chọn một luồng để xem nó di chuyển.",
+  "node.h":"Một máy, chi tiết","node.sub":"Một tiến trình Node.js (<code>apps/server</code>, Fastify 5) với hai listener loopback, các dịch vụ, lưu trữ cục bộ, và một tiến trình OMP con được giám sát cho mỗi phiên đang chạy. Rê chuột hoặc focus vào khối bất kỳ để xem chi tiết.",
+  "flow.h":"Một prompt, từ đầu đến cuối","flow.sub":"Từ ô soạn thảo tới tác tử rồi quay lại: REST chấp nhận prompt, OMP stream frame qua stdio, EventBus phát các sự kiện đã chuẩn hóa qua <code>/ws</code>.",
+  "mods.h":"Bản đồ mô-đun","mods.sub":"Một monorepo pnpm: hai app và mười bốn package <code>@clam/*</code>. Package miền không bao giờ import app; web app chỉ import contracts. Rê chuột lên một package để xem các phụ thuộc.",
+  "mods.k1":"import","mods.k2":"được import bởi",
+  "sec.h":"Ranh giới bảo mật","sec.sub":"Một phiên chủ máy điều khiển các tác tử chạy lệnh dưới quyền người dùng cục bộ, nên mặc định phơi bày tối thiểu và mọi chặng đều được xác thực.",
+  "ft.rt":"Runtime tác tử:"
+};
+const RAW = {}; // original EN innerHTML per element
+function i18nKey(en, vi){ if(!vi || vi===en) return null; const k="k"+Object.keys(VI).length; VI[k]=vi; return k; }
+function t2(pair){ return lang==="vi" ? pair[1] : pair[0]; }
+
+/* ---------- tooltips: [titleEN, descEN, titleVI, descVI, code?] ---------- */
+const TIPS = {
+ browser:["Web UI on this machine","React 19 + Vite single-page app styled with Tailwind v4. It talks only to /api/local (REST) and /ws (WebSocket) on the loopback UI listener, with types from @clam/contracts. Route-level code splitting keeps initial JS under a 180 KB gzip budget.","Giao diện web trên máy này","SPA React 19 + Vite, giao diện Tailwind v4. Chỉ nói chuyện với /api/local (REST) và /ws (WebSocket) trên listener UI loopback, kiểu dữ liệu từ @clam/contracts. Tách mã theo route giữ JS ban đầu dưới ngân sách 180 KB gzip.","http://127.0.0.1:4317"],
+ ui:["UI listener · 127.0.0.1:4317","Loopback only: CLAM_HOST accepts 127.0.0.1, ::1 or localhost, anything else refuses to boot. Serves /api/local, the /ws event socket (plus /ws/terminal and /ws/browser) and the built web UI. Non-loopback Host headers and foreign WebSocket Origins are rejected. Never tunnelled.","Listener UI · 127.0.0.1:4317","Chỉ loopback: CLAM_HOST chỉ nhận 127.0.0.1, ::1 hoặc localhost, giá trị khác thì server không khởi động. Phục vụ /api/local, socket sự kiện /ws (cùng /ws/terminal, /ws/browser) và giao diện web đã build. Host không phải loopback và Origin WebSocket lạ bị từ chối. Không bao giờ đi qua tunnel.","CLAM_HOST · CLAM_PORT"],
+ net:["Network listener · 127.0.0.1:4318","A second Fastify instance in the same process, and the tunnel's origin. Serves /api/v1, the signed node-to-node protocol: rate limit → version, peer, clock skew, nonce, digest, signature → capability → handler. Only when the owner switches remote UI on does it also serve the web UI behind the owner login; otherwise every other path is a plain 404.","Listener mạng · 127.0.0.1:4318","Một instance Fastify thứ hai trong cùng tiến trình, là origin của tunnel. Phục vụ /api/v1, giao thức có chữ ký giữa các máy: giới hạn tốc độ → phiên bản, peer, lệch giờ, nonce, digest, chữ ký → quyền → handler. Chỉ khi chủ máy bật UI từ xa nó mới phục vụ giao diện web sau trang đăng nhập; ngoài ra mọi đường dẫn khác trả 404.","CLAM_NETWORK_PORT (default UI port + 1)"],
+ cloudflared:["cloudflared (child process)","Started and supervised by @clam/cloudflare-tunnel, restarted with backoff. Quick tunnel: a random https://*.trycloudflare.com that changes on every start and is announced to peers. Named tunnel: your own hostname, dashboard token kept in the secret store.","cloudflared (tiến trình con)","Được @clam/cloudflare-tunnel khởi chạy và giám sát, tự khởi động lại với backoff. Quick tunnel: địa chỉ ngẫu nhiên https://*.trycloudflare.com, đổi mỗi lần chạy và được thông báo cho các peer. Named tunnel: hostname của bạn, token dashboard lưu trong kho bí mật.","origin http://127.0.0.1:4318"],
+ edge:["Cloudflare edge","Terminates TLS for each machine's domain and forwards to its tunnel. Cloudflare can see the traffic, so request signatures give authenticity and integrity independent of TLS — never put secrets into task text or messages.","Cloudflare edge","Kết thúc TLS cho domain của từng máy và chuyển tiếp vào tunnel. Cloudflare nhìn thấy lưu lượng, nên chữ ký request đảm bảo tính xác thực và toàn vẹn độc lập với TLS — đừng đưa bí mật vào nội dung tác vụ hay tin nhắn."],
+ phone:["Phone or another browser","Opens the machine's own domain. Remote UI is off by default and can only be switched on at the machine: scrypt-hashed owner password, __Host- session cookie, exact-Origin CSRF check, throttled login. Terminal and Browser need their own toggle plus a password step-up.","Điện thoại hoặc trình duyệt khác","Mở domain riêng của máy. UI từ xa tắt mặc định và chỉ bật được ngay tại máy: mật khẩu chủ máy băm scrypt, cookie phiên __Host-, kiểm tra Origin chính xác chống CSRF, giới hạn đăng nhập. Terminal và Browser cần công tắc riêng và nhập lại mật khẩu (step-up)."],
+ peers:["Paired machines","Other CLAM nodes. Every /api/v1 call is signed with Ed25519 and checked against the pinned key of a paired peer, then authorised by the capabilities you granted it. Liveness: a signed GET /node/health every 30 s.","Các máy đã ghép cặp","Các node CLAM khác. Mọi lời gọi /api/v1 được ký Ed25519 và kiểm tra với khóa đã ghim của peer, rồi cấp quyền theo capability bạn đã cho phép. Kiểm tra sống: GET /node/health có chữ ký mỗi 30 giây."],
+ providers:["Model providers","OMP holds the provider logins and calls the model APIs. CLAM starts the login flow through OMP's control process and never reads or writes OMP's credential store.","Nhà cung cấp mô hình","OMP giữ đăng nhập provider và gọi API mô hình. CLAM khởi chạy luồng đăng nhập qua tiến trình điều khiển của OMP và không bao giờ đọc hay ghi kho thông tin đăng nhập của OMP."],
+ server:["apps/server · Fastify 5","The composition root: builds one ServerContext (config, db, secrets, bus, identity, runtime, git, github, network …), registers every route plugin and owns the process lifecycle. Every body and query is validated with the Zod schemas of @clam/contracts.","apps/server · Fastify 5","Gốc kết hợp: tạo một ServerContext (config, db, secrets, bus, identity, runtime, git, github, network …), đăng ký mọi route plugin và quản lý vòng đời tiến trình. Mọi body và query đều được kiểm tra bằng schema Zod của @clam/contracts.","apps/server/src/context.ts"],
+ bus:["EventBus → /ws","Topic fan-out — session:<id>, sessions, runtime, git:<projectId>, network, tunnel, tasks, shared … Each topic has a monotonically increasing seq that the WebSocket forwards, so clients detect gaps and refetch. Producers such as the working-tree watcher run only while someone listens.","EventBus → /ws","Phát theo topic — session:<id>, sessions, runtime, git:<projectId>, network, tunnel, tasks, shared … Mỗi topic có seq tăng dần được WebSocket chuyển tiếp, nên client phát hiện chỗ thiếu và tải lại. Các bộ phát như trình theo dõi cây thư mục chỉ chạy khi có người nghe."],
+ sessions:["Sessions · runtime supervisor","One OMP child per active session. Concurrency cap (default 4) with LRU eviction of idle runtimes, idle reaping after 30 min, crash restarts with exponential backoff (up to 8 attempts). Prompts are admitted, streamed and reconciled by clientId; the Context panel can compact a session's context on demand.","Phiên · bộ giám sát runtime","Một tiến trình OMP con cho mỗi phiên đang chạy. Giới hạn đồng thời (mặc định 4) với loại bỏ LRU các runtime rảnh, dọn runtime rảnh sau 30 phút, khởi động lại khi lỗi với backoff lũy thừa (tối đa 8 lần). Prompt được chấp nhận, stream và đối chiếu theo clientId; panel Context có thể nén ngữ cảnh phiên khi cần."],
+ tasks:["Task engine","Delegates a task to an agent on a paired machine — from the UI or by an agent with the mesh_delegate host tool. Durable outbox with idempotency keys, executor queue (one running task per working tree), completion with mesh_complete, loop guard of 12 agent messages without a human.","Bộ máy tác vụ","Ủy thác tác vụ cho tác tử trên máy đã ghép cặp — từ UI hoặc do tác tử gọi host tool mesh_delegate. Outbox bền vững với khóa idempotency, hàng đợi thực thi (mỗi cây làm việc một tác vụ chạy), hoàn tất bằng mesh_complete, chống vòng lặp tối đa 12 tin nhắn tác tử khi không có người.","apps/server/src/tasks · @clam/task-engine"],
+ shared:["Shared sessions","The driver's session is mirrored live and read-only to participants, checkpointed to a shared git branch plus an OMP session snapshot, and can be taken over on another machine under an epoch that fences the former driver. Participants work in a git worktree of the shared branch.","Phiên chia sẻ","Phiên của máy lái (driver) được sao chép trực tiếp, chỉ đọc, tới các máy tham gia, lưu checkpoint lên nhánh git chung kèm snapshot phiên OMP, và có thể được máy khác tiếp quản dưới một epoch chặn máy lái cũ. Máy tham gia làm việc trong git worktree của nhánh chung.","apps/server/src/shared"],
+ chat:["Group chat (discussion)","A leaderless log replicated on every member machine and ordered by a hybrid logical clock: @mention addressing, a “since your last turn” catch-up, automatic replies from every agent turn. Files in the group are replicated between members by signed pull.","Chat nhóm (thảo luận)","Nhật ký không cần leader, được sao chép trên mọi máy thành viên và sắp xếp bằng đồng hồ logic lai (HLC): gọi tên bằng @mention, phần tóm tắt “từ lượt trước của bạn”, tự động trả lời sau mỗi lượt của tác tử. Tệp trong nhóm được sao chép giữa các thành viên bằng pull có chữ ký."],
+ handoff:["Handoff engine","Moves unfinished work to another machine: freeze, OMP handoff summary (secret-scanned), WIP pushed to the task branch or a folder bundle, sealed manifest offered through the outbox, re-entrant restore steps on the target, durable ack, epoch n+1 — fencing makes sure it never runs twice.","Bộ máy bàn giao","Chuyển việc dang dở sang máy khác: đóng băng, tóm tắt handoff của OMP (đã quét bí mật), WIP đẩy lên nhánh tác vụ hoặc gói thư mục, manifest niêm phong gửi qua outbox, các bước khôi phục chạy lại được ở máy đích, ack bền vững, epoch n+1 — cơ chế fencing bảo đảm không bao giờ chạy hai lần.","apps/server/src/handoff · @clam/handoff-engine"],
+ context:["Context engine","Shareable project memory — memory, plans, decisions, summaries, notes — versioned with ancestry, searchable (SQLite FTS5) and replicated to workspace members with POST /context/sync. Private contexts and conversation history never leave the machine. Works with or without git.","Bộ máy ngữ cảnh","Bộ nhớ dự án có thể chia sẻ — memory, kế hoạch, quyết định, tóm tắt, ghi chú — có phiên bản kèm tổ tiên, tìm kiếm được (SQLite FTS5) và sao chép tới các thành viên workspace bằng POST /context/sync. Ngữ cảnh riêng và lịch sử hội thoại không bao giờ rời máy. Chạy được có hoặc không có git.","apps/server/src/context · @clam/context-engine"],
+ network:["Network services","Peers with pinned keys and capability grants, invitation pairing, a jittered 30 s signed heartbeat plus SSE, the Agent Directory of every paired machine, tunnel control and a gap-free network event log.","Dịch vụ mạng","Peer với khóa đã ghim và quyền được cấp, ghép cặp bằng lời mời, heartbeat có chữ ký mỗi ~30 giây cùng SSE, Danh bạ tác tử của mọi máy đã ghép cặp, điều khiển tunnel và nhật ký sự kiện mạng liên tục.","apps/server/src/network"],
+ access:["Access gate","Guards the remote UI on the public listener: owner session cookie, exact-Origin check on writes and upgrades, login throttling with lockout, loopback-only exposure controls, password step-up for Terminal and Browser, audit entries.","Cổng truy cập","Bảo vệ UI từ xa trên listener công khai: cookie phiên chủ máy, kiểm tra Origin chính xác cho thao tác ghi và nâng cấp WebSocket, giới hạn đăng nhập có khóa tạm, các điều khiển phơi bày chỉ ở loopback, step-up mật khẩu cho Terminal và Browser, ghi nhật ký kiểm toán.","apps/server/src/auth/gate.ts"],
+ git:["Git engine + askpass broker","Drives the system git CLI with argv only (no shell): status, diff, log, commit, fetch, fast-forward-only pull, never-forced push, conflict report, secret scanner. Tokens reach git through a Unix-socket askpass broker with a one-time nonce — never in argv, env, remote URLs or files.","Git engine + askpass broker","Điều khiển git CLI của hệ thống chỉ bằng argv (không qua shell): status, diff, log, commit, fetch, pull chỉ fast-forward, push không bao giờ ép, báo cáo xung đột, quét bí mật. Token tới git qua askpass broker trên Unix socket với nonce dùng một lần — không bao giờ nằm trong argv, env, URL remote hay tệp.","@clam/git-engine"],
+ github:["GitHub integration","OAuth device flow or gh import, several accounts, repository listing and permission checks, pull requests with mergeability and combined checks, commit identity.","Tích hợp GitHub","OAuth device flow hoặc nhập từ gh, nhiều tài khoản, liệt kê repo và kiểm tra quyền, pull request kèm trạng thái merge và checks, danh tính commit.","@clam/github-integration"],
+ usage:["Provider usage","Three sources, never blended: OMP-recorded stats (omp stats), provider-reported quota (omp usage) and CLAM's own per-session cost accounting in SQLite.","Mức dùng provider","Ba nguồn, không bao giờ trộn lẫn: thống kê OMP ghi nhận (omp stats), hạn mức do provider báo (omp usage) và kế toán chi phí theo phiên của CLAM trong SQLite.","@clam/provider-usage"],
+ outputs:["Turn outputs · files","Records the files each agent turn created or changed and serves project files (ranges, downloads, atomic uploads). Chat uploads land in the project's attachments/ folder; group-chat files live in a content-addressed store.","Kết quả lượt · tệp","Ghi nhận các tệp mà mỗi lượt của tác tử tạo hoặc sửa, phục vụ tệp dự án (range, tải xuống, upload nguyên tử). Tệp tải lên trong chat nằm trong thư mục attachments/ của dự án; tệp chat nhóm nằm trong kho định địa chỉ theo nội dung.","services/turn-outputs.ts"],
+ terminal:["Terminal","Real login shells on node-pty with a 2 MiB scrollback ring, rendered with xterm.js over /ws/terminal/:id. Shells outlive the browser tab; at most 12 terminals. Never reachable through /api/v1.","Terminal","Shell đăng nhập thật trên node-pty với bộ đệm cuộn 2 MiB, hiển thị bằng xterm.js qua /ws/terminal/:id. Shell sống lâu hơn tab trình duyệt; tối đa 12 terminal. Không bao giờ truy cập được qua /api/v1.","apps/server/src/terminal"],
+ browser2:["Machine browser","One headless Chromium-family browser on the machine, driven over the Chrome DevTools Protocol on a pipe (no debugging port) with a dedicated profile. Pages stream as JPEG frames over /ws/browser/:tabId with back-pressure.","Trình duyệt của máy","Một trình duyệt họ Chromium chạy headless trên máy, điều khiển qua Chrome DevTools Protocol bằng pipe (không mở cổng debug) với profile riêng. Trang được stream dạng khung JPEG qua /ws/browser/:tabId có kiểm soát áp lực.","apps/server/src/browser"],
+ preview:["Preview gateway","Opens a dev server that runs on the machine (localhost:<port>) in your own browser through the machine's domain, behind single-use tickets minted by an owner session. Off by default.","Cổng xem trước","Mở dev server đang chạy trên máy (localhost:<port>) trong trình duyệt của bạn qua domain của máy, sau vé dùng một lần do phiên chủ máy cấp. Tắt mặc định.","apps/server/src/preview"],
+ monitor:["System monitor","Samples CPU, memory and disk every 3 s for the sidebar ring gauges and alerts; the System page lists the top apps and, on demand, the largest folders.","Giám sát hệ thống","Lấy mẫu CPU, bộ nhớ và đĩa mỗi 3 giây cho các vòng đo ở sidebar và cảnh báo; trang System liệt kê các app dùng nhiều nhất và, khi yêu cầu, các thư mục lớn nhất.","services/system-monitor.ts"],
+ sqlite:["SQLite · clam.db","better-sqlite3 + Drizzle ORM in WAL mode with foreign keys and a busy timeout; committed SQL migrations with pre-migrate snapshots. Sessions, tasks, peers, outbox, shared sessions, handoffs, contexts. No machine reads another machine's database.","SQLite · clam.db","better-sqlite3 + Drizzle ORM ở chế độ WAL, có khóa ngoại và busy timeout; migration SQL được commit kèm snapshot trước khi migrate. Phiên, tác vụ, peer, outbox, phiên chia sẻ, bàn giao, ngữ cảnh. Không máy nào đọc cơ sở dữ liệu của máy khác.","@clam/database"],
+ secrets:["OS secret store","macOS Keychain (security -i, secret on stdin), Linux Secret Service (secret-tool), otherwise an AES-256-GCM encrypted file. Holds GitHub tokens, the named-tunnel token and the session signing key; no secret ever goes into SQLite, logs or responses.","Kho bí mật của hệ điều hành","macOS Keychain (security -i, bí mật qua stdin), Linux Secret Service (secret-tool), nếu không có thì tệp mã hóa AES-256-GCM. Giữ token GitHub, token named tunnel và khóa ký phiên; không bí mật nào nằm trong SQLite, log hay phản hồi.","@clam/secret-store"],
+ identity:["Ed25519 node identity","A keypair generated on first run, kept as identity/ed25519.key (PEM, 0600). Node id = node_ + 16 hex of the SHA-256 fingerprint, which you compare out of band when pairing. It signs every outgoing /api/v1 request.","Danh tính node Ed25519","Cặp khóa tạo ở lần chạy đầu, lưu tại identity/ed25519.key (PEM, 0600). Node id = node_ + 16 ký tự hex của dấu vân tay SHA-256, được bạn so sánh khi ghép cặp. Nó ký mọi request /api/v1 gửi đi.","@clam/node-identity"],
+ folders:["Project folders · data directory","Your project folders — git working copies or plain folders (git is never required) — plus ~/.clam: clam.db, sessions/<id>/ (one OMP session directory per session), artifacts/, worktrees/, cache/ and run/ (askpass socket).","Thư mục dự án · thư mục dữ liệu","Các thư mục dự án của bạn — bản git hoặc thư mục thường (không bắt buộc git) — cùng ~/.clam: clam.db, sessions/<id>/ (mỗi phiên một thư mục phiên OMP), artifacts/, worktrees/, cache/ và run/ (socket askpass).","CLAM_DATA_DIR (default ~/.clam)"],
+ omp:["OMP agent runtime","One omp --mode rpc-ui --cwd <project> child per active session (plus --no-ui in yolo approval mode), bound to <dataDir>/sessions/<id> with open_session and spoken to with JSONL frames over stdio (protocol v2). A long-lived omp --mode rpc control process serves logins and model lists. CLAM's mesh_* host tools are registered in every runtime.","Runtime tác tử OMP","Mỗi phiên đang chạy có một tiến trình con omp --mode rpc-ui --cwd <project> (thêm --no-ui ở chế độ duyệt yolo), gắn với <dataDir>/sessions/<id> bằng open_session và giao tiếp bằng frame JSONL qua stdio (giao thức v2). Một tiến trình điều khiển omp --mode rpc chạy lâu dài phục vụ đăng nhập và danh sách mô hình. Các host tool mesh_* của CLAM được đăng ký trong mọi runtime.","@clam/agent-runtime"],
+ gh:["GitHub","Source of truth for shared code and shareable project data under .clmesh/ (never credentials or private conversations). Machines sync by fetching and pushing the same repository; pull requests from the Git panel.","GitHub","Nguồn chân lý cho mã nguồn chung và dữ liệu dự án chia sẻ trong .clmesh/ (không bao giờ chứa thông tin đăng nhập hay hội thoại riêng). Các máy đồng bộ bằng cách fetch và push cùng một repo; tạo pull request từ panel Git."],
+ legend:["How to read this diagram","Colours mark the kind of traffic; moving dashes and dots show data in motion. Every box is focusable: hover it or press Tab to read what it does.","Cách đọc sơ đồ","Màu sắc cho biết loại lưu lượng; nét đứt và chấm di chuyển thể hiện dữ liệu đang chạy. Mọi khối đều focus được: rê chuột hoặc nhấn Tab để đọc chức năng."],
+ mA:["Machine A · MacBook Pro","A full CLAM node on a named tunnel: its own OMP agents, SQLite database, Ed25519 identity and web UI. Its owner can also open this UI from a phone through the same domain.","Máy A · MacBook Pro","Một node CLAM đầy đủ trên named tunnel: tác tử OMP, cơ sở dữ liệu SQLite, danh tính Ed25519 và giao diện web riêng. Chủ máy cũng có thể mở giao diện này từ điện thoại qua cùng domain."],
+ mB:["Machine B · Linux workstation","Another node with its own agents and data. It knows A only by A's pinned public key, URL and the capabilities each side granted.","Máy B · máy trạm Linux","Một node khác với tác tử và dữ liệu riêng. Nó chỉ biết A qua khóa công khai đã ghim, URL và các quyền mà mỗi bên đã cấp."],
+ mC:["Machine C · Mac mini","A node on a quick tunnel: a random *.trycloudflare.com address that changes on every start. It announces the new address to every peer with a signed POST /node/announce; peers verify it by fingerprint.","Máy C · Mac mini","Một node dùng quick tunnel: địa chỉ ngẫu nhiên *.trycloudflare.com đổi mỗi lần khởi động. Nó thông báo địa chỉ mới cho mọi peer bằng POST /node/announce có chữ ký; các peer xác minh bằng dấu vân tay."],
+ mP:["Phone","Any browser, anywhere: it opens Machine A's own domain and signs in with A's owner password. Same React UI, same /ws stream — only through the tunnel and the access gate.","Điện thoại","Bất kỳ trình duyệt nào, ở đâu cũng được: mở domain riêng của Máy A và đăng nhập bằng mật khẩu chủ máy của A. Cùng giao diện React, cùng luồng /ws — chỉ là đi qua tunnel và cổng truy cập."],
+ mE:["Cloudflare Tunnels","Each machine runs cloudflared and is reachable only at its own HTTPS domain. There is no control plane: discovery is the invitation URL plus code you exchange yourself.","Cloudflare Tunnel","Mỗi máy chạy cloudflared và chỉ truy cập được qua domain HTTPS của riêng nó. Không có control plane: việc tìm nhau là URL lời mời cùng mã mà bạn tự trao đổi."],
+ mG:["GitHub · shared repository","Shared code and .clmesh/ project data. Delegated tasks deliver a pushed task branch (or a patch), shared sessions checkpoint to a shared branch.","GitHub · repo chung","Mã chung và dữ liệu dự án .clmesh/. Tác vụ ủy thác trả về nhánh tác vụ đã push (hoặc bản patch), phiên chia sẻ lưu checkpoint lên nhánh chung."]
+};
+
+/* ---------- helpers ---------- */
+function mk(tag, attrs, parent){ const e=document.createElementNS(NS,tag); if(attrs) for(const k in attrs) e.setAttribute(k,attrs[k]); if(parent) parent.appendChild(e); return e; }
+function tx(parent, x, y, en, vi, cls, anchor){ const e=mk("text",{x,y,class:cls},parent); if(anchor) e.setAttribute("text-anchor",anchor); e.textContent=en; const k=i18nKey(en,vi); if(k) e.dataset.i18n=k; return e; }
+const ICONS = {
+ monitor:"M3 4h18v12H3z M8 20h8 M12 16v4",
+ phone:"M8 2h8a1.5 1.5 0 0 1 1.5 1.5v17A1.5 1.5 0 0 1 16 22H8a1.5 1.5 0 0 1-1.5-1.5v-17A1.5 1.5 0 0 1 8 2z M11 18.5h2",
+ cloud:"M7 19h10.5a4.5 4.5 0 0 0 .4-8.98A6.5 6.5 0 0 0 5.4 9.6 4.75 4.75 0 0 0 7 19z",
+ db:"M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6 M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3",
+ key:"M12.5 14.5a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0z M11.3 11.3L20 2.6 M16.5 6.1l2.6 2.6 M14.4 8.2l2 2",
+ lock:"M5 11h14v10H5z M8 11V7a4 4 0 0 1 8 0v4 M12 15v2",
+ git:"M8.5 5.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z M8.5 18.5a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z M20.5 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z M6 8v8 M18 10.5c0 4-5 4-11 5.5",
+ bolt:"M13 2L4 14h7l-1 8 9-12h-7z",
+ server:"M4 4h16v6H4z M4 14h16v6H4z M8 7h.01 M8 17h.01",
+ folder:"M3 6h6l2 2h10v11H3z",
+ globe:"M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z M3 12h18 M12 3c2.5 2.6 3.6 5.6 3.6 9s-1.1 6.4-3.6 9c-2.5-2.6-3.6-5.6-3.6-9S9.5 5.6 12 3z",
+ users:"M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M2 21c0-4 3-6 7-6s7 2 7 6 M16 3.5a4 4 0 0 1 0 7.5 M18 15c2.5.6 4 2.6 4 6",
+ chip:"M7 7h10v10H7z M9 2v3 M15 2v3 M9 19v3 M15 19v3 M2 9h3 M2 15h3 M19 9h3 M19 15h3",
+ shield:"M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z",
+ sig:"M3 17c3-1 4-9 6-9s1 8 3 8 2-4 4-4 2 3 5 3 M3 21h18",
+ link:"M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1 M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
+ eye:"M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"
+};
+function icon(parent, name, x, y, size, color){ const g=mk("g",{transform:`translate(${x} ${y}) scale(${size/24})`,fill:"none",stroke:color,"stroke-width":1.8,"stroke-linecap":"round","stroke-linejoin":"round"},parent); mk("path",{d:ICONS[name]},g); return g; }
+function tipGroup(parent, id, color){ const g=mk("g",{"data-tip":id,tabindex:0,role:"img"},parent); if(color) g.style.setProperty("--c",`var(--${color})`); return g; }
+function card(parent, o){
+  const g=tipGroup(parent,o.tip,o.c);
+  mk("rect",{x:o.x,y:o.y,width:o.w,height:o.h,rx:o.rx||14,class:"bx"},g);
+  if(o.glow) mk("rect",{x:o.x,y:o.y,width:o.w,height:o.h,rx:o.rx||14,fill:"none",class:"glowbx","stroke-width":1.6,style:`animation-delay:${o.glow}s`},g);
+  let tx0=o.x+16;
+  if(o.icon){ const b=mk("rect",{x:o.x+14,y:o.y+14,width:30,height:30,rx:9,fill:`var(--${o.c})`,"fill-opacity":.14},g); icon(g,o.icon,o.x+20,o.y+20,18,`var(--${o.c})`); tx0=o.x+54; }
+  if(o.title) tx(g,tx0,o.y+(o.icon?27:24),o.title[0],o.title[1],"tt");
+  (o.sub||[]).forEach((s,i)=>tx(g,tx0,o.y+(o.icon?43:41)+i*15,s[0],s[1],"ts"));
+  return g;
+}
+function pill(parent,x,y,text,color){ const g=mk("g",{class:"pill"},parent); const w=text.length*6.5+18; mk("rect",{x,y,width:w,height:20,rx:10,fill:`var(--${color})`,"fill-opacity":.12,stroke:`var(--${color})`,"stroke-opacity":.45},g); const t=mk("text",{x:x+w/2,y:y+14,"text-anchor":"middle",fill:`var(--${color})`},g); t.textContent=text; return w; }
+function defs(svg){
+  const d=mk("defs",null,svg);
+  d.innerHTML=`<filter id="pglow-${svg.id}" x="-200%" y="-200%" width="500%" height="500%"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  <linearGradient id="busg-${svg.id}" x1="0" x2="1"><stop offset="0" stop-color="var(--cyan)" stop-opacity=".16"/><stop offset=".5" stop-color="var(--violet)" stop-opacity=".2"/><stop offset="1" stop-color="var(--amber)" stop-opacity=".16"/></linearGradient>
+  <linearGradient id="shim-${svg.id}" x1="0" x2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+  <marker id="arr-${svg.id}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker>`;
+}
+let pid=0;
+function link(parent, d, color, o={}){
+  const id="p"+(pid++);
+  mk("path",{d,class:"base",style:`--c:var(--${color})`},parent);
+  const p=mk("path",{d,id,class:"link"+(o.git?" git":"")+(o.slow?" slow":""),style:`--c:var(--${color})`},parent);
+  if(o.label){ const t=tx(parent,o.label[0],o.label[1],o.label[2],o.label[3],"lbl",o.label[4]||"middle"); }
+  (o.pk||[]).forEach(pk=>packet(parent,id,color,pk.dur,pk.begin||0,pk.rev,parent.ownerSVGElement||parent));
+  return p;
+}
+function packet(parent, pathId, color, dur, begin, rev, svg){
+  const c=mk("circle",{r:4.2,class:"pkt",style:`--c:var(--${color})`,filter:`url(#pglow-${(svg.id||svg.ownerSVGElement.id)})`},parent);
+  const a=mk("animateMotion",{dur:dur+"s",begin:begin+"s",repeatCount:"indefinite",rotate:"auto"},c);
+  if(rev){ a.setAttribute("keyPoints","1;0"); a.setAttribute("keyTimes","0;1"); a.setAttribute("calcMode","linear"); }
+  const m=mk("mpath",null,a); m.setAttribute("href","#"+pathId);
+  return c;
+}
+
+/* ---------- 02 node anatomy ---------- */
+function buildNode(){
+  const s=document.getElementById("nodeSvg"); defs(s);
+  const L=mk("g",null,s); // links layer
+  // frame
+  const fr=mk("g",null,s);
+  mk("rect",{x:236,y:20,width:744,height:786,rx:26,class:"frame"},fr);
+  tx(fr,258,46,"ONE MACHINE · NODE","MỘT MÁY · NODE","tl");
+  tx(fr,958,46,"node_<16 hex> · ~/.clam",null,"ts","end");
+  // outside left
+  card(s,{x:16,y:80,w:196,h:112,c:"cyan",tip:"browser",icon:"monitor",title:["Browser","Trình duyệt"],sub:[["React 19 · Vite","React 19 · Vite"],["Tailwind v4","Tailwind v4"],["127.0.0.1:4317","127.0.0.1:4317"]],glow:.2});
+  // legend
+  const lg=tipGroup(s,"legend","blue");
+  mk("rect",{x:16,y:232,width:196,height:402,rx:14,class:"bx"},lg);
+  tx(lg,32,258,"LEGEND","CHÚ GIẢI","tl");
+  const items=[["cyan","UI · REST + WS","UI · REST + WS"],["violet","Signed /api/v1","/api/v1 có chữ ký"],["orange","Cloudflare Tunnel","Cloudflare Tunnel"],["amber","OMP · JSONL stdio","OMP · JSONL stdio"],["green","Local storage","Lưu trữ cục bộ"],["pink","Owner login","Đăng nhập chủ máy"],["gray","git fetch / push","git fetch / push",1],["blue","Server · services","Server · dịch vụ"]];
+  items.forEach((it,i)=>{ const y=286+i*34; mk("line",{x1:32,y1:y,x2:56,y2:y,stroke:`var(--${it[0]})`,"stroke-width":2.4,"stroke-dasharray":it[3]?"3 5":"7 6",class:"link",style:`--c:var(--${it[0]})`},lg); tx(lg,66,y+4,it[1],it[2],"ts"); });
+  const py=286+items.length*34; mk("circle",{cx:44,cy:py,r:4.5,class:"pkt",style:"--c:var(--cyan)",filter:`url(#pglow-nodeSvg)`},lg); tx(lg,66,py+4,"data in motion","dữ liệu đang chạy","ts");
+  tx(lg,32,py+40,"Hover or Tab to a box","Rê chuột hoặc Tab vào","ts"); tx(lg,32,py+56,"for details","khối để xem chi tiết","ts");
+  card(s,{x:16,y:660,w:196,h:110,c:"gray",tip:"gh",icon:"git",title:["GitHub","GitHub"],sub:[["fetch · push · PRs","fetch · push · PR"],[".clmesh/ shared data",".clmesh/ dùng chung"]]});
+  // listeners
+  card(s,{x:256,y:66,w:318,h:104,c:"cyan",tip:"ui",title:["UI listener","Listener UI"],sub:[["127.0.0.1:4317 · loopback","127.0.0.1:4317 · loopback"]],glow:.6});
+  let px=272; px+=pill(s,px,136,"/api/local","cyan")+8; px+=pill(s,px,136,"/ws","cyan")+8; pill(s,px,136,"static UI","cyan");
+  card(s,{x:590,y:66,w:300,h:104,c:"violet",tip:"net",title:["Network listener","Listener mạng"],sub:[["127.0.0.1:4318 · tunnel origin","127.0.0.1:4318 · origin của tunnel"]],glow:1.1});
+  px=606; px+=pill(s,px,136,"/api/v1 signed","violet")+8; pill(s,px,136,"owner UI","pink");
+  card(s,{x:906,y:84,w:140,h:72,c:"orange",tip:"cloudflared",title:["cloudflared","cloudflared"],sub:[["child process","tiến trình con"],["quick · named","quick · named"]],rx:12,glow:1.6});
+  // server
+  const sv=card(s,{x:256,y:196,w:704,h:352,c:"blue",tip:"server",title:["apps/server · Fastify 5","apps/server · Fastify 5"],sub:[["ServerContext · route plugins · Zod-validated","ServerContext · route plugin · kiểm tra bằng Zod"]],rx:18});
+  const chips=[
+   ["sessions","amber","Sessions · runtime","Phiên · runtime","supervisor · LRU cap","giám sát · giới hạn LRU"],
+   ["tasks","violet","Task engine","Bộ máy tác vụ","delegate · outbox · run","ủy thác · outbox · chạy"],
+   ["shared","violet","Shared sessions","Phiên chia sẻ","mirror · takeover","sao chép · tiếp quản"],
+   ["chat","violet","Group chat","Chat nhóm","HLC log · @mentions","nhật ký HLC · @nhắc"],
+   ["handoff","violet","Handoff engine","Bộ máy bàn giao","manifest · fencing","manifest · fencing"],
+   ["context","violet","Context engine","Bộ máy ngữ cảnh","memory · plans · sync","bộ nhớ · kế hoạch"],
+   ["network","violet","Network services","Dịch vụ mạng","pairing · heartbeat","ghép cặp · heartbeat"],
+   ["access","pink","Access gate","Cổng truy cập","owner login · step-up","đăng nhập · step-up"],
+   ["git","blue","Git engine","Git engine","git CLI · askpass","git CLI · askpass"],
+   ["github","blue","GitHub integration","Tích hợp GitHub","device flow · PRs","device flow · PR"],
+   ["usage","green","Provider usage","Mức dùng provider","stats · quota · cost","thống kê · hạn mức"],
+   ["outputs","green","Turn outputs · files","Kết quả lượt · tệp","attachments · changes","đính kèm · thay đổi"],
+   ["terminal","cyan","Terminal","Terminal","node-pty · xterm.js","node-pty · xterm.js"],
+   ["browser2","cyan","Machine browser","Trình duyệt của máy","headless Chromium · CDP","Chromium headless · CDP"],
+   ["preview","cyan","Preview gateway","Cổng xem trước","localhost apps → domain","app localhost → domain"],
+   ["monitor","green","System monitor","Giám sát hệ thống","CPU · RAM · disk · apps","CPU · RAM · đĩa · app"]];
+  chips.forEach((c,i)=>{ const col=i%4,row=Math.floor(i/4); const x=268+col*172,y=256+row*62;
+    const g=tipGroup(s,c[0],c[1]); mk("rect",{x,y,width:162,height:52,rx:11,class:"bx"},g);
+    mk("rect",{x:x+8,y:y+12,width:3,height:28,rx:1.5,fill:`var(--${c[1]})`},g);
+    tx(g,x+20,y+23,c[2],c[3],"tc"); tx(g,x+20,y+39,c[4],c[5],"tcs"); });
+  const bus=tipGroup(s,"bus","cyan"); mk("rect",{x:268,y:506,width:678,height:30,rx:9,class:"bx"},bus);
+  mk("rect",{x:268,y:506,width:678,height:30,rx:9,fill:"url(#busg-nodeSvg)"},bus);
+  const cp=mk("clipPath",{id:"busclip"},bus); mk("rect",{x:268,y:506,width:678,height:30,rx:9},cp);
+  const sh=mk("g",{"clip-path":"url(#busclip)"},bus); mk("rect",{x:268,y:506,width:200,height:30,fill:"url(#shim-nodeSvg)",class:"shimmer"},sh);
+  tx(bus,607,525,"EventBus · topics with seq  →  /ws  →  live UI","EventBus · topic kèm seq  →  /ws  →  UI trực tiếp","ts","middle");
+  // storage
+  card(s,{x:256,y:572,w:154,h:110,c:"green",tip:"sqlite",icon:"db",title:["SQLite","SQLite"],sub:[["clam.db · WAL","clam.db · WAL"],["Drizzle ORM","Drizzle ORM"],["better-sqlite3","better-sqlite3"]]});
+  card(s,{x:418,y:572,w:142,h:110,c:"green",tip:"secrets",icon:"lock",title:["Secrets","Bí mật"],sub:[["Keychain","Keychain"],["libsecret","libsecret"],["AES-GCM file","tệp AES-GCM"]]});
+  card(s,{x:568,y:572,w:134,h:110,c:"pink",tip:"identity",icon:"key",title:["Identity","Danh tính"],sub:[["Ed25519","Ed25519"],["key 0600","khóa 0600"],["fingerprint","dấu vân tay"]]});
+  card(s,{x:256,y:696,w:446,h:92,c:"green",tip:"folders",icon:"folder",title:["Project folders · ~/.clam","Thư mục dự án · ~/.clam"],sub:[["git working copies or plain folders","bản git hoặc thư mục thường"],["sessions/ · attachments/ · worktrees/","sessions/ · attachments/ · worktrees/"]]});
+  // omp
+  const og=card(s,{x:718,y:572,w:242,h:216,c:"amber",tip:"omp",icon:"bolt",title:["OMP agent runtime","Runtime tác tử OMP"],sub:[["JSONL stdio · RPC v2","JSONL stdio · RPC v2"]],glow:2});
+  const procs=[["omp --mode rpc-ui · S1"],["omp --mode rpc-ui · S2"],["omp --mode rpc-ui · S3"],["omp --mode rpc · control"]];
+  procs.forEach((p,i)=>{ const y=630+i*38; mk("rect",{x:732,y,width:214,height:30,rx:8,fill:"var(--amber)","fill-opacity":i<3?.09:.04,stroke:"var(--amber)","stroke-opacity":.3},og);
+    mk("circle",{cx:748,cy:y+15,r:4,class:"dot",style:`--c:var(--${i<3?"amber":"gray"});animation-delay:${i*.5}s`},og);
+    const t=mk("text",{x:760,y:y+19,class:"tcs",style:"fill:var(--text)"},og); t.textContent=p[0]; });
+  // outside right
+  const cl=tipGroup(s,"edge","orange");
+  mk("path",{d:"M25,60 a20,20 0 0 1 0,-40 a28,28 0 0 1 50,-6 a22,22 0 0 1 3,46 z",transform:"translate(1013 190) scale(1.7 1.85)",class:"bx","vector-effect":"non-scaling-stroke"},cl);
+  mk("path",{d:"M25,60 a20,20 0 0 1 0,-40 a28,28 0 0 1 50,-6 a22,22 0 0 1 3,46 z",transform:"translate(1013 190) scale(1.7 1.85)",fill:"none",class:"glowbx","vector-effect":"non-scaling-stroke"},cl);
+  tx(cl,1100,272,"Cloudflare",null,"tt","middle"); tx(cl,1100,290,"edge · TLS","edge · TLS","ts","middle");
+  card(s,{x:1010,y:356,w:146,h:104,c:"pink",tip:"phone",icon:"phone",title:["Phone","Điện thoại"],sub:[["your domain","domain riêng"],["owner login","đăng nhập chủ"]],rx:14});
+  card(s,{x:1010,y:500,w:178,h:118,c:"violet",tip:"peers",icon:"users",title:["Paired machines","Máy đã ghép cặp"],sub:[["Ed25519-signed","ký Ed25519"],["/api/v1 · HTTPS","/api/v1 · HTTPS"],["heartbeat 30 s","heartbeat 30 giây"]],glow:2.4});
+  card(s,{x:1010,y:656,w:178,h:104,c:"amber",tip:"providers",icon:"globe",title:["Model providers","Provider mô hình"],sub:[["via OMP login","qua đăng nhập OMP"]]});
+  // links
+  link(L,"M212,136 C234,136 234,118 256,118","cyan",{pk:[{dur:1.4},{dur:1.4,begin:.7,rev:1}]});
+  link(L,"M415,170 V196","cyan",{pk:[{dur:1.1,rev:1}]});
+  link(L,"M740,170 V196","violet",{pk:[{dur:1.1}]});
+  link(L,"M906,120 H890","orange");
+  link(L,"M1046,112 C1100,112 1100,150 1100,196","orange",{pk:[{dur:1.6,rev:1},{dur:1.6,begin:.8}]});
+  link(L,"M1083,300 V356","pink",{pk:[{dur:1.3,rev:1}]});
+  link(L,"M1172,280 V500","violet",{pk:[{dur:2},{dur:2,begin:1,rev:1}]});
+  link(L,"M880,548 V572","amber",{pk:[{dur:1}]});
+  link(L,"M333,548 V572","green"); link(L,"M489,548 V572","green"); link(L,"M635,548 V572","green");
+  link(L,"M256,742 C234,742 234,716 212,716","gray",{git:1,slow:1});
+  link(L,"M960,708 H1010","amber",{pk:[{dur:1.2},{dur:1.2,begin:.6,rev:1}]});
+}
+
+/* ---------- 01 mesh ---------- */
+const MESH = {
+ center:[600,290],
+ links:{ A:[[340,125],[440,125],[500,290]], B:[[860,125],[760,125],[700,290]], C:[[860,475],[760,475],[700,290]], P:[[240,500],[360,500],[500,290]] },
+ git:{ A:[[190,210],[190,400],[330,525],[450,525]], B:[[900,210],[880,400],[820,515],[750,515]], C:[[860,532],[820,532],[790,532],[750,532]] }
+};
+const FLOWS = {
+ chat:{c:"cyan",n:["Group chat","Chat nhóm"],tag:"POST /api/v1/shared/:id/messages",legs:["A>B","A>C","B>A","C>A"],steps:[
+  ["A message is appended to the group log on the author's machine.","Tin nhắn được thêm vào nhật ký nhóm trên máy của người viết."],
+  ["It is replicated to every member through the durable outbox (signed, retried); a hybrid logical clock keeps one order everywhere.","Nó được sao chép tới mọi thành viên qua outbox bền vững (có chữ ký, tự thử lại); đồng hồ logic lai giữ cùng một thứ tự ở mọi nơi."],
+  ["@mentioned agents wake up with a “since your last turn” catch-up injected into their session.","Tác tử được @nhắc thức dậy với phần tóm tắt “từ lượt trước của bạn” được chèn vào phiên."],
+  ["Every agent turn posts its reply back to the group; files it points at are attached and pulled by members.","Mỗi lượt của tác tử gửi câu trả lời lại nhóm; tệp mà nó nhắc tới được đính kèm và các thành viên kéo về."]]},
+ task:{c:"amber",n:["Task delegation","Ủy thác tác vụ"],tag:"POST /api/v1/tasks · GET /tasks/:id",legs:["A>B","B>A"],steps:[
+  ["An agent on A calls the mesh_delegate host tool (or you delegate from the UI); the task is stored in A's durable outbox.","Tác tử trên A gọi host tool mesh_delegate (hoặc bạn ủy thác từ UI); tác vụ được lưu vào outbox bền vững của A."],
+  ["A signed POST /tasks reaches B; B accepts by its auto-accept policy or a human picks the project.","POST /tasks có chữ ký tới B; B chấp nhận theo chính sách tự nhận hoặc người dùng chọn dự án."],
+  ["B runs it with its own OMP agent in its own clone or folder; both agents can talk with mesh_message (loop guard: 12).","B chạy bằng tác tử OMP của chính nó trong bản clone hoặc thư mục riêng; hai tác tử trao đổi bằng mesh_message (chống vòng lặp: 12)."],
+  ["A polls GET /tasks/:id?since= (authoritative); mesh_complete returns a summary plus a pushed branch, patch or files.","A thăm dò GET /tasks/:id?since= (nguồn chuẩn); mesh_complete trả về tóm tắt cùng nhánh đã push, bản patch hoặc tệp."]]},
+ shared:{c:"green",n:["Shared session","Phiên chia sẻ"],tag:"POST /api/v1/shared/:id/mirror · /driver",legs:["A>B","A>C","A>G","B>C"],steps:[
+  ["Driver A mirrors its session live and read-only to the participants B and C.","Máy lái A sao chép phiên trực tiếp, chỉ đọc, tới các máy tham gia B và C."],
+  ["Checkpoints: commit + push to the shared branch, plus an OMP session snapshot that participants pull (sha256-verified, ≤ 100 MiB).","Checkpoint: commit + push lên nhánh chung, cùng snapshot phiên OMP mà máy tham gia kéo về (kiểm tra sha256, ≤ 100 MiB)."],
+  ["Takeover on B: check out the shared branch, unpack the snapshot, start a new local session, announce epoch + 1.","Tiếp quản trên B: checkout nhánh chung, giải nén snapshot, mở phiên cục bộ mới, thông báo epoch + 1."],
+  ["The former driver is fenced and becomes a read-only moved copy; unpushed work is rescued to a rescue branch.","Máy lái cũ bị chặn (fenced) và thành bản sao chỉ đọc; phần việc chưa push được cứu sang nhánh rescue."]]},
+ handoff:{c:"orange",n:["Handoff","Bàn giao"],tag:"POST /api/v1/handoffs · /accept · /ack",legs:["A>B","B>A"],steps:[
+  ["A freezes the task, settles the turn and asks OMP for a handoff summary (secret-scanned).","A đóng băng tác vụ, kết thúc lượt và yêu cầu OMP viết tóm tắt bàn giao (đã quét bí mật)."],
+  ["WIP is committed and pushed to the task branch (or bundled); a sealed manifest is offered through the outbox.","WIP được commit và push lên nhánh tác vụ (hoặc đóng gói); manifest niêm phong được gửi qua outbox."],
+  ["B restores in re-entrant steps: files, contexts, dependency setup, validation, a new local session.","B khôi phục qua các bước chạy lại được: tệp, ngữ cảnh, cài đặt phụ thuộc, kiểm tra, một phiên cục bộ mới."],
+  ["A durable ack hands B epoch n + 1; A stops its runtime and is fenced, so the work never runs twice.","Ack bền vững trao cho B epoch n + 1; A dừng runtime và bị chặn, nên công việc không bao giờ chạy hai lần."]]},
+ context:{c:"violet",n:["Context sync","Đồng bộ ngữ cảnh"],tag:"POST /api/v1/context/sync",legs:["A>B","B>C","C>A"],steps:[
+  ["Shareable contexts — memory, plans, decisions, summaries, notes — are versioned with their ancestry.","Ngữ cảnh chia sẻ — memory, kế hoạch, quyết định, tóm tắt, ghi chú — được đánh phiên bản kèm tổ tiên."],
+  ["Changes are pushed to workspace members through the outbox; reconciliation rounds exchange what each side has.","Thay đổi được đẩy tới thành viên workspace qua outbox; các vòng đối chiếu trao đổi những gì mỗi bên đang có."],
+  ["Concurrent edits are detected and resolved; private contexts and conversation history never leave a machine. No git needed.","Chỉnh sửa đồng thời được phát hiện và giải quyết; ngữ cảnh riêng và lịch sử hội thoại không rời máy. Không cần git."]]},
+ pairing:{c:"pink",n:["Pairing","Ghép cặp"],tag:"POST /api/v1/node/pair",legs:["B>A","A>B"],steps:[
+  ["A creates an invitation: a single-use XXXX-XXXX code, valid ≤ 10 minutes, 5 attempts.","A tạo lời mời: mã XXXX-XXXX dùng một lần, hiệu lực ≤ 10 phút, 5 lần thử."],
+  ["B previews A's /node/info and you compare the full fingerprint.","B xem trước /node/info của A và bạn so sánh toàn bộ dấu vân tay."],
+  ["B sends hello with an HMAC proof derived from the code (HKDF) — the code itself never travels.","B gửi hello với bằng chứng HMAC sinh từ mã (HKDF) — bản thân mã không bao giờ được gửi."],
+  ["A's owner approves and picks capabilities; signed confirms pin both Ed25519 keys.","Chủ máy A chấp thuận và chọn quyền; các xác nhận có chữ ký ghim khóa Ed25519 của cả hai bên."]]},
+ remote:{c:"pink",n:["Phone access","Truy cập từ điện thoại"],tag:"https://a.example.dev",legs:["P>A","A>P"],steps:[
+  ["The phone opens Machine A's own domain; Cloudflare forwards it through A's tunnel to 127.0.0.1:4318.","Điện thoại mở domain riêng của Máy A; Cloudflare chuyển tiếp qua tunnel của A tới 127.0.0.1:4318."],
+  ["The access gate checks the owner session cookie and the exact Origin (remote UI must be switched on at the machine).","Cổng truy cập kiểm tra cookie phiên chủ máy và Origin chính xác (UI từ xa phải được bật ngay tại máy)."],
+  ["The same React UI and live /ws stream run over the domain; Terminal and Browser need a password step-up.","Cùng giao diện React và luồng /ws trực tiếp chạy qua domain; Terminal và Browser cần nhập lại mật khẩu."]]}
+};
+let flow="chat";
+function bez(pts){ return `M${pts[0]} C${pts[1]} ${pts[2]} ${pts[3]}`; }
+function legPath(leg){
+  const [a,b]=leg.split(">"); const c=MESH.center;
+  if(b==="G"){ return bez(MESH.git[a]); }
+  if(a==="G"){ const g=MESH.git[b]; return `M${g[3]} C${g[2]} ${g[1]} ${g[0]}`; }
+  const la=MESH.links[a], lb=MESH.links[b];
+  return `M${la[0]} C${la[1]} ${la[2]} ${c} C${lb[2]} ${lb[1]} ${lb[0]}`;
+}
+function buildMesh(){
+  const s=document.getElementById("meshSvg"); defs(s);
+  const base=mk("g",null,s);
+  const lk={};
+  for(const k in MESH.links){ const p=MESH.links[k]; const d=`M${p[0]} C${p[1]} ${p[2]} ${MESH.center}`; const col=k==="P"?"pink":"violet";
+    lk[k]=[mk("path",{d,class:"mbase",style:`--c:var(--${col})`},base),mk("path",{d,class:"mlink",style:`--c:var(--${col})`},base)]; }
+  for(const k in MESH.git){ const d=bez(MESH.git[k]); lk["G"+k]=[mk("path",{d,class:"mbase",style:"--c:var(--gray)"},base),mk("path",{d,class:"mlink",style:"--c:var(--gray);stroke-dasharray:3 6"},base)]; }
+  tx(base,430,150,"HTTPS · signed","HTTPS · có chữ ký","lbl","start"); tx(base,770,150,"HTTPS · signed","HTTPS · có chữ ký","lbl","end");
+  tx(base,180,320,"git fetch / push",null,"lbl","end"); tx(base,440,412,"HTTPS · owner login","HTTPS · đăng nhập chủ","lbl","start");
+  const pk=mk("g",{id:"meshPk"},s);
+  // cloud
+  const cl=tipGroup(s,"mE","orange");
+  const cd="M25,60 a20,20 0 0 1 0,-40 a28,28 0 0 1 50,-6 a22,22 0 0 1 3,46 z";
+  mk("path",{d:cd,transform:"translate(454 206) scale(2.8 2.45)",class:"bx","vector-effect":"non-scaling-stroke"},cl);
+  mk("path",{d:cd,transform:"translate(454 206) scale(2.8 2.45)",fill:"none",class:"glowbx","vector-effect":"non-scaling-stroke"},cl);
+  icon(cl,"cloud",585,232,30,"var(--orange)");
+  tx(cl,600,296,"Cloudflare Tunnels",null,"tt","middle"); tx(cl,600,316,"one HTTPS domain per machine","mỗi máy một domain HTTPS","ts","middle");
+  // machines
+  function machine(id,x,y,title,sub,dom,n){
+    const g=card(s,{x,y,w:300,h:170,c:"violet",tip:id,icon:"monitor",title,sub:[sub],glow:Math.random()*2});
+    tx(g,x+54,y+60,dom,null,"ts").style.fill="var(--cyan)";
+    let px=x+16; px+=pill(g,px,y+80,"UI :4317","cyan")+6; px+=pill(g,px,y+80,"/api/v1 :4318","violet")+6; pill(g,px,y+80,"SQLite","green");
+    px=x+16; px+=pill(g,px,y+108,"cloudflared","orange")+6; pill(g,px,y+108,"Ed25519","pink");
+    tx(g,x+16,y+152,"OMP agents","tác tử OMP","ts");
+    for(let i=0;i<n;i++){ mk("circle",{cx:x+110+i*16,cy:y+148,r:5,class:"dot",style:`--c:var(--amber);animation-delay:${i*.4}s`},g); }
+  }
+  machine("mA",40,40,["Machine A","Máy A"],["MacBook Pro · named tunnel","MacBook Pro · named tunnel"],"https://a.example.dev",3);
+  machine("mB",860,40,["Machine B","Máy B"],["Linux workstation · named","Máy trạm Linux · named"],"https://b.example.dev",2);
+  machine("mC",860,390,["Machine C","Máy C"],["Mac mini · quick tunnel","Mac mini · quick tunnel"],"https://*.trycloudflare.com",2);
+  const ph=card(s,{x:40,y:430,w:200,h:140,c:"pink",tip:"mP",icon:"phone",title:["Phone","Điện thoại"],sub:[["opens A's domain","mở domain của A"],["owner login","đăng nhập chủ máy"]]});
+  pill(ph,56,532,"remote UI","pink");
+  card(s,{x:450,y:480,w:300,h:90,c:"gray",tip:"mG",icon:"git",title:["GitHub","GitHub"],sub:[["shared repo · .clmesh/","repo chung · .clmesh/"],["task & shared branches · PRs","nhánh tác vụ & nhánh chung · PR"]]});
+  s._lk=lk; s._pk=pk;
+  // buttons
+  const box=document.getElementById("flowBtns");
+  for(const k in FLOWS){ const b=document.createElement("button"); b.type="button"; b.dataset.flow=k; b.style.setProperty("--fc",`var(--${FLOWS[k].c})`); b.innerHTML=`<i style="background:var(--${FLOWS[k].c})"></i><span></span>`; b.onclick=()=>setFlow(k); box.appendChild(b); }
+}
+function setFlow(k){
+  flow=k; const f=FLOWS[k]; const s=document.getElementById("meshSvg");
+  document.querySelectorAll("#flowBtns button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.flow===k));
+  for(const id in s._lk) s._lk[id].forEach(p=>p.classList.remove("hot"));
+  const pk=s._pk; pk.innerHTML="";
+  f.legs.forEach((leg,i)=>{ const [a,b]=leg.split(">");
+    [a,b].forEach(n=>{ if(n==="G"){ s._lk["G"+(a==="G"?b:a)].forEach(p=>p.classList.add("hot")); } else if(a!=="G"&&b!=="G") s._lk[n].forEach(p=>p.classList.add("hot")); });
+    const d=legPath(leg); const id="leg"+i; mk("path",{id,d,fill:"none",stroke:"none"},pk);
+    const col=leg.includes("G")?"gray":f.c; const dur=leg.includes("G")?2.2:2.6;
+    for(let r=0;r<2;r++) packet(pk,id,col,dur,-(i*.65+r*dur/2),0,s);
+  });
+  renderSteps();
+}
+function renderSteps(){
+  const f=FLOWS[flow]; const el=document.getElementById("steps"); el.style.setProperty("--fc",`var(--${f.c})`);
+  el.innerHTML=`<h3>${t2(f.n)}</h3><div class="tag">${f.tag}</div><ol>${f.steps.map(s=>`<li>${esc(t2(s))}</li>`).join("")}</ol>`;
+  document.querySelectorAll("#flowBtns button").forEach(b=>b.querySelector("span").textContent=t2(FLOWS[b.dataset.flow].n));
+}
+function esc(s){ return s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])).replace(/(mesh_\w+|\/[\w/:?=.-]+|epoch \+ 1|epoch n \+ 1|XXXX-XXXX)/g,"<code>$1</code>"); }
+
+/* ---------- 03 sequence ---------- */
+const LANES=[["Web UI","Web UI","React"],["REST","REST","/api/local"],["Runtime","Runtime","supervisor"],["OMP","OMP","omp --mode rpc-ui"],["EventBus","EventBus","session:<id>"],["WebSocket","WebSocket","/ws"]];
+const LX=[100,290,490,700,900,1090];
+const SEQ=[
+ [0,0,"optimistic message (clientId)","cyan",0,["The UI shows your message immediately, tagged with a clientId.","UI hiển thị ngay tin nhắn của bạn, gắn một clientId."]],
+ [0,1,"POST /sessions/:id/prompt","cyan",0,["The prompt goes to the loopback REST API with its clientId.","Prompt được gửi tới REST API loopback kèm clientId."]],
+ [1,2,"ensureRuntime(sessionId)","blue",0,["The route asks the supervisor for this session's runtime.","Route yêu cầu bộ giám sát cấp runtime cho phiên này."]],
+ [2,3,"spawn? · ready · open_session","amber",0,["If no process runs, an omp child is spawned, negotiates protocol v2 and binds to the session directory with open_session.","Nếu chưa có tiến trình, một omp con được khởi chạy, thương lượng giao thức v2 và gắn vào thư mục phiên bằng open_session."]],
+ [2,3,"{\"type\":\"prompt\", …}","amber",0,["The prompt is written as one JSONL frame on the child's stdin.","Prompt được ghi thành một frame JSONL vào stdin của tiến trình con."]],
+ [3,2,"response · admitted","amber",1,["OMP acknowledges as soon as the prompt is admitted.","OMP xác nhận ngay khi prompt được chấp nhận."]],
+ [1,0,"202 PromptAccepted","cyan",1,["REST answers 202 on admission, not completion; a retry with the same clientId gets the same answer.","REST trả 202 khi chấp nhận, không đợi hoàn tất; gửi lại cùng clientId nhận đúng câu trả lời cũ."]],
+ [3,2,"message_update · tool_execution_*","amber",1,["OMP streams message_update and tool_execution_* frames.","OMP stream các frame message_update và tool_execution_*."]],
+ [2,4,"normalize → SessionEvent · publish","violet",0,["The adapter normalizes frames into SessionEvents and publishes them on session:<id>.","Adapter chuẩn hóa frame thành SessionEvent và publish lên session:<id>."]],
+ [4,5,"event · seq n","violet",0,["The EventBus hands each event to the WebSocket with its per-topic seq.","EventBus chuyển từng sự kiện tới WebSocket kèm seq theo topic."]],
+ [5,0,"{type:\"event\", topic, seq, event}","cyan",0,["The UI batches deltas per animation frame; a gap in seq triggers a refetch.","UI gộp delta theo từng khung hình; nếu thiếu seq thì tải lại."]],
+ [3,2,"prompt_result · completed","amber",1,["prompt_result closes the turn; the session settles.","prompt_result kết thúc lượt; phiên trở về trạng thái ổn định."]],
+ [5,0,"reconcile clientId · final message · usage","cyan",0,["The UI folds OMP's echo into the optimistic message by clientId and shows the final text and usage.","UI gộp bản echo của OMP vào tin nhắn tạm theo clientId, hiển thị nội dung cuối và mức dùng."]]
+];
+let seqI=0, seqTimer=null, seqPlaying=true;
+function buildSeq(){
+  const s=document.getElementById("seqSvg"); defs(s);
+  const cols=["cyan","cyan","blue","amber","violet","cyan"];
+  LANES.forEach((l,i)=>{ const x=LX[i]; mk("line",{x1:x,y1:74,x2:x,y2:630,class:"seqline"},s);
+    const g=mk("g",null,s); g.style.setProperty("--c",`var(--${cols[i]})`);
+    mk("rect",{x:x-82,y:18,width:164,height:54,rx:12,class:"bx glowbx","stroke-width":1.4,style:`stroke:var(--${cols[i]});animation-delay:${i*.4}s`},g);
+    tx(g,x,41,l[0],l[1],"tt","middle"); tx(g,x,59,l[2],null,"tcs","middle"); });
+  // loop box (msgs 8-11 → indices 7..10)
+  const y0=110, dy=40;
+  mk("rect",{x:40,y:y0+7*dy-26,width:1120,height:4*dy+12,rx:10,fill:"var(--violet)","fill-opacity":.04,stroke:"var(--violet)","stroke-opacity":.35,"stroke-dasharray":"4 5"},s);
+  tx(s,52,y0+7*dy-10,"loop · streaming","lặp · đang stream","lbl");
+  s._msgs=SEQ.map((m,i)=>{ const y=y0+i*dy; const g=mk("g",{class:"msg"+(m[4]?" ret":"")},s); g.style.setProperty("--c",`var(--${m[3]})`);
+    const x1=LX[m[0]], x2=LX[m[1]];
+    if(m[0]===m[1]){ mk("path",{d:`M${x1},${y-6} h34 v14 h-26`,class:"self"},g); mk("path",{d:`M${x1+4},${y+8} l10,-5 v10z`,class:"ah"},g);
+      tx(g,x1+44,y+5,m[2],null,"","start"); }
+    else { const dir=x2>x1?1:-1; mk("line",{x1:x1+dir*4,y1:y,x2:x2-dir*10,y2:y},g); mk("path",{d:`M${x2-dir*2},${y} l${-dir*10},-5 v10z`,class:"ah"},g);
+      const mid=(x1+x2)/2; tx(g,mid,y-7,m[2],null,"","middle"); }
+    const n=mk("text",{x:24,y:y+4,class:"n"},g); n.textContent=i+1; return {g,x1,x2,y}; });
+  s._pkt=mk("circle",{r:5,class:"pkt seqpkt",style:"--c:var(--cyan)",filter:"url(#pglow-seqSvg)"},s);
+  document.getElementById("seqBtn").onclick=()=>{ seqPlaying=!seqPlaying; if(seqPlaying) playSeq(); else stopSeq(); seqLabel(); };
+}
+function seqStep(i){
+  const s=document.getElementById("seqSvg"); seqI=i;
+  s._msgs.forEach((m,j)=>m.g.classList.toggle("on",j===i));
+  const m=s._msgs[i]; const col=SEQ[i][3]; const p=s._pkt; p.style.setProperty("--c",`var(--${col})`);
+  const t0=performance.now(), dur=900; const x1=m.x1, x2=m.x1===m.x2?m.x1+34:m.x2;
+  cancelAnimationFrame(p._raf);
+  const tick=now=>{ const k=Math.min(1,(now-t0)/dur); const e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2; p.setAttribute("cx",x1+(x2-x1)*e); p.setAttribute("cy",m.y); if(k<1) p._raf=requestAnimationFrame(tick); };
+  if(still) { p.setAttribute("cx",x2); p.setAttribute("cy",m.y); } else p._raf=requestAnimationFrame(tick);
+  document.getElementById("seqNum").textContent=`${i+1}/${SEQ.length}`;
+  document.getElementById("seqTxt").textContent=t2(SEQ[i][5]);
+}
+function playSeq(){ stopSeq(); if(still) return; seqTimer=setInterval(()=>seqStep((seqI+1)%SEQ.length),1700); }
+function stopSeq(){ clearInterval(seqTimer); seqTimer=null; }
+function seqLabel(){ const b=document.getElementById("seqBtn"); const play=seqPlaying&&!still; b.textContent=play?(lang==="vi"?"Tạm dừng":"Pause"):(lang==="vi"?"Bước tiếp ›":"Next step ›"); b.onclick=()=>{ if(play){ seqPlaying=false; stopSeq(); } else seqStep((seqI+1)%SEQ.length); seqLabel(); }; }
+
+/* ---------- 04 modules (deps from package.json) ---------- */
+const MODS=[
+ ["Apps","Ứng dụng",[["web","apps/web","blue","React 19 + Vite SPA · Tailwind v4; imports only the contracts","SPA React 19 + Vite · Tailwind v4; chỉ import contracts",["contracts"]],
+  ["server","apps/server","blue","Fastify 5 composition root: listeners, routes, services, EventBus","Gốc kết hợp Fastify 5: listener, route, dịch vụ, EventBus",["agent-network","agent-runtime","cloudflare-tunnel","context-engine","contracts","database","git-engine","github-integration","handoff-engine","node-identity","provider-usage","secret-store","task-engine","workspace-files"]]]],
+ ["Coordination rules","Quy tắc phối hợp",[["task-engine","@clam/task-engine","violet","Pure task rules: state machine, loop guard, mesh_* host tools, outbox policy","Quy tắc tác vụ thuần: máy trạng thái, chống vòng lặp, host tool mesh_*, chính sách outbox",["contracts"]],
+  ["handoff-engine","@clam/handoff-engine","violet","Manifest seal/verify, ownership epochs, fencing tokens, recovery decisions","Niêm phong/kiểm tra manifest, epoch sở hữu, fencing token, quyết định khôi phục",["contracts","git-engine","node-identity"]],
+  ["context-engine","@clam/context-engine","violet","Shareable memory: canonical versions, ancestry, conflicts, FTS5 search","Bộ nhớ chia sẻ: phiên bản chuẩn, tổ tiên, xung đột, tìm kiếm FTS5",["contracts"]]]],
+ ["Mesh","Mạng lưới",[["agent-network","@clam/agent-network","pink","Ed25519 request signing & verification, pairing crypto, signed HTTPS client + SSE","Ký & xác minh request Ed25519, mật mã ghép cặp, HTTPS client có chữ ký + SSE",["contracts","node-identity"]],
+  ["cloudflare-tunnel","@clam/cloudflare-tunnel","orange","cloudflared lifecycle: detect, quick & named tunnels, restart backoff","Vòng đời cloudflared: phát hiện, quick & named tunnel, khởi động lại có backoff",["contracts"]],
+  ["node-identity","@clam/node-identity","pink","Ed25519 keypair, node id, fingerprint, sign/verify primitives","Cặp khóa Ed25519, node id, dấu vân tay, hàm ký/xác minh",[]]]],
+ ["Runtime & integrations","Runtime & tích hợp",[["agent-runtime","@clam/agent-runtime","amber","Pluggable runtime adapter + OMP adapter: processes, JSONL framing, supervisor","Adapter runtime cắm được + adapter OMP: tiến trình, đóng khung JSONL, giám sát",["contracts"]],
+  ["provider-usage","@clam/provider-usage","amber","Normalizes omp stats / usage / models with caching and provenance","Chuẩn hóa omp stats / usage / models kèm cache và nguồn gốc",["contracts"]],
+  ["github-integration","@clam/github-integration","cyan","OAuth device flow, gh import, accounts, repos, pull requests","OAuth device flow, nhập từ gh, tài khoản, repo, pull request",["contracts","secret-store","database"]],
+  ["git-engine","@clam/git-engine","cyan","System git wrapper (argv only), askpass broker, .clmesh/ bootstrap, secret scanner","Bọc git hệ thống (chỉ argv), askpass broker, khởi tạo .clmesh/, quét bí mật",["contracts"]],
+  ["workspace-files","@clam/workspace-files","cyan","Deterministic folder bundles: scan, ignore rules, preview, atomic apply","Gói thư mục tất định: quét, luật bỏ qua, xem trước, áp dụng nguyên tử",["contracts"]]]],
+ ["Foundation","Nền tảng",[["contracts","@clam/contracts","green","Zod schemas + types for the local API, WebSocket and session events","Schema Zod + kiểu cho API cục bộ, WebSocket và sự kiện phiên",[]],
+  ["database","@clam/database","green","better-sqlite3 + Drizzle: WAL, migrations, table objects","better-sqlite3 + Drizzle: WAL, migration, đối tượng bảng",["contracts"]],
+  ["secret-store","@clam/secret-store","green","Keychain · libsecret · AES-256-GCM encrypted-file backends","Backend Keychain · libsecret · tệp mã hóa AES-256-GCM",[]]]]
+];
+function buildMods(){
+  const root=document.getElementById("mods"); const byId={};
+  MODS.forEach(L=>{ const layer=document.createElement("div"); layer.className="layer";
+    const ln=document.createElement("div"); ln.className="ln"; ln.textContent=L[0]; const k=i18nKey(L[0],L[1]); if(k) ln.dataset.i18n=k; layer.appendChild(ln);
+    const row=document.createElement("div"); row.className="row"; layer.appendChild(row);
+    L[2].forEach(m=>{ const d=document.createElement("div"); d.className="mod"; d.tabIndex=0; d.style.setProperty("--mc",`var(--${m[2]})`); d.dataset.id=m[0];
+      const sp=document.createElement("span"); sp.textContent=m[3]; const k2=i18nKey(m[3],m[4]); if(k2) sp.dataset.i18n=k2;
+      const b=document.createElement("b"); b.textContent=m[1]; d.append(b,sp); row.appendChild(d); byId[m[0]]={el:d,deps:m[5],c:m[2]}; });
+    root.appendChild(layer); });
+  const wires=document.getElementById("wires");
+  const on=id=>{ const m=byId[id]; root.classList.add("focus"); m.el.classList.add("on"); wires.innerHTML="";
+    const R=root.getBoundingClientRect(); const r0=m.el.getBoundingClientRect();
+    const draw=(from,to,col)=>{ const a=from.getBoundingClientRect(), b=to.getBoundingClientRect();
+      const ax=a.left+a.width/2-R.left, ay=(b.top>a.top?a.bottom:a.top)-R.top, bx=b.left+b.width/2-R.left, by=(b.top>a.top?b.top:b.bottom)-R.top;
+      const same=Math.abs(a.top-b.top)<4; const p=mk("path",{d:same?`M${ax},${a.top-R.top} C${ax},${a.top-R.top-34} ${bx},${b.top-R.top-34} ${bx},${b.top-R.top}`:`M${ax},${ay} C${ax},${(ay+by)/2} ${bx},${(ay+by)/2} ${bx},${by}`,stroke:`var(--${col})`},wires); };
+    m.deps.forEach(dn=>{ byId[dn].el.classList.add("dep"); draw(m.el,byId[dn].el,"cyan"); });
+    for(const k in byId) if(byId[k].deps.includes(id)){ byId[k].el.classList.add("rdep"); draw(byId[k].el,m.el,"amber"); } };
+  const off=()=>{ root.classList.remove("focus"); wires.innerHTML=""; for(const k in byId) byId[k].el.classList.remove("on","dep","rdep"); };
+  for(const k in byId){ const el=byId[k].el; el.addEventListener("mouseenter",()=>{off();on(k);}); el.addEventListener("focus",()=>{off();on(k);}); el.addEventListener("mouseleave",off); el.addEventListener("blur",off); }
+}
+
+/* ---------- 05 security ---------- */
+const SEC=[
+ ["server","cyan","Loopback-only binds","Chỉ bind loopback","Both listeners bind 127.0.0.1; any other CLAM_HOST or CLAM_NETWORK_HOST refuses to boot. Nothing is reachable from outside except through the tunnel.","Cả hai listener bind 127.0.0.1; CLAM_HOST hoặc CLAM_NETWORK_HOST khác thì không khởi động. Từ bên ngoài chỉ vào được qua tunnel."],
+ ["link","violet","Two listeners, one process","Hai listener, một tiến trình","The tunnel reaches only the network listener: /api/v1, plus the owner UI when remote UI is on. /api/local on 4317 and OMP RPC are never tunnelled.","Tunnel chỉ tới được listener mạng: /api/v1, cùng UI chủ máy khi bật UI từ xa. /api/local trên 4317 và OMP RPC không bao giờ đi qua tunnel."],
+ ["sig","pink","Every peer call is signed","Mọi lời gọi giữa các máy đều được ký","Ed25519 over method, path, query, host, timestamp, nonce, request ids, idempotency key and body digest; 60 s clock skew, replay window, pinned keys, per-peer capabilities.","Ed25519 trên method, path, query, host, timestamp, nonce, request id, khóa idempotency và digest của body; lệch giờ 60 giây, cửa sổ chống phát lại, khóa đã ghim, quyền theo từng peer."],
+ ["key","orange","Pairing you can verify","Ghép cặp kiểm chứng được","Single-use XXXX-XXXX code (≤ 10 min, 5 attempts), HKDF + HMAC proofs so the code is never sent, full fingerprint comparison, owner approval with chosen capabilities.","Mã XXXX-XXXX dùng một lần (≤ 10 phút, 5 lần thử), bằng chứng HKDF + HMAC nên mã không bao giờ được gửi, so sánh toàn bộ dấu vân tay, chủ máy chấp thuận và chọn quyền."],
+ ["lock","pink","Remote UI, off by default","UI từ xa, tắt mặc định","Switched on only at the machine. scrypt-hashed owner password, __Host- HttpOnly cookie, exact-Origin CSRF check, throttled login; Terminal and Browser need a password step-up.","Chỉ bật được ngay tại máy. Mật khẩu chủ máy băm scrypt, cookie __Host- HttpOnly, kiểm tra Origin chính xác chống CSRF, giới hạn đăng nhập; Terminal và Browser cần nhập lại mật khẩu."],
+ ["shield","green","Secrets stay out of the database","Bí mật không nằm trong cơ sở dữ liệu","Tokens live in the OS secret store; git receives them through the askpass broker, never in argv, env or files. Provider logins stay in OMP's own store.","Token nằm trong kho bí mật của hệ điều hành; git nhận token qua askpass broker, không bao giờ qua argv, env hay tệp. Đăng nhập provider nằm trong kho riêng của OMP."]
+];
+function buildSec(){
+  const g=document.getElementById("sgrid");
+  SEC.forEach(s=>{ const c=document.createElement("div"); c.className="scard"; c.style.setProperty("--sc",`var(--${s[1]})`);
+    const k1=i18nKey(s[2],s[3]), k2=i18nKey(s[4],s[5]);
+    c.innerHTML=`<h3><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${ICONS[s[0]]}"/></svg><span data-i18n="${k1}">${s[2]}</span></h3><p data-i18n="${k2}">${s[4]}</p>`;
+    g.appendChild(c); });
+}
+
+/* ---------- tooltip ---------- */
+const tip=document.getElementById("tip");
+function tipFor(id){ const t=TIPS[id]; if(!t) return null; return lang==="vi"?[t[2],t[3],t[4]]:[t[0],t[1],t[4]]; }
+function showTip(el, x, y){
+  const d=tipFor(el.dataset.tip); if(!d) return;
+  tip.style.setProperty("--c",getComputedStyle(el).getPropertyValue("--c")||"var(--cyan)");
+  tip.innerHTML=`<h4><i></i>${escH(d[0])}</h4><p>${escH(d[1])}</p>${d[2]?`<code>${escH(d[2])}</code>`:""}`;
+  tip.classList.add("show"); tip.setAttribute("aria-hidden","false");
+  const w=tip.offsetWidth, h=tip.offsetHeight, vw=innerWidth, vh=innerHeight;
+  let lx=x+18, ly=y+18; if(lx+w>vw-10) lx=x-w-18; if(lx<10) lx=10; if(ly+h>vh-10) ly=y-h-18; if(ly<70) ly=Math.min(vh-h-10,y+18);
+  tip.style.left=lx+"px"; tip.style.top=ly+"px";
+}
+function hideTip(){ tip.classList.remove("show"); tip.setAttribute("aria-hidden","true"); }
+function escH(s){ return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c])); }
+document.addEventListener("pointermove",e=>{ const el=e.target.closest&&e.target.closest("[data-tip]"); if(el) showTip(el,e.clientX,e.clientY); else if(tip.classList.contains("show")&&!document.activeElement.closest?.("[data-tip]")) hideTip(); });
+document.addEventListener("focusin",e=>{ const el=e.target.closest&&e.target.closest("[data-tip]"); if(el){ const r=el.getBoundingClientRect(); showTip(el,r.left+r.width/2,r.bottom-8); } });
+document.addEventListener("focusout",hideTip);
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") hideTip(); });
+addEventListener("scroll",()=>{ if(!document.activeElement.closest?.("[data-tip]")) hideTip(); },{passive:true});
+
+/* ---------- language / theme / motion ---------- */
+function applyLang(l){
+  lang=l; document.documentElement.lang=l;
+  document.querySelectorAll("[data-i18n]").forEach(el=>{ const k=el.dataset.i18n; if(!(k in RAW)&&!el.__raw) el.__raw=el instanceof SVGElement?el.textContent:el.innerHTML;
+    const v=l==="vi"?VI[k]:null; const val=v!=null?v:el.__raw; if(el instanceof SVGElement) el.textContent=val; else el.innerHTML=val; });
+  document.querySelectorAll("[data-lang]").forEach(b=>b.setAttribute("aria-pressed",b.dataset.lang===l));
+  document.querySelectorAll("[data-tip]").forEach(el=>{ const d=tipFor(el.dataset.tip); if(d) el.setAttribute("aria-label",d[0]+". "+d[1]); });
+  document.getElementById("theme").setAttribute("aria-label",l==="vi"?"Chuyển giao diện sáng/tối":"Toggle light/dark theme");
+  renderSteps(); seqStep(seqI); seqLabel(); motionLabel();
+  try{ localStorage.setItem("clam-arch-lang",l); }catch(_){}
+}
+function applyTheme(t){ document.documentElement.dataset.theme=t; try{ localStorage.setItem("clam-arch-theme",t); }catch(_){} }
+let still=false;
+const rm=matchMedia("(prefers-reduced-motion: reduce)");
+function setStill(v){
+  still=v; document.documentElement.classList.toggle("still",v);
+  document.querySelectorAll("svg").forEach(s=>{ if(s.pauseAnimations){ v?s.pauseAnimations():s.unpauseAnimations(); } });
+  if(v){ stopSeq(); document.querySelectorAll(".reveal").forEach(e=>e.classList.add("in")); } else if(seqPlaying) playSeq();
+  motionLabel(); seqLabel();
+}
+function motionLabel(){ const b=document.getElementById("motion"); b.setAttribute("aria-pressed",still); document.getElementById("motionTxt").textContent=still?(lang==="vi"?"Chạy":"Play"):(lang==="vi"?"Dừng":"Pause");
+  document.getElementById("motionIco").setAttribute("d",still?"M7 4l13 8-13 8z":"M7 5h3v14H7zM14 5h3v14h-3z"); b.setAttribute("aria-label",still?(lang==="vi"?"Bật chuyển động":"Play animations"):(lang==="vi"?"Tắt chuyển động":"Pause animations")); }
+
+/* ---------- boot ---------- */
+buildMesh(); buildNode(); buildSeq(); buildMods(); buildSec();
+let st={}; try{ st={lang:localStorage.getItem("clam-arch-lang"),theme:localStorage.getItem("clam-arch-theme")}; }catch(_){}
+applyTheme(qs.get("theme")||st.theme||"dark");
+setFlow(qs.get("flow")&&FLOWS[qs.get("flow")]?qs.get("flow"):"chat");
+applyLang(qs.get("lang")==="vi"||(!qs.get("lang")&&st.lang==="vi")?"vi":"en");
+setStill(rm.matches||qs.has("still"));
+rm.addEventListener?.("change",e=>setStill(e.matches));
+seqStep(0); if(!still) playSeq();
+document.querySelectorAll("[data-lang]").forEach(b=>b.onclick=()=>applyLang(b.dataset.lang));
+document.getElementById("theme").onclick=()=>applyTheme(document.documentElement.dataset.theme==="dark"?"light":"dark");
+document.getElementById("motion").onclick=()=>setStill(!still);
+if("IntersectionObserver" in window && !still){ const io=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target); } }),{threshold:.08}); document.querySelectorAll(".reveal").forEach(e=>io.observe(e)); }
+else document.querySelectorAll(".reveal").forEach(e=>e.classList.add("in"));
+if(qs.has("reveal")) document.querySelectorAll(".reveal").forEach(e=>e.classList.add("in"));
+</script>
+</body>
+</html>
