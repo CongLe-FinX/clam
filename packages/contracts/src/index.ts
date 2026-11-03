@@ -17,6 +17,7 @@ export * from "./session.ts";
 export * from "./shared.ts";
 export * from "./tasks.ts";
 export * from "./terminal.ts";
+export * from "./system.ts";
 export * from "./usage.ts";
 export * from "./workspace.ts";
 export * from "./ws.ts";

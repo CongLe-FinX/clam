@@ -12,6 +12,7 @@ import githubRoutes from "./api/github.ts";
 import gitRoutes from "./api/git.ts";
 import networkRoutes from "./api/network.ts";
 import nodeRoutes from "./api/node.ts";
+import systemRoutes from "./api/system.ts";
 import ompRoutes from "./api/omp.ts";
 import previewRoutes from "./api/preview.ts";
 import projectFileRoutes from "./api/project-files.ts";
@@ -43,6 +44,7 @@ const UI_BODY_LIMIT = 2 * 1024 * 1024;
 const LOCAL_API_PLUGINS = [
 	accessRoutes,
 	nodeRoutes,
+	systemRoutes,
 	workspaceRoutes,
 	projectRoutes,
 	projectFileRoutes,

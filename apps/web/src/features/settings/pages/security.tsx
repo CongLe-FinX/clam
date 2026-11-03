@@ -450,10 +450,11 @@ export default function SecurityPage() {
 				{access.isError && <InlineError error={access.error} onRetry={() => access.refetch()} />}
 				{access.data && (
 					<>
+						{access.data.via === "remote" && <SignInSessionsSection a={access.data} />}
 						<RemoteAccessSection a={access.data} />
 						<MachineToolsSection a={access.data} />
 						<PasswordSection a={access.data} />
-						<SignInSessionsSection a={access.data} />
+						{access.data.via !== "remote" && <SignInSessionsSection a={access.data} />}
 						<SecurityNotes />
 					</>
 				)}

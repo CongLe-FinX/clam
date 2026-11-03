@@ -21,7 +21,5 @@ const vi: Catalog = {
 	"Owner access only. This machine's agent-to-agent API is separate and never uses this password.": "Chỉ dành cho chủ sở hữu. API agent-to-agent của máy này là riêng biệt và không bao giờ dùng mật khẩu này.",
 	"That password is not correct.": "Mật khẩu không đúng.",
 	"Cancel": "Hủy",
-	"Sign out": "Đăng xuất",
-	"Sign out of this machine": "Đăng xuất khỏi máy này",
 };
 export default vi;

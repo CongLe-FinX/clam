@@ -183,6 +183,11 @@ const nodeRuntimeRoute = createRoute({
 	path: "runtime",
 	component: lazyRouteComponent(() => import("@/features/node/runtime-page.tsx")),
 });
+const nodeSystemRoute = createRoute({
+	getParentRoute: () => nodeRoute,
+	path: "system",
+	component: lazyRouteComponent(() => import("@/features/node/system-page.tsx")),
+});
 
 // `t`: the selected terminal (survives a reload); `project`: open (or reuse) a terminal in that project's folder on arrival.
 const terminalRoute = createRoute({
@@ -293,7 +298,7 @@ const routeTree = rootRoute.addChildren([
 	projectRoute,
 	sessionRoute,
 	chatsRoute,
-	nodeRoute.addChildren([nodeIndexRoute, nodeSessionsRoute, nodeProjectsRoute, nodeGitRoute, nodeRuntimeRoute]),
+	nodeRoute.addChildren([nodeIndexRoute, nodeSessionsRoute, nodeProjectsRoute, nodeGitRoute, nodeRuntimeRoute, nodeSystemRoute]),
 	terminalRoute,
 	browserRoute,
 	networkRoute.addChildren([networkIndexRoute, networkNodesRoute, networkPeerRoute, networkAgentsRoute]),

@@ -19,6 +19,8 @@ import {
 	type SharedInvite,
 	type SharedSession,
 	type Task,
+	type SystemProcesses,
+	type SystemStatus,
 	type TunnelState,
 	type Workspace,
 	routes,
@@ -42,6 +44,9 @@ export const qk = {
 	node: ["local", "node"] as const,
 	health: ["local", "health"] as const,
 	settings: ["local", "settings"] as const,
+	system: ["local", "system"] as const,
+	systemProcesses: ["local", "system", "processes"] as const,
+	systemDiskUsage: ["local", "system", "disk-usage"] as const,
 	security: ["local", "security"] as const,
 	tunnel: ["local", "tunnel"] as const,
 	networkAll: ["local", "network"] as const,
@@ -108,6 +113,11 @@ export function createQueryClient(): QueryClient {
 
 export const useNode = () => useQuery({ queryKey: qk.node, queryFn: ({ signal }) => api.get<NodeInfo>(routes.node, undefined, { signal }), staleTime: 5 * 60_000 });
 export const useHealth = () => useQuery({ queryKey: qk.health, queryFn: ({ signal }) => api.get<NodeHealth>(routes.health, undefined, { signal }), refetchInterval: 30_000 });
+/** Host load. The sidebar card polls every 5 s; the System page asks for 3 s (the shortest interval of the mounted observers wins). Paused while the tab is hidden. */
+export const useSystemStatus = (intervalMs = 5000) =>
+	useQuery({ queryKey: qk.system, queryFn: ({ signal }) => api.get<SystemStatus>(routes.system, undefined, { signal }), refetchInterval: intervalMs, staleTime: 2000 });
+export const useSystemProcesses = (intervalMs = 5000) =>
+	useQuery({ queryKey: qk.systemProcesses, queryFn: ({ signal }) => api.get<SystemProcesses>(routes.systemProcesses, undefined, { signal }), refetchInterval: intervalMs, staleTime: 2000 });
 export const useWorkspaces = () => useQuery({ queryKey: qk.workspaces, queryFn: ({ signal }) => api.get<Workspace[]>(routes.workspaces, undefined, { signal }) });
 export const useWorkspace = (id: string) => useQuery({ queryKey: qk.workspace(id), queryFn: ({ signal }) => api.get<Workspace>(routes.workspace(id), undefined, { signal }) });
 export const useProjects = (workspaceId?: string) =>

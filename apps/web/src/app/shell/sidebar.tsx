@@ -10,6 +10,7 @@ import {
 	FolderGit2,
 	GitBranch,
 	Globe,
+	Gauge,
 	LayoutDashboard,
 	ListChecks,
 	MessageSquarePlus,
@@ -49,13 +50,12 @@ import { Button } from "@/ui/button";
 import { Kbd } from "@/ui/kbd";
 import { Skeleton } from "@/ui/skeleton";
 import { Tip } from "@/ui/tooltip";
-import { SignOutItem } from "@/features/auth/sign-out-item";
 import { NodeStatusCard, NodeStatusDot } from "./node-status.tsx";
 
 export const rowClass =
 	"group/row relative flex h-8 min-w-0 items-center gap-2 rounded-lg px-2 text-[13px] text-muted-foreground outline-none transition-colors duration-150 hover:bg-surface-2 hover:text-foreground data-[status=active]:bg-surface-3 data-[status=active]:text-foreground coarse:h-11 [&_svg]:size-4 [&_svg]:shrink-0";
 
-type StaticTo = "/" | "/chats" | "/workspaces" | "/node/sessions" | "/node/projects" | "/node/runtime" | "/node/git" | "/terminal" | "/browser" | "/network/nodes" | "/network/agents" | "/tasks" | "/shared" | "/handoffs" | "/settings";
+type StaticTo = "/" | "/chats" | "/workspaces" | "/node/sessions" | "/node/projects" | "/node/runtime" | "/node/system" | "/node/git" | "/terminal" | "/browser" | "/network/nodes" | "/network/agents" | "/tasks" | "/shared" | "/handoffs" | "/settings";
 
 type BadgeKind = "pairing" | "task" | "shared" | "handoff";
 
@@ -405,6 +405,7 @@ export function NavTree({ rail = false, onNavigate }: { rail?: boolean; onNaviga
 					<NavLink to="/node/projects" icon={FolderGit2} label={t("Projects")} rail />
 					<NavLink to="/node/git" icon={GitBranch} label={t("Git")} rail />
 					<NavLink to="/node/runtime" icon={Cpu} label={t("Runtime")} rail />
+					<NavLink to="/node/system" icon={Gauge} label={t("System")} rail />
 					<NavLink to="/terminal" icon={Terminal} label={t("Terminal")} rail />
 					<NavLink to="/browser" icon={Globe} label={t("Browser")} rail />
 					<div className="my-2 h-px bg-border" />
@@ -457,6 +458,7 @@ export function NavTree({ rail = false, onNavigate }: { rail?: boolean; onNaviga
 						<NavLink to="/node/sessions" icon={TerminalSquare} label={t("Agent Sessions")} rail={false} />
 						<NavLink to="/node/projects" icon={FolderGit2} label={t("Projects")} rail={false} />
 						<NavLink to="/node/runtime" icon={Cpu} label={t("Runtime")} rail={false} />
+						<NavLink to="/node/system" icon={Gauge} label={t("System")} rail={false} />
 						<NavLink to="/node/git" icon={GitBranch} label={t("Git")} rail={false} />
 						<NavLink to="/terminal" icon={Terminal} label={t("Terminal")} rail={false} />
 						<NavLink to="/browser" icon={Globe} label={t("Browser")} rail={false} />
@@ -554,7 +556,6 @@ export function Sidebar({ mode }: { mode: "full" | "rail" }) {
 			<div className={cn("flex items-center gap-1 border-t p-2", rail && "flex-col")}>
 				<NavLinkSettings rail={rail} />
 				<ThemeToggle />
-				{rail ? <SignOutItem compact /> : null}
 				{mode === "full" ? (
 					<Tip label={rail ? t("Expand sidebar") : t("Collapse sidebar")}>
 						<Button variant="ghost" size="icon" onClick={() => setCollapsed(!collapsedPref)} aria-label={rail ? t("Expand sidebar") : t("Collapse sidebar")}>

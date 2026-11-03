@@ -18,6 +18,11 @@ export const routes = {
 	tunnelStop: "/tunnel/stop", // POST → TunnelState
 	tunnelProbe: "/tunnel/probe", // POST → TunnelState (named mode: check now whether another cloudflared already serves the hostname)
 
+	// Host load: CPU/memory/disk of the machine this node runs on, top apps, and an on-demand scan of the home folder.
+	system: "/system", // GET SystemStatus (cheap; the UI polls it)
+	systemProcesses: "/system/processes", // GET SystemProcesses (top apps by CPU and by memory; display names only, never command lines)
+	systemDiskUsage: "/system/disk-usage", // POST → DiskUsageReport (scans the home folder, ≤60 s) · GET → the cached report (≤10 min) or 404
+
 	// Owner access to this node's UI through its domain. Login/status answer without a session; everything else needs one remotely.
 	access: "/access", // GET AccessStatus · PATCH UpdateAccessBody → AccessStatus (enabling: loopback only; remote sessions may only switch off)
 	accessPassword: "/access/password", // PUT SetPasswordBody → AccessStatus
