@@ -5,6 +5,7 @@ import { AlertTriangle, ChevronRight, Download, FileQuestion, FileX, RefreshCw, 
 import { Fragment, lazy, type ReactNode, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { CopyButton, HlLineView } from "@/components/code-block";
 import { LazyMarkdown } from "@/components/lazy-markdown";
+import { projectAssets } from "@/components/rich/assets";
 import { t } from "@/i18n";
 import { api, errorText, localUrl } from "@/lib/api";
 import { isMediaKind, previewKind } from "@/lib/file-kind";
@@ -55,6 +56,8 @@ export function FileViewer({ projectId, path, className, onClose, actions }: Fil
 	const media = isMediaKind(kind);
 	const rawUrl = localUrl(routes.projectRaw(projectId), { path });
 	const downloadUrl = localUrl(routes.projectRaw(projectId), { path, download: 1 });
+	// Relative links and images in a markdown file point next to it (`images/x.png` beside `docs/guide.md`), not at the project root.
+	const assets = useMemo(() => projectAssets(projectId, path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : ""), [projectId, path]);
 	const q = useQuery({
 		queryKey: qk.projectFile(projectId, path),
 		queryFn: ({ signal }) => api.get<FileContent>(routes.projectFile(projectId), { path }, { signal }),
@@ -161,7 +164,7 @@ export function FileViewer({ projectId, path, className, onClose, actions }: Fil
 				) : isMd && mode === "preview" ? (
 					<div className="scrollbar-thin h-full overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
 						<div className="mx-auto max-w-3xl">
-							<LazyMarkdown text={data.content} />
+							<LazyMarkdown text={data.content} assets={assets} />
 						</div>
 					</div>
 				) : (

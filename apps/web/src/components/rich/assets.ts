@@ -25,8 +25,11 @@ export interface AssetResolver {
 	resolve(href: string): RichFile | null;
 }
 
-/** Strip `./`, a leading `/`, query/hash and percent-encoding: `./out/My%20chart.png?x#y` → `out/My chart.png`. */
-export function normalizeRelative(href: string): string | null {
+/**
+ * Strip `./`, a leading `/`, query/hash and percent-encoding: `./out/My%20chart.png?x#y` → `out/My chart.png`. With `base` (a folder of
+ * the project), the path is taken relative to it and may climb out of it with `..`, never above the project root.
+ */
+export function normalizeRelative(href: string, base = ""): string | null {
 	if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("//") || href.startsWith("#")) return null;
 	let p = href.split(/[?#]/, 1)[0] ?? "";
 	try {
@@ -34,10 +37,16 @@ export function normalizeRelative(href: string): string | null {
 	} catch {
 		/* keep as is */
 	}
-	const parts: string[] = [];
-	for (const seg of p.replace(/\\/g, "/").split("/")) {
+	p = p.replace(/\\/g, "/");
+	// A leading `/` means the project root, not the base folder.
+	const parts: string[] = p.startsWith("/") ? [] : base.split("/").filter((s) => s !== "" && s !== ".");
+	for (const seg of p.split("/")) {
 		if (seg === "" || seg === ".") continue;
-		if (seg === "..") return null;
+		if (seg === "..") {
+			if (parts.length === 0) return null;
+			parts.pop();
+			continue;
+		}
 		parts.push(seg);
 	}
 	return parts.length ? parts.join("/") : null;
@@ -59,11 +68,14 @@ export function projectFile(projectId: string, file: Pick<TurnOutputFile, "path"
 	};
 }
 
-/** Markdown paths resolve against the session's project folder. Unknown files render as broken-image cards, never as a request storm: only paths with a known extension resolve. */
-export function projectAssets(projectId: string): AssetResolver {
+/**
+ * Markdown paths resolve against the session's project folder, or against `baseDir` (the folder of the markdown file being shown, so
+ * `images/x.png` next to a document works). Unknown files render as broken-image cards, never as a request storm.
+ */
+export function projectAssets(projectId: string, baseDir = ""): AssetResolver {
 	return {
 		resolve(href) {
-			const rel = normalizeRelative(href);
+			const rel = normalizeRelative(href, baseDir);
 			if (!rel) return null;
 			return projectFile(projectId, { path: rel, name: baseName(rel), size: 0, mimeType: "" });
 		},
