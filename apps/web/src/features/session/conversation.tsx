@@ -57,7 +57,21 @@ function estimateRow(stream: SessionStream, key: string | undefined): number {
 	return Math.min(h, 900);
 }
 
-export function Conversation({ stream, onPickPrompt, readOnly, className }: { stream: SessionStream; onPickPrompt: (text: string) => void; /** Mirror / moved copy: no starter prompts. */ readOnly?: boolean; className?: string }) {
+export function Conversation({
+	stream,
+	onPickPrompt,
+	readOnly,
+	hidden = false,
+	className,
+}: {
+	stream: SessionStream;
+	onPickPrompt: (text: string) => void;
+	/** Mirror / moved copy: no starter prompts. */
+	readOnly?: boolean;
+	/** Kept mounted but not displayed (a shared session showing its group chat): coming back must land where the user was, at the tail if there. */
+	hidden?: boolean;
+	className?: string;
+}) {
 	const rows = useOrder(stream);
 	const historyStatus = useStreamMeta(stream, (m) => m.historyStatus);
 	const historyError = useStreamMeta(stream, (m) => m.historyError);
@@ -98,10 +112,17 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 		void stream.loadOlder();
 	}, [v, stream]);
 
+	/** Until this time the view stays pinned to the tail whatever the browser reports (it restores a stale position as the box reappears). */
+	const pinUntil = useRef(0);
 	const onScroll = useCallback(() => {
 		const el = parentRef.current;
-		if (!el) return;
+		// Hidden (display: none) the box has no size: the browser's scroll events then say nothing about where the user is.
+		if (!el || el.clientHeight === 0) return;
 		const near = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD;
+		if (!near && performance.now() < pinUntil.current) {
+			el.scrollTop = el.scrollHeight;
+			return;
+		}
 		stick.current = near;
 		setAtBottom(near);
 		if (near) setUnread(0);
@@ -116,6 +137,25 @@ export function Conversation({ stream, onPickPrompt, readOnly, className }: { st
 		setAtBottom(true);
 		setUnread(0);
 	}, []);
+
+	// Shown again after being hidden: the browser dropped (or restores a stale) scroll position while the box had no size. Back to the
+	// tail if the user was there when it was hidden, and hold it there while the rows that came into view are measured.
+	const wasHidden = useRef(hidden);
+	const stickAtHide = useRef(true);
+	useLayoutEffect(() => {
+		if (hidden) {
+			if (!wasHidden.current) stickAtHide.current = stick.current;
+			wasHidden.current = true;
+			return;
+		}
+		if (!wasHidden.current) return;
+		wasHidden.current = false;
+		if (!stickAtHide.current) return;
+		pinUntil.current = performance.now() + 600;
+		toBottom();
+		const raf = requestAnimationFrame(() => requestAnimationFrame(toBottom));
+		return () => cancelAnimationFrame(raf);
+	}, [hidden, toBottom]);
 
 	// Keep the viewport anchored after older rows are prepended, and follow the tail while the user is at the bottom.
 	useLayoutEffect(() => {

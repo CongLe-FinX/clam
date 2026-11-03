@@ -37,7 +37,9 @@ import { useChats } from "@/features/chats/hooks";
 import { useActiveHandoffCount } from "@/features/handoff/api";
 import { warmHandlers } from "@/features/session/preload";
 import { t, tr } from "@/i18n";
-import { isAwaitingApproval, isPendingInvite, taskNeedsAttention, usePairingRequests, useProjects, useSharedInvites, useSharedSessions, useTasks, useWorkspaces } from "@/lib/queries";
+import { isAwaitingApproval, isPendingInvite, taskNeedsAttention, usePairingRequests, useProjects, useRuntime, useSessions, useSharedInvites, useSharedSessions, useTasks, useWorkspaces } from "@/lib/queries";
+import { RUNTIME_STATE_LABEL, runtimeDot } from "@/components/session-status";
+import { StatusDot } from "@/ui/status-dot";
 import { useUi } from "@/lib/store";
 import { cycleTheme, THEME_LABEL, type ThemePref, useThemePref } from "@/lib/theme";
 import { cn } from "@/lib/utils";
@@ -261,6 +263,60 @@ function ChatsSection() {
 	);
 }
 
+/** Busy first, then a crashed one (it needs a look), then the rest. */
+const RUNNING_ORDER: Partial<Record<string, number>> = { busy: 0, crashed: 1 };
+
+/**
+ * Sessions whose agent process is up right now (busy first, then most recently active): one click to switch between the work in flight.
+ * Hidden when nothing runs; the Runtime page keeps the full table with stop/restart.
+ */
+function RunningSection() {
+	const runtime = useRuntime().data;
+	const sessions = useSessions().data;
+	const params = useParams({ strict: false }) as { sessionId?: string };
+	const qc = useQueryClient();
+	const live = (runtime ?? []).filter((r) => r.state !== "stopped");
+	if (live.length === 0) return null;
+	const byId = new Map((sessions ?? []).map((s) => [s.id, s] as const));
+	const rows = [...live].sort((a, b) => (RUNNING_ORDER[a.state] ?? 2) - (RUNNING_ORDER[b.state] ?? 2) || (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? ""));
+	return (
+		<>
+			<SectionLabel
+				action={
+					<Link to="/node/runtime" preload="intent" className="rounded-md px-1 text-2xs font-medium normal-case tracking-normal text-subtle outline-none hover:text-foreground">
+						{t("Manage")}
+					</Link>
+				}
+			>
+				{t("Running")}
+			</SectionLabel>
+			<div className="flex flex-col gap-px">
+				{rows.map((r) => {
+					const s = byId.get(r.sessionId);
+					const current = params.sessionId === r.sessionId;
+					return (
+						<Link
+							key={r.sessionId}
+							to="/sessions/$sessionId"
+							params={{ sessionId: r.sessionId }}
+							{...warmHandlers(qc, r.sessionId, s?.status ?? "ready")}
+							preload="intent"
+							aria-current={current ? "page" : undefined}
+							className={cn(rowClass, current && "bg-surface-3 text-foreground")}
+						>
+							<span className="grid size-4 shrink-0 place-items-center">
+								<StatusDot status={runtimeDot(r.state)} label={tr(RUNTIME_STATE_LABEL[r.state])} />
+							</span>
+							<span className="min-w-0 flex-1 truncate">{s?.title || t("Untitled session")}</span>
+							{s && s.pendingRequests > 0 ? <span role="img" aria-label={t("Waiting for your answer")} title={t("Waiting for your answer")} className="size-2 shrink-0 rounded-full bg-warning" /> : null}
+						</Link>
+					);
+				})}
+			</div>
+		</>
+	);
+}
+
 /** Navigation tree shared by the desktop sidebar and the mobile drawer. */
 export function NavTree({ rail = false, onNavigate }: { rail?: boolean; onNavigate?: () => void }) {
 	const workspaces = useWorkspaces();
@@ -295,6 +351,7 @@ export function NavTree({ rail = false, onNavigate }: { rail?: boolean; onNaviga
 				</>
 			) : (
 				<>
+					<RunningSection />
 					<ChatsSection />
 					<SectionLabel
 						action={

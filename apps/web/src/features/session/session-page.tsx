@@ -471,7 +471,7 @@ function Workspace({ session }: { session: AgentSession }) {
 			<div className={cn("flex min-h-0 flex-1 flex-col", showChat && "hidden")}>
 				<div className="relative flex min-h-0 flex-1 flex-col">
 					<div className="flex min-h-0 flex-1 flex-col">
-						<Conversation stream={stream} readOnly={readOnly} onPickPrompt={(text) => setFill({ text, nonce: Date.now() })} />
+						<Conversation stream={stream} readOnly={readOnly} hidden={showChat} onPickPrompt={(text) => setFill({ text, nonce: Date.now() })} />
 					</div>
 				</div>
 				<AskDock store={omp} />
