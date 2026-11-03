@@ -228,25 +228,35 @@ export class SessionService {
 		return row;
 	}
 
+	/** The git-mode shared session `row` belongs to, when that share works in `row`'s project on this node. */
+	private gitShareOf(row: SessionRow): typeof sharedSessions.$inferSelect | undefined {
+		if (!row.sharedSessionId) return undefined;
+		const shared = this.ctx.db.select().from(sharedSessions).where(eq(sharedSessions.id, row.sharedSessionId)).get();
+		return shared && shared.vcs !== "files" && shared.localProjectId === row.projectId ? shared : undefined;
+	}
+
 	/**
 	 * The git-mode shared session whose worktree `row` works in: the session that drives it on this node, and — once this node lost the
 	 * driver role — the same session while its worktree is still here (moving its conversation back to the project folder mid-hand-over
 	 * would race the `moved` bookkeeping). Undefined for every other session.
 	 */
 	private drivenShare(row: SessionRow): typeof sharedSessions.$inferSelect | undefined {
-		if (!row.sharedSessionId || this.isViewed(row)) return undefined;
-		const shared = this.ctx.db.select().from(sharedSessions).where(eq(sharedSessions.id, row.sharedSessionId)).get();
-		if (!shared || shared.localProjectId !== row.projectId) return undefined;
+		if (this.isViewed(row)) return undefined;
+		const shared = this.gitShareOf(row);
+		if (!shared) return undefined;
 		if (drivesGitShare(shared)) return shared;
-		return shared.vcs !== "files" && shared.localSessionId === row.id && hasWorktree(this.ctx, shared.id) ? shared : undefined;
+		return shared.localSessionId === row.id && hasWorktree(this.ctx, shared.id) ? shared : undefined;
 	}
 
 	/**
-	 * Which folder the session works in, as a checkout id: `<projectId>~<sharedId>` for the session that drives a git-mode shared session
-	 * whose worktree exists on this node, otherwise `<projectId>` (the project's own folder). The same rule decides the runtime's cwd.
+	 * Which folder the session shows and works in, as a checkout id: `<projectId>~<sharedId>` when it belongs to a git-mode shared session
+	 * whose worktree exists on this node, otherwise `<projectId>` (the project's own folder). For a session that runs here this is the
+	 * runtime's folder (`drivenShare`, see `workdir`). A live copy of another node's session and a session that moved to another node run
+	 * nothing here: they show the share's worktree while this node keeps one (the shared branch and its history, as this node last had it),
+	 * never the project folder, whose branch has nothing to do with the share.
 	 */
 	checkoutIdOf(row: SessionRow): string {
-		const shared = this.drivenShare(row);
+		const shared = this.isViewed(row) ? this.gitShareOf(row) : this.drivenShare(row);
 		return shared && hasWorktree(this.ctx, shared.id) ? joinCheckoutId(row.projectId, shared.id) : row.projectId;
 	}
 

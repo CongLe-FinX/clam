@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
-import type { AgentSession, SharedSession, SharedTransfer, TransferPhase } from "@clam/contracts";
+import type { AgentSession, GitStatus, SharedSession, SharedTransfer, TransferPhase } from "@clam/contracts";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { api } from "./full-harness.ts";
 import { eventually } from "./net-helpers.ts";
@@ -111,6 +111,15 @@ describe("hand-over to a node that is not a participant yet", () => {
 		expect(mirror.kind).toBe("mirror");
 		await eventually(async () => (await transcriptTexts(pair.a, mirror.id)).some((t) => t.includes("Nothing is missing")), "B's continued session on A's mirror", 30_000);
 		expect(former.participants.find((p) => p.nodeId === pair.aId)).toMatchObject({ role: "participant", state: "active" });
+		// A no longer drives, but its worktree of the share stays: the moved session and the mirror show it (the shared branch), never the
+		// project folder, which is still on its own branch and cannot take the shared branch while the worktree holds it
+		const worktreeA = worktreeOf(pair.a, sharedId);
+		const inWorktree = `${pair.projectA.id}~${sharedId}`;
+		expect((await sessionOn(pair.a, session.id)).checkoutId).toBe(inWorktree);
+		expect(mirror.checkoutId).toBe(inWorktree);
+		expect(git(worktreeA, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe(started.body.repo?.branch);
+		expect((await api(pair.a).get<GitStatus>(`/projects/${inWorktree}/git/status`)).body.branch).toBe(started.body.repo?.branch);
+		expect(git(pair.workA, "rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
 		expect(remoteBranches(pair.origin).filter((b) => b.startsWith("clam/rescue/"))).toEqual([]);
 		const stale = await api(pair.a).post<ErrorBody>(`/sessions/${session.id}/prompt`, { message: "still there?", clientId: "late" });
 		expect(stale.status).toBe(409);
