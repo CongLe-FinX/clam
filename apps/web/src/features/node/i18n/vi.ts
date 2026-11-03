@@ -86,7 +86,7 @@ const vi: Catalog = {
 	"Free": "Còn trống",
 	"Total": "Tổng",
 	"No volumes could be read.": "Không đọc được ổ đĩa nào.",
-	"{free} free": "còn trống {free}",
+	"{free} free": "{free} trống",
 	"Nothing to show.": "Chưa có gì để hiển thị.",
 	"{count, plural, one {# process} other {# processes}}": "{count, plural, other {# tiến trình}}",
 	"Per-app usage is not available on this system": "Chưa hỗ trợ thống kê theo ứng dụng trên hệ thống này",
