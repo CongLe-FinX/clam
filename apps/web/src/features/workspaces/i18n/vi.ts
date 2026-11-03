@@ -101,6 +101,8 @@ const vi: Catalog = {
 	"This stops syncing shareable contexts with that machine. Copies it already holds stay on that machine.": "Thao tác này dừng đồng bộ ngữ cảnh chia sẻ với máy đó. Các bản sao nó đã có vẫn ở lại trên máy đó.",
 	"{name} removed": "Đã gỡ {name}",
 	"Could not remove member": "Không thể gỡ thành viên",
+	"Workspace actions": "Thao tác với workspace",
+	"Delete workspace…": "Xóa workspace…",
 };
 
 export default vi;

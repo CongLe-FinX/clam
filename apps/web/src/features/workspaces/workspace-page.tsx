@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams } from "@tanstack/react-router";
-import { BookMarked, Bot, Folder, FolderGit2, FolderPlus, GitBranch, Layers, MessageSquarePlus, Pencil, Trash2, Users } from "lucide-react";
+import { BookMarked, Bot, Folder, FolderGit2, FolderPlus, GitBranch, Layers, MessageSquarePlus, MoreHorizontal, Pencil, Trash2, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { SessionRow } from "@/components/session-row";
@@ -11,10 +11,12 @@ import { relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/ui/dropdown-menu";
 import { EmptyState } from "@/ui/empty-state";
 import { PageContainer, PageHeader, SectionTitle } from "@/ui/page";
 import { Skeleton } from "@/ui/skeleton";
 import { StatusDot } from "@/ui/status-dot";
+import { Tip } from "@/ui/tooltip";
 import { useDeleteWorkspace } from "./workspaces-page.tsx";
 
 export default function WorkspacePage() {
@@ -64,25 +66,39 @@ export default function WorkspacePage() {
 				description={ws.data ? ws.data.description || undefined : undefined}
 				actions={
 					<>
-						<Button variant="ghost" size="icon" aria-label={t("Edit workspace")} onClick={() => openDialog({ kind: "edit-workspace", workspaceId })}>
-							<Pencil />
-						</Button>
-						<Button variant="ghost" size="icon" aria-label={t("Delete workspace")} onClick={() => setConfirmDelete(true)}>
-							<Trash2 />
-						</Button>
-						<Button asChild variant="outline">
-							<Link to="/workspaces/$workspaceId/context" params={{ workspaceId }} search={{}}>
-								<BookMarked /> {t("Context")}
-							</Link>
-						</Button>
-						<Button asChild variant="outline">
-							<Link to="/workspaces/$workspaceId/members" params={{ workspaceId }} search={{}}>
-								<Users /> {t("Members")}
-							</Link>
-						</Button>
 						<Button variant="primary" onClick={() => openDialog({ kind: "create-project", workspaceId })}>
 							<FolderPlus /> {t("Add project")}
 						</Button>
+						{/* Phones show Context and Members as icons so the whole row fits on one line; wider screens add the words. */}
+						<Tip label={t("Context")}>
+							<Button asChild variant="outline" className="max-sm:aspect-square max-sm:px-0">
+								<Link to="/workspaces/$workspaceId/context" params={{ workspaceId }} search={{}}>
+									<BookMarked /> <span className="max-sm:sr-only">{t("Context")}</span>
+								</Link>
+							</Button>
+						</Tip>
+						<Tip label={t("Members")}>
+							<Button asChild variant="outline" className="max-sm:aspect-square max-sm:px-0">
+								<Link to="/workspaces/$workspaceId/members" params={{ workspaceId }} search={{}}>
+									<Users /> <span className="max-sm:sr-only">{t("Members")}</span>
+								</Link>
+							</Button>
+						</Tip>
+						<DropdownMenu>
+							<DropdownMenuTrigger asChild>
+								<Button variant="outline" size="icon" aria-label={t("Workspace actions")}>
+									<MoreHorizontal />
+								</Button>
+							</DropdownMenuTrigger>
+							<DropdownMenuContent>
+								<DropdownMenuItem onSelect={() => openDialog({ kind: "edit-workspace", workspaceId })}>
+									<Pencil /> {t("Edit workspace")}
+								</DropdownMenuItem>
+								<DropdownMenuItem danger onSelect={() => setConfirmDelete(true)}>
+									<Trash2 /> {t("Delete workspace…")}
+								</DropdownMenuItem>
+							</DropdownMenuContent>
+						</DropdownMenu>
 					</>
 				}
 			/>
