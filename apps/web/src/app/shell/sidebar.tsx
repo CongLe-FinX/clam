@@ -36,6 +36,7 @@ import { ChatContextMenu, ChatRowMenu } from "@/features/chats/chat-actions";
 import { useChats } from "@/features/chats/hooks";
 import { useActiveHandoffCount } from "@/features/handoff/api";
 import { warmHandlers } from "@/features/session/preload";
+import { hueOf, hueStyle } from "@/features/shared/identity";
 import { t, tr } from "@/i18n";
 import { isAwaitingApproval, isPendingInvite, taskNeedsAttention, usePairingRequests, useProjects, useRuntime, useSessions, useSharedInvites, useSharedSessions, useTasks, useWorkspaces } from "@/lib/queries";
 import { RUNTIME_STATE_LABEL, runtimeDot } from "@/components/session-status";
@@ -273,14 +274,14 @@ const RUNNING_ORDER: Partial<Record<string, number>> = { busy: 0, crashed: 1 };
 function RunningSection() {
 	const runtime = useRuntime().data;
 	const sessions = useSessions().data;
-	// Every project of the node (no workspace filter): the badge names the project a runtime works in; a plain chat's own folder gets none.
+	// Every project of the node (no workspace filter): the badge names the project a runtime works in, or says "Chat" for a chat's own folder.
 	const projects = useProjects().data;
 	const params = useParams({ strict: false }) as { sessionId?: string };
 	const qc = useQueryClient();
 	const live = (runtime ?? []).filter((r) => r.state !== "stopped");
 	if (live.length === 0) return null;
 	const byId = new Map((sessions ?? []).map((s) => [s.id, s] as const));
-	const projectOf = new Map((projects ?? []).filter((p) => p.origin !== "chat").map((p) => [p.id, p.name] as const));
+	const projectOf = new Map((projects ?? []).map((p) => [p.id, p] as const));
 	const rows = [...live].sort((a, b) => (RUNNING_ORDER[a.state] ?? 2) - (RUNNING_ORDER[b.state] ?? 2) || (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? ""));
 	return (
 		<>
@@ -312,9 +313,20 @@ function RunningSection() {
 								<StatusDot status={runtimeDot(r.state)} label={tr(RUNTIME_STATE_LABEL[r.state])} />
 							</span>
 							<span className="min-w-0 flex-1 truncate">{s?.title || t("Untitled session")}</span>
-							{project ? (
-								<span title={t("Project: {name}", { name: project })} className="max-w-[45%] shrink-0 truncate rounded bg-surface-3 px-1.5 py-px font-mono text-[10px] leading-4 text-muted-foreground">
-									{project}
+							{project?.origin === "chat" ? (
+								<span title={t("Chat")} className="inline-flex shrink-0 items-center gap-1 rounded-md bg-accent-soft px-1.5 py-px text-[10px] font-medium leading-4 text-accent">
+									<MessagesSquare className="size-2.5" aria-hidden />
+									{t("Chat")}
+								</span>
+							) : project ? (
+								// One colour per project (stable: derived from its id), so the same project reads the same at a glance.
+								<span
+									title={t("Project: {name}", { name: project.name })}
+									style={hueStyle(hueOf(project.id, null))}
+									className="inline-flex min-w-0 max-w-[45%] shrink-0 items-center gap-1 rounded-md bg-[oklch(0.95_0.035_var(--hue))] px-1.5 py-px text-[10px] font-medium leading-4 text-[oklch(0.45_0.13_var(--hue))] shadow-[inset_0_0_0_1px_oklch(0.88_0.06_var(--hue))] dark:bg-[oklch(0.3_0.05_var(--hue))] dark:text-[oklch(0.85_0.09_var(--hue))] dark:shadow-[inset_0_0_0_1px_oklch(0.4_0.07_var(--hue))]"
+								>
+									<FolderGit2 className="size-2.5 shrink-0" aria-hidden />
+									<span className="truncate">{project.name}</span>
 								</span>
 							) : null}
 							{s && s.pendingRequests > 0 ? <span role="img" aria-label={t("Waiting for your answer")} title={t("Waiting for your answer")} className="size-2 shrink-0 rounded-full bg-warning" /> : null}

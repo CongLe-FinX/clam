@@ -171,6 +171,7 @@ const vi: Catalog = {
 	"Manage": "Quản lý",
 	"Untitled session": "Phiên chưa đặt tên",
 	"Project: {name}": "Dự án: {name}",
+	"Chat": "Chat",
 	"Primary": "Chính",
 	"Agent Directory": "Danh bạ agent",
 	"Shared Sessions": "Phiên chia sẻ",
