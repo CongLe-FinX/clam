@@ -9,5 +9,6 @@ const vi: Catalog = {
 	"Disk is almost full · {free} free": "Ổ đĩa gần đầy · còn trống {free}",
 	"Disk is getting full · {free} free": "Ổ đĩa sắp đầy · còn trống {free}",
 	"Folder sizes cannot be measured on this platform": "Không thể đo dung lượng thư mục trên nền tảng này",
+	"OMP is already being updated": "OMP đang được cập nhật",
 };
 export default vi;

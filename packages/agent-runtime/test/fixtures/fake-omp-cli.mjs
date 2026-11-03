@@ -166,8 +166,30 @@ export async function runCli(argv, env) {
 	if (args[0] === "--profile") args = args.slice(2);
 
 	if (args[0] === "session") return runSession(args, env, dir);
+	// The installed version lives in config.json (`version`, default 18.14.0) so `omp update` can change it; FAKE_OMP_LATEST is the release
+	// on offer, FAKE_OMP_UPDATE_FAIL makes the check and the install fail like an unreachable release service.
+	const installed = () => readConfig(dir).version ?? "18.14.0";
 	if (args[0] === "--version") {
-		process.stdout.write("omp/18.14.0\n");
+		process.stdout.write(`omp/${installed()}\n`);
+		return 0;
+	}
+	if (args[0] === "update") {
+		if (env.FAKE_OMP_UPDATE_FAIL) {
+			process.stderr.write(`Failed to check for updates: ${env.FAKE_OMP_UPDATE_FAIL}\n`);
+			return 1;
+		}
+		const current = installed();
+		const latest = env.FAKE_OMP_LATEST ?? current;
+		const newer = latest.localeCompare(current, undefined, { numeric: true }) > 0;
+		process.stdout.write(`Current version: ${current}\n`);
+		if (!newer) {
+			process.stdout.write("✔ Already up to date\n");
+			return 0;
+		}
+		process.stdout.write(`New version available: ${latest}\n`);
+		if (args.includes("--check")) return 0;
+		writeConfig(dir, { ...readConfig(dir), version: latest });
+		process.stdout.write(`Updating via bun...\n\n✔ Updated to ${latest}\n`);
 		return 0;
 	}
 	if (args[0] === "config") {

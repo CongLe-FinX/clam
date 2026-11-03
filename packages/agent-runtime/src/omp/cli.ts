@@ -33,6 +33,10 @@ const MAX_SELECTOR_LENGTH = 200;
 
 const SESSION_TRANSFER_TIMEOUT_MS = 120_000;
 const SESSION_MOVED_TIMEOUT_MS = 30_000;
+/** `omp update --check` asks omp's release service over the network. */
+const UPDATE_CHECK_TIMEOUT_MS = 60_000;
+/** `omp update` downloads and installs (bun/npm/Homebrew/binary). */
+const UPDATE_TIMEOUT_MS = 5 * 60_000;
 const ARCHIVE_PROBLEM_PATTERN = /archive|manifest|sha256|invalid|not a session archive|no such file|ENOENT|not found/i;
 const LEASE_PATTERN = /another live omp process/i;
 
@@ -515,6 +519,23 @@ export function createOmpCli(options: OmpCliOptions): OmpCli {
 			const source = resolve(sessionFile);
 			await requireFile("Session file", source, "invalid_argument");
 			await runSession(["session", "moved", source, "--to", to], opts?.timeoutMs ?? SESSION_MOVED_TIMEOUT_MS, "omp session moved", false);
+		},
+
+		async checkUpdate() {
+			const out = stripAnsi(await runChecked(["update", "--check"], UPDATE_CHECK_TIMEOUT_MS, "omp update --check"));
+			const current = /Current version:\s*v?(\S+)/i.exec(out)?.[1] ?? null;
+			const offered = /New version available:\s*v?(\S+)/i.exec(out)?.[1] ?? null;
+			const upToDate = /Already up to date/i.test(out);
+			return { current, latest: offered ?? (upToDate ? current : null), available: offered !== null };
+		},
+
+		async update(opts) {
+			const out = stripAnsi(await runChecked(["update"], opts?.timeoutMs ?? UPDATE_TIMEOUT_MS, "omp update")).trim();
+			// A successful install ends with "Updated to <version>"; "Already up to date" installs nothing.
+			const version = /Updated to\s*v?([0-9][^\s(]*)/i.exec(out)?.[1] ?? null;
+			generation++;
+			modelsCache = null;
+			return { version, output: out };
 		},
 
 		invalidate(): void {

@@ -1,18 +1,110 @@
 import { useState } from "react";
-import { CheckCircle2, Download, RefreshCw, XCircle } from "lucide-react";
-import type { LoginProvider } from "@clam/contracts";
+import { ArrowUpCircle, CheckCircle2, Download, Loader2, RefreshCw, XCircle } from "lucide-react";
+import { toast } from "sonner";
+import { type LoginProvider, type OmpUpdateCheck, type OmpUpdateResult, routes } from "@clam/contracts";
 import { T, t } from "@/i18n";
+import { api, errorText } from "@/lib/api";
 import { qk } from "@/lib/queries";
+import { cn, relativeTime } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
 import { Skeleton } from "@/ui/skeleton";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { OmpLoginDialog } from "../components/omp-login";
 import { ModelCatalog } from "../components/omp-models";
 import { ProvidersList } from "../components/omp-providers";
 import { RolesEditor } from "../components/omp-roles";
 import { CopyButton, InlineError, KeyValue, PageBody, PageIntro, SettingsSection } from "../components/section";
 import { useModelRoles, useOmpModels, useOmpOverview } from "../hooks";
+
+const UPDATE_KEY = ["local", "omp", "update"] as const;
+
+/**
+ * "Is there a newer OMP?" right where its version is shown: checked when the page opens (the server keeps the answer 10 min), checked again
+ * on demand, and installed with one click through `omp update`. Agents already running keep their version until they restart.
+ */
+function OmpUpdatePanel() {
+	const qc = useQueryClient();
+	const check = useQuery({
+		queryKey: UPDATE_KEY,
+		queryFn: ({ signal }) => api.get<OmpUpdateCheck>(routes.ompUpdate, undefined, { signal }),
+		staleTime: 10 * 60_000,
+		retry: false,
+	});
+	const recheck = useMutation({
+		mutationFn: () => api.get<OmpUpdateCheck>(routes.ompUpdate, { refresh: 1 }),
+		onSuccess: (next) => qc.setQueryData(UPDATE_KEY, next),
+		onError: (e) => toast.error(t("Could not check for OMP updates"), { description: errorText(e) }),
+	});
+	const install = useMutation({
+		mutationFn: () => api.post<OmpUpdateResult>(routes.ompUpdate),
+		onSuccess: (r) => {
+			void qc.invalidateQueries({ queryKey: UPDATE_KEY });
+			void qc.invalidateQueries({ queryKey: qk.ompProviders });
+			void qc.invalidateQueries({ queryKey: qk.ompModels });
+			if (!r.updated) {
+				toast.info(t("OMP is already up to date"));
+				return;
+			}
+			toast.success(t("OMP updated to {version}", { version: r.version?.replace(/^omp\//, "") ?? "?" }), {
+				description: r.runningSessions > 0 ? t("{count, plural, one {# running session keeps} other {# running sessions keep}} the previous version until it restarts.", { count: r.runningSessions }) : undefined,
+				duration: 8000,
+			});
+		},
+		onError: (e) => toast.error(t("OMP update failed"), { description: errorText(e), duration: 12_000 }),
+	});
+
+	const data = check.data;
+	const checking = check.isPending || recheck.isPending;
+	const available = data?.available === true;
+	return (
+		<div
+			className={cn(
+				"mb-3 flex flex-wrap items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors",
+				available ? "bg-accent-soft/60 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--accent)_35%,transparent)]" : "bg-surface-2 shadow-[inset_0_0_0_1px_var(--border)]",
+			)}
+		>
+			<span className={cn("grid size-8 shrink-0 place-items-center rounded-full", available ? "bg-accent text-accent-foreground" : check.isError ? "bg-danger/12 text-danger" : "bg-success/12 text-success")}>
+				{checking || install.isPending ? <Loader2 className="size-4 animate-spin" /> : available ? <ArrowUpCircle className="size-4" /> : check.isError ? <XCircle className="size-4" /> : <CheckCircle2 className="size-4" />}
+			</span>
+			<div className="min-w-0 flex-1">
+				{install.isPending ? (
+					<>
+						<div className="font-medium">{t("Updating OMP to {version}…", { version: data?.latest ?? "" })}</div>
+						<div className="text-xs text-muted-foreground">{t("Downloading and installing; this can take a minute. Running agents are not interrupted.")}</div>
+					</>
+				) : checking && !data ? (
+					<div className="text-muted-foreground">{t("Checking for OMP updates…")}</div>
+				) : check.isError ? (
+					<>
+						<div className="font-medium">{t("Could not check for OMP updates")}</div>
+						<div className="truncate text-xs text-danger">{errorText(check.error)}</div>
+					</>
+				) : available ? (
+					<>
+						<div className="font-medium">{t("OMP {version} is available", { version: data.latest ?? "" })}</div>
+						<div className="text-xs text-muted-foreground">{t("You have {current}. Agents that are running keep their version until they restart.", { current: data.current ?? "?" })}</div>
+					</>
+				) : data ? (
+					<>
+						<div className="font-medium">{t("OMP is up to date")}</div>
+						<div className="text-xs text-muted-foreground">{t("Version {current} · checked {time}", { current: data.current ?? "?", time: relativeTime(data.checkedAt) })}</div>
+					</>
+				) : null}
+			</div>
+			<div className="flex shrink-0 items-center gap-2">
+				{available ? (
+					<Button variant="primary" size="sm" loading={install.isPending} disabled={checking} onClick={() => install.mutate()}>
+						<ArrowUpCircle /> {install.isPending ? t("Updating…") : t("Update to {version}", { version: data.latest ?? "" })}
+					</Button>
+				) : null}
+				<Button variant="ghost" size="sm" loading={recheck.isPending} disabled={install.isPending || check.isPending} onClick={() => recheck.mutate()}>
+					<RefreshCw /> {t("Check for new version")}
+				</Button>
+			</div>
+		</div>
+	);
+}
 
 export default function OmpPage() {
 	const qc = useQueryClient();
@@ -58,20 +150,23 @@ export default function OmpPage() {
 					{overview.isPending && <Skeleton className="h-24" />}
 					{overview.isError && <InlineError error={overview.error} onRetry={() => overview.refetch()} />}
 					{install && install.installed && (
-						<dl className="divide-y divide-border">
-							<KeyValue label={t("Version")} mono>
-								{install.version ?? t("unknown")}
-							</KeyValue>
-							<KeyValue label={t("Binary")} mono>
-								{install.binaryPath ?? "—"}
-							</KeyValue>
-							<KeyValue label={t("Config directory")} mono>
-								{install.configPath ?? "—"}
-							</KeyValue>
-							<KeyValue label={t("Default model")} mono>
-								{overview.data?.defaultModel ?? t("Not set")}
-							</KeyValue>
-						</dl>
+						<>
+							<OmpUpdatePanel />
+							<dl className="divide-y divide-border">
+								<KeyValue label={t("Version")} mono>
+									{install.version ?? t("unknown")}
+								</KeyValue>
+								<KeyValue label={t("Binary")} mono>
+									{install.binaryPath ?? "—"}
+								</KeyValue>
+								<KeyValue label={t("Config directory")} mono>
+									{install.configPath ?? "—"}
+								</KeyValue>
+								<KeyValue label={t("Default model")} mono>
+									{overview.data?.defaultModel ?? t("Not set")}
+								</KeyValue>
+							</dl>
+						</>
 					)}
 					{notInstalled && (
 						<div className="space-y-3">

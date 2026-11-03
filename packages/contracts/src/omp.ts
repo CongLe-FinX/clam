@@ -107,3 +107,26 @@ export const ProvidersOverview = z.object({
 	defaultModel: z.string().nullable(),
 });
 export type ProvidersOverview = z.infer<typeof ProvidersOverview>;
+
+/** `GET /omp/update`: the installed OMP and the newest release on its update channel. */
+export const OmpUpdateCheck = z.object({
+	current: z.string().nullable(),
+	/** Null when omp could not tell (it printed neither an offer nor "up to date"). */
+	latest: z.string().nullable(),
+	available: z.boolean(),
+	checkedAt: z.string(),
+});
+export type OmpUpdateCheck = z.infer<typeof OmpUpdateCheck>;
+
+/** `POST /omp/update`: what `omp update` did. */
+export const OmpUpdateResult = z.object({
+	previous: z.string().nullable(),
+	/** The version now installed (`omp --version` after the update). */
+	version: z.string().nullable(),
+	updated: z.boolean(),
+	/** omp's own output, for the details view. */
+	output: z.string(),
+	/** Agent runtimes still running the previous version: they switch when they restart. */
+	runningSessions: z.number().int(),
+});
+export type OmpUpdateResult = z.infer<typeof OmpUpdateResult>;

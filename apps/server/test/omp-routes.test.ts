@@ -55,6 +55,12 @@ function fakeCli() {
 		sessionMoved: async () => {
 			throw new Error("not used by this test");
 		},
+		checkUpdate: async () => {
+			throw new Error("not used by this test");
+		},
+		update: async () => {
+			throw new Error("not used by this test");
+		},
 		invalidate: () => {
 			state.invalidations++;
 		},
@@ -107,6 +113,7 @@ function fakeControl() {
 			state.logouts.push([providerId, credentialId]);
 			return { remainingSource: "env" };
 		},
+		release: async () => {},
 		shutdown: async () => {},
 	};
 	return { control, state, emit };

@@ -346,6 +346,15 @@ export function createOmpControl(options: OmpControlOptions): OmpControl {
 			return { remainingSource: data.remainingSource ?? null };
 		},
 
+		async release(): Promise<void> {
+			if (closed || activeRecords().length > 0) return;
+			clearTimeout(idleTimer);
+			idleTimer = undefined;
+			const current = transport;
+			transport = null;
+			if (current) await current.close().catch(() => undefined);
+		},
+
 		async shutdown(): Promise<void> {
 			closed = true;
 			clearTimeout(idleTimer);

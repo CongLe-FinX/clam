@@ -53,6 +53,17 @@ export interface OmpCli {
 	 * value is empty / starts with `-`. Default timeout 30 s.
 	 */
 	sessionMoved(sessionFile: string, to: string, options?: { timeoutMs?: number }): Promise<void>;
+	/**
+	 * `omp update --check`: the installed version and the newest one on omp's update channel. `latest` is null when omp printed neither
+	 * an offer nor "up to date". Rejects (`rejected`) when the check itself failed (offline, registry down) and `timeout` after 60 s.
+	 */
+	checkUpdate(): Promise<{ current: string | null; latest: string | null; available: boolean }>;
+	/**
+	 * `omp update`: install the newest version (omp picks the install method: bun, npm, Homebrew, binary, …). Resolves with the version
+	 * omp reports it updated to (null when it was already up to date) and its output; rejects with omp's error text. Default timeout 5 min.
+	 * Running omp processes keep the version they started with.
+	 */
+	update(options?: { timeoutMs?: number }): Promise<{ version: string | null; output: string }>;
 }
 
 export interface OmpControl {
@@ -75,6 +86,8 @@ export interface OmpControl {
 	onFlow(listener: (flow: LoginFlow) => void): () => void;
 	/** RPC `logout`. */
 	logout(providerId: string, credentialId: number): Promise<{ remainingSource: string | null }>;
+	/** Stop the control process unless a login flow is running, so the next call starts the current binary (after `omp update`). */
+	release(): Promise<void>;
 	/** Stop the control process (called at server shutdown). */
 	shutdown(): Promise<void>;
 }

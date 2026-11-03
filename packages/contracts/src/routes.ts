@@ -166,6 +166,7 @@ export const routes = {
 	ompModels: "/omp/models", // GET ModelInfo[]
 	ompModelRoles: "/omp/model-roles", // GET ModelRoles · PUT SetModelRoleBody → ModelRoles
 	ompModelTest: "/omp/models/test", // POST ModelTestBody → ModelTestResult
+	ompUpdate: "/omp/update", // GET ?refresh=1 → OmpUpdateCheck (cached 10 min) · POST → OmpUpdateResult (409 update_in_progress while one runs)
 
 	// usage
 	usageRecorded: "/usage/recorded", // GET ?refresh=1 → RecordedUsage

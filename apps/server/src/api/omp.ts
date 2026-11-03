@@ -6,6 +6,8 @@ import {
 	LogoutBody,
 	type ModelInfo,
 	type ModelRoles,
+	type OmpUpdateCheck,
+	type OmpUpdateResult,
 	ModelTestBody,
 	type ModelTestResult,
 	type ProviderAccount,
@@ -111,5 +113,48 @@ export default async function ompRoutes(app: FastifyInstance, { ctx }: RoutePlug
 		const { selector } = ModelTestBody.parse(req.body);
 		if (!isValidModelSelector(selector)) throw ApiError.badRequest(i18nMsg("Invalid model selector: {selector}", { selector: JSON.stringify(selector) }));
 		return ctx.ompCli.testModel(selector);
+	});
+
+	// ── OMP updates: `omp update --check` / `omp update`. The check asks omp's release service, so its answer is cached.
+	const UPDATE_CHECK_TTL_MS = 10 * 60_000;
+	let lastCheck: OmpUpdateCheck | null = null;
+	let updating: Promise<OmpUpdateResult> | null = null;
+
+	app.get(routes.ompUpdate, async (req): Promise<OmpUpdateCheck> => {
+		const { refresh } = ModelsQuery.parse(req.query);
+		if (lastCheck && !(refresh === "1" || refresh === "true") && Date.now() - Date.parse(lastCheck.checkedAt) < UPDATE_CHECK_TTL_MS) return lastCheck;
+		const install = await ctx.ompCli.detect();
+		if (!install.installed) throw ApiError.unavailable(install.error ?? "omp is not installed");
+		const check = await ctx.ompCli.checkUpdate();
+		lastCheck = { ...check, checkedAt: new Date().toISOString() };
+		return lastCheck;
+	});
+
+	app.post(routes.ompUpdate, async (): Promise<OmpUpdateResult> => {
+		if (updating) throw new ApiError(409, "update_in_progress", i18nMsg("OMP is already being updated"));
+		const run = (async (): Promise<OmpUpdateResult> => {
+			const before = await ctx.ompCli.detect();
+			if (!before.installed) throw ApiError.unavailable(before.error ?? "omp is not installed");
+			const { output } = await ctx.ompCli.update();
+			const after = await ctx.ompCli.detect();
+			lastCheck = null;
+			// The login/provider process is long-lived: let the next request start it from the new binary (it waits if a login is running).
+			await ctx.ompControl.release();
+			const version = after.version ?? before.version;
+			ctx.log.info({ from: before.version, to: version }, "omp updated");
+			return {
+				previous: before.version,
+				version,
+				updated: version !== before.version,
+				output,
+				runningSessions: ctx.runtime.list().filter((r) => r.state !== "stopped").length,
+			};
+		})();
+		updating = run;
+		try {
+			return await run;
+		} finally {
+			updating = null;
+		}
 	});
 }
