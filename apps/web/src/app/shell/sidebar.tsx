@@ -273,11 +273,14 @@ const RUNNING_ORDER: Partial<Record<string, number>> = { busy: 0, crashed: 1 };
 function RunningSection() {
 	const runtime = useRuntime().data;
 	const sessions = useSessions().data;
+	// Every project of the node (no workspace filter): the badge names the project a runtime works in; a plain chat's own folder gets none.
+	const projects = useProjects().data;
 	const params = useParams({ strict: false }) as { sessionId?: string };
 	const qc = useQueryClient();
 	const live = (runtime ?? []).filter((r) => r.state !== "stopped");
 	if (live.length === 0) return null;
 	const byId = new Map((sessions ?? []).map((s) => [s.id, s] as const));
+	const projectOf = new Map((projects ?? []).filter((p) => p.origin !== "chat").map((p) => [p.id, p.name] as const));
 	const rows = [...live].sort((a, b) => (RUNNING_ORDER[a.state] ?? 2) - (RUNNING_ORDER[b.state] ?? 2) || (b.lastActivityAt ?? "").localeCompare(a.lastActivityAt ?? ""));
 	return (
 		<>
@@ -293,6 +296,7 @@ function RunningSection() {
 			<div className="flex flex-col gap-px">
 				{rows.map((r) => {
 					const s = byId.get(r.sessionId);
+					const project = s ? projectOf.get(s.projectId) : undefined;
 					const current = params.sessionId === r.sessionId;
 					return (
 						<Link
@@ -308,6 +312,11 @@ function RunningSection() {
 								<StatusDot status={runtimeDot(r.state)} label={tr(RUNTIME_STATE_LABEL[r.state])} />
 							</span>
 							<span className="min-w-0 flex-1 truncate">{s?.title || t("Untitled session")}</span>
+							{project ? (
+								<span title={t("Project: {name}", { name: project })} className="max-w-[45%] shrink-0 truncate rounded bg-surface-3 px-1.5 py-px font-mono text-[10px] leading-4 text-muted-foreground">
+									{project}
+								</span>
+							) : null}
 							{s && s.pendingRequests > 0 ? <span role="img" aria-label={t("Waiting for your answer")} title={t("Waiting for your answer")} className="size-2 shrink-0 rounded-full bg-warning" /> : null}
 						</Link>
 					);

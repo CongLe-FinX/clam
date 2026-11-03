@@ -170,6 +170,7 @@ const vi: Catalog = {
 	"Running": "Đang chạy",
 	"Manage": "Quản lý",
 	"Untitled session": "Phiên chưa đặt tên",
+	"Project: {name}": "Dự án: {name}",
 	"Primary": "Chính",
 	"Agent Directory": "Danh bạ agent",
 	"Shared Sessions": "Phiên chia sẻ",
