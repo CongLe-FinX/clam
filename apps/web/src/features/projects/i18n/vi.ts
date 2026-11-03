@@ -19,6 +19,8 @@ const vi: Catalog = {
 	"Symbolic link": "Liên kết tượng trưng",
 	"File path": "Đường dẫn tệp",
 	"Markdown view": "Chế độ xem Markdown",
+	"Page view": "Chế độ xem trang",
+	"Open the page in a new tab": "Mở trang trong tab mới",
 	"Preview": "Xem trước",
 	"Source": "Nguồn",
 	"Disable line wrap": "Tắt ngắt dòng",

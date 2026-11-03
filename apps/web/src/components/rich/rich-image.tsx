@@ -43,16 +43,31 @@ export function RemoteImageCard({ src, alt, className }: { src: string; alt?: st
 	);
 }
 
+/**
+ * A remote badge (shields.io and other SVG status images in a README): the page CSP blocks the picture, so its alt text stands in as
+ * a small pill that keeps a row of badges on one line. Not a link itself: a badge is usually wrapped in one.
+ */
+export function RemoteBadge({ src, alt }: { src: string; alt?: string }) {
+	return (
+		<span title={src} className="inline-flex max-w-full items-center rounded-md bg-surface-2 px-1.5 py-0.5 align-middle font-mono text-2xs font-medium text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]">
+			<span className="truncate">{alt || t("Badge")}</span>
+		</span>
+	);
+}
+
 export interface RichImageProps {
 	src: string;
 	alt?: string;
 	className?: string;
 	/** Name shown on the fallback card when the image fails (path or file name). */
 	label?: string;
+	/** Width the author asked for (`<img width="240">`, `width="100%"`): pixels or a percentage. */
+	width?: string | undefined;
 }
 
 /** One image: space reserved while loading, lazy decode, click opens the shared lightbox, failure → friendly card. */
-export function RichImage({ src, alt = "", className, label }: RichImageProps) {
+export function RichImage({ src, alt = "", className, label, width }: RichImageProps) {
+	const size = width && /^\d+(\.\d+)?%?$/.test(width.trim()) ? (width.trim().endsWith("%") ? width.trim() : `${width.trim()}px`) : undefined;
 	const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
 	const [open, setOpen] = useState(false);
 	const close = useCallback(() => setOpen(false), []);
@@ -60,6 +75,7 @@ export function RichImage({ src, alt = "", className, label }: RichImageProps) {
 	return (
 		<>
 			<button
+				style={size ? { width: size } : undefined}
 				type="button"
 				onClick={() => setOpen(true)}
 				aria-label={alt ? t("View image: {alt}", { alt }) : t("View image")}
@@ -76,7 +92,7 @@ export function RichImage({ src, alt = "", className, label }: RichImageProps) {
 					decoding="async"
 					onLoad={() => setState("ready")}
 					onError={() => setState("failed")}
-					className={cn("block max-h-[min(26rem,60dvh)] max-w-full cursor-zoom-in object-contain transition-opacity duration-200", state === "loading" ? "size-full opacity-0" : "opacity-100")}
+					className={cn("block max-h-[min(26rem,60dvh)] max-w-full cursor-zoom-in object-contain transition-opacity duration-200", size && "w-full", state === "loading" ? "size-full opacity-0" : "opacity-100")}
 				/>
 			</button>
 			{open ? <LazyLightbox items={[{ src, alt: alt || label || t("Image"), name: label || alt }]} index={0} onIndexChange={() => undefined} onClose={close} /> : null}

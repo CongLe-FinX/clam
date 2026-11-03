@@ -102,7 +102,7 @@ export default function QuickLook({ projectId, path, onNavigate, onClose }: Quic
 				>
 					<D.Title className="sr-only">{name}</D.Title>
 					<GrabHandle onClose={onClose} className="mt-0 h-6 sm:hidden" />
-					<FileViewer key={path} projectId={projectId} path={path} onClose={onClose} actions={actions} className="min-h-0 flex-1" />
+					<FileViewer key={path} projectId={projectId} path={path} onClose={onClose} onOpenFile={onNavigate} actions={actions} className="min-h-0 flex-1" />
 				</D.Content>
 			</D.Portal>
 		</D.Root>

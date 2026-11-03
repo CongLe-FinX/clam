@@ -1,6 +1,6 @@
 import { isLocalAppUrl, OpenInMachineBrowser } from "@/features/browser/open-in-browser.tsx";
 import { OpenPreview } from "@/features/preview/open-preview.tsx";
-import { createContext, memo, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, memo, type MouseEvent, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components, defaultUrlTransform, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -8,15 +8,19 @@ import { type AssetResolver } from "./rich/assets.ts";
 import { FileChip } from "./rich/file-chip.tsx";
 import { FileTile } from "./rich/file-tile.tsx";
 import { hasMath, loadedMath, loadMath, type MathPlugins, protectCurrency } from "./rich/math.ts";
-import { RemoteImageCard, RichImage, BrokenImageCard } from "./rich/rich-image.tsx";
+import { type HtmlPlugins, loadedHtml, loadHtml } from "./rich/html.ts";
+import { BrokenImageCard, RemoteBadge, RemoteImageCard, RichImage } from "./rich/rich-image.tsx";
 import { RichFence } from "./rich/rich-fence.tsx";
 import { CodeBlock } from "./code-block.tsx";
-import { t } from "@/i18n";
+import { Info, Lightbulb, MessageSquareWarning, OctagonAlert, TriangleAlert } from "lucide-react";
+import { msg, t, tr } from "@/i18n";
 
 type Plugins = NonNullable<Options["remarkPlugins"]>;
 
 /** Resolves relative paths in `![]()` / `[]()`; provided once by `Markdown`, read by the (module-level, stable) component overrides. */
 const AssetsContext = createContext<AssetResolver | undefined>(undefined);
+/** Opens another file of the same folder in place (the file viewer); absent in chat, where file links are chips. */
+const OpenFileContext = createContext<((path: string) => void) | undefined>(undefined);
 /** The source text of the block being rendered, so a fence's closing line can be checked from its machine offsets. */
 const SourceContext = createContext("");
 
@@ -54,22 +58,59 @@ const IMG_WRAPPERS = new Set(["a", "em", "strong", "del"]);
 const hasImage = (n: HastNode): boolean => n.children?.some((c) => c.type === "element" && (c.tagName === "img" || (IMG_WRAPPERS.has(c.tagName ?? "") && hasImage(c)))) ?? false;
 const onlyImages = (n: HastNode): boolean =>
 	n.children?.every((c) => (c.type === "text" && !(c.value ?? "").trim()) || (c.type === "element" && (c.tagName === "br" || c.tagName === "img" || (c.tagName === "a" && hasImage(c) && onlyImages(c))))) ?? false;
+interface ImgNode extends HastNode {
+	properties?: { src?: unknown };
+	children?: ImgNode[];
+}
+const imageSources = (n: ImgNode): string[] => (n.tagName === "img" ? [String(n.properties?.src ?? "")] : (n.children ?? []).flatMap(imageSources));
 
-function Img({ src, alt }: { src?: string | Blob; alt?: string }) {
+/** Status badges (shields.io and SVG images on a remote host): a compact pill, not a full remote-image card per badge. */
+const isBadge = (src: string): boolean => /^(https?:)?\/\/img\.shields\.io\//i.test(src) || /\.svg(?:[?#]|$)/i.test(src);
+
+function Img({ src, alt, width }: { src?: string | Blob; alt?: string; width?: string | number }) {
 	const assets = useContext(AssetsContext);
 	if (typeof src !== "string" || !src) return null;
-	if (DATA_IMAGE.test(src)) return <RichImage src={src} alt={alt} label={alt || t("Embedded image")} />;
-	if (/^https?:\/\//i.test(src) || src.startsWith("//")) return <RemoteImageCard src={src.startsWith("//") ? `https:${src}` : src} alt={alt} />;
+	const w = width == null ? undefined : String(width);
+	if (DATA_IMAGE.test(src)) return <RichImage src={src} alt={alt} label={alt || t("Embedded image")} width={w} />;
+	if (/^https?:\/\//i.test(src) || src.startsWith("//")) {
+		const url = src.startsWith("//") ? `https:${src}` : src;
+		return isBadge(src) ? <RemoteBadge src={url} alt={alt} /> : <RemoteImageCard src={url} alt={alt} />;
+	}
 	const file = assets?.resolve(src);
 	if (!file) return <BrokenImageCard label={alt || src} detail={src} />;
-	if (file.kind === "image") return <RichImage src={file.url} alt={alt || file.name} label={file.path ?? file.name} />;
+	if (file.kind === "image") return <RichImage src={file.url} alt={alt || file.name} label={file.path ?? file.name} width={w} />;
 	return <FileTile file={file} className="my-1" />;
+}
+
+/**
+ * `#slug` links scroll to the heading (or the `id`/`name` an HTML block declared, which sanitizing prefixes with `user-content-`)
+ * inside the same rendered document, never through the page URL: several documents can be on one page and the router owns the hash.
+ */
+function scrollToAnchor(event: MouseEvent<HTMLAnchorElement>, href: string): void {
+	let id = href.slice(1);
+	try {
+		id = decodeURIComponent(id);
+	} catch {
+		/* keep as written */
+	}
+	const root = event.currentTarget.closest(".prose-clam");
+	if (!root || !id) return;
+	const target = root.querySelector(`[data-md-anchor="${CSS.escape(id)}"]`) ?? root.querySelector(`[id="${CSS.escape(id)}"], [id="${CSS.escape(`user-content-${id}`)}"]`);
+	if (!target) return;
+	event.preventDefault();
+	target.scrollIntoView({ behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
 }
 
 function Link({ href, children }: { href?: string; children?: ReactNode }) {
 	const assets = useContext(AssetsContext);
+	const openFile = useContext(OpenFileContext);
 	if (!href) return <span>{children}</span>;
-	if (href.startsWith("#")) return <a href={href}>{children}</a>;
+	if (href.startsWith("#"))
+		return (
+			<a href={href} onClick={(e) => scrollToAnchor(e, href)}>
+				{children}
+			</a>
+		);
 	if (isAbsolute(href)) {
 		const link = <a href={href} target="_blank" rel="noreferrer noopener">{children}</a>;
 		return isLocalAppUrl(href) ? (
@@ -83,6 +124,20 @@ function Link({ href, children }: { href?: string; children?: ReactNode }) {
 		);
 	}
 	const file = assets?.resolve(href);
+	if (file?.path && openFile) {
+		const target = file.path;
+		return (
+			<a
+				href={file.url}
+				onClick={(e) => {
+					e.preventDefault();
+					openFile(target);
+				}}
+			>
+				{children}
+			</a>
+		);
+	}
 	if (file) return <FileChip file={file}>{children}</FileChip>;
 	return <span className="text-muted-foreground" title={href}>{children}</span>;
 }
@@ -102,14 +157,40 @@ function Code({ className, children, node }: { className?: string; children?: Re
 	return <CodeBlock code={code} lang={lang} className="my-3" />;
 }
 
+const ALERTS = {
+	note: { icon: Info, label: msg("Note") },
+	tip: { icon: Lightbulb, label: msg("Tip") },
+	important: { icon: MessageSquareWarning, label: msg("Important") },
+	warning: { icon: TriangleAlert, label: msg("Warning") },
+	caution: { icon: OctagonAlert, label: msg("Caution") },
+} as const;
+type AlertKind = keyof typeof ALERTS;
+
 const components: Components = {
 	pre: ({ children }) => <>{children}</>,
 	code: Code,
 	a: ({ href, children }) => <Link href={href}>{children}</Link>,
-	img: ({ src, alt }) => <Img src={src} alt={alt} />,
+	blockquote({ node, children }) {
+		const kind = node?.properties?.dataAlert as AlertKind | undefined;
+		const alert = kind ? ALERTS[kind] : undefined;
+		if (!alert) return <blockquote>{children}</blockquote>;
+		const Icon = alert.icon;
+		return (
+			<div role="note" className={cn("md-alert", `md-alert-${kind}`)}>
+				<p className="md-alert-title">
+					<Icon aria-hidden className="size-4 shrink-0" />
+					{tr(alert.label)}
+				</p>
+				{children}
+			</div>
+		);
+	},
+	img: ({ src, alt, width }) => <Img src={src} alt={alt} width={width} />,
 	p({ node, children }) {
-		if (node && hasImage(node as HastNode)) return <div className={cn(onlyImages(node as HastNode) ? "md-gallery rich-card" : "md-p")}>{children}</div>;
-		return <p>{children}</p>;
+		// A row of badges stays a line of text (it may be centred); real pictures become a gallery or a mixed block.
+		if (node && hasImage(node as HastNode) && !imageSources(node as HastNode).every(isBadge)) return <div className={cn(onlyImages(node as HastNode) ? "md-gallery rich-card" : "md-p")}>{children}</div>;
+		const align = node?.properties?.align;
+		return <p style={align === "center" || align === "right" || align === "left" ? { textAlign: align } : undefined}>{children}</p>;
 	},
 	table: ({ children }) => (
 		<div className="md-table rich-card scrollbar-thin">
@@ -180,42 +261,118 @@ export function splitBlocks(src: string): string[] {
 	return blocks;
 }
 
-/** KaTeX arrives once (module promise); until then math renders as plain text, then upgrades in place. */
-function useMath(needed: boolean): MathPlugins | null {
-	const [math, setMath] = useState<MathPlugins | null>(() => (needed ? loadedMath() : null));
+/** A plugin set that arrives once (module promise); until then the text renders without it, then upgrades in place. */
+function useLazyPlugins<T>(needed: boolean, peek: () => T | null, load: () => Promise<T>): T | null {
+	const [plugins, setPlugins] = useState<T | null>(() => (needed ? peek() : null));
 	useEffect(() => {
-		if (!needed || math) return;
+		if (!needed || plugins) return;
 		let alive = true;
-		loadMath().then((m) => alive && setMath(m), () => undefined);
+		load().then((p) => alive && setPlugins(p), () => undefined);
 		return () => {
 			alive = false;
 		};
-	}, [needed, math]);
-	return needed ? math : null;
+	}, [needed, plugins, load]);
+	return needed ? plugins : null;
 }
 
-const Block = memo(function Block({ text, breaks }: { text: string; breaks: boolean }) {
-	const math = useMath(useMemo(() => hasMath(text), [text]));
+interface HastTree {
+	type: string;
+	tagName?: string;
+	value?: string;
+	properties?: Record<string, unknown>;
+	children?: HastTree[];
+}
+const HEADING = /^h[1-6]$/;
+const textOf = (n: HastTree): string => (n.type === "text" ? (n.value ?? "") : (n.children ?? []).map(textOf).join(""));
+
+const ALERT_MARK = /^\s*\[!(note|tip|important|warning|caution)\][ \t]*(?:\r?\n|$)/i;
+
+/**
+ * GitHub alerts: a blockquote whose first line is only `[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]` or `[!CAUTION]` becomes a
+ * callout (`data-alert`); the marker line is removed. Anything else on that line keeps it a plain quote, as on GitHub.
+ */
+function rehypeAlerts() {
+	return (tree: HastTree) => {
+		const walk = (node: HastTree): void => {
+			if (node.type === "element" && node.tagName === "blockquote") {
+				const para = node.children?.find((c) => c.type === "element");
+				const first = para?.tagName === "p" ? para.children?.[0] : undefined;
+				const match = first?.type === "text" ? ALERT_MARK.exec(first.value ?? "") : null;
+				if (para?.children && first && match) {
+					first.value = (first.value ?? "").slice(match[0].length);
+					// With hard breaks on, the marker's line ends in a <br> instead of a newline.
+					if (first.value === "") para.children.shift();
+					if (para.children[0]?.type === "element" && para.children[0].tagName === "br") para.children.shift();
+					if (para.children.length === 0) node.children = node.children?.filter((c) => c !== para);
+					node.properties = { ...node.properties, dataAlert: (match[1] as string).toLowerCase() };
+				}
+			}
+			node.children?.forEach(walk);
+		};
+		walk(tree);
+	};
+}
+
+/**
+ * Every heading gets the slug GitHub would give it (`## How CLAM compares` → `how-clam-compares`, repeats get `-1`, `-2`), as
+ * `data-md-anchor`: a table of contents written for GitHub (`[Install](#install)`) jumps to it. Not an `id`, which would collide
+ * when two documents are on one page.
+ */
+function rehypeHeadingAnchors() {
+	return (tree: HastTree) => {
+		const seen = new Map<string, number>();
+		const walk = (node: HastTree): void => {
+			if (node.type === "element" && HEADING.test(node.tagName ?? "")) {
+				const base = textOf(node).trim().toLowerCase().replace(/[^\p{L}\p{M}\p{N}\p{Pc}\- ]/gu, "").replace(/ /g, "-");
+				const n = seen.get(base) ?? 0;
+				seen.set(base, n + 1);
+				node.properties = { ...node.properties, dataMdAnchor: n === 0 ? base : `${base}-${n}` };
+				return;
+			}
+			node.children?.forEach(walk);
+		};
+		walk(tree);
+	};
+}
+
+/** Raw HTML worth parsing: a tag, a closing tag or a comment, outside of what is obviously prose. */
+const HAS_HTML = /<(?:[a-z][\w-]*[\s/>]|\/[a-z]|!--)/i;
+
+const Block = memo(function Block({ text, breaks, html }: { text: string; breaks: boolean; html: boolean }) {
+	const math = useLazyPlugins(useMemo(() => hasMath(text), [text]), loadedMath, loadMath);
+	const wantsHtml = useMemo(() => html && HAS_HTML.test(text), [html, text]);
+	const raw = useLazyPlugins<HtmlPlugins>(wantsHtml, loadedHtml, loadHtml);
 	const remark = useMemo(() => (math ? [...(breaks ? REMARK_BREAKS : REMARK_BASE), ...math.remark] : breaks ? REMARK_BREAKS : REMARK_BASE), [math, breaks]);
+	const rehype = useMemo(() => [...(raw?.rehype ?? []), rehypeAlerts, ...(math?.rehype ?? []), rehypeHeadingAnchors], [raw, math]);
 	const source = useMemo(() => (math ? protectCurrency(text) : text), [math, text]);
+	// Never flash the document's HTML as text while the parser loads.
+	if (wantsHtml && !raw) return null;
 	return (
 		<SourceContext.Provider value={text}>
-			<ReactMarkdown remarkPlugins={remark} rehypePlugins={math?.rehype} components={components} urlTransform={urlTransform}>
+			<ReactMarkdown remarkPlugins={remark} rehypePlugins={rehype} components={components} urlTransform={urlTransform}>
 				{source}
 			</ReactMarkdown>
 		</SourceContext.Provider>
 	);
 });
 
-function Markdown({ text, assets, breaks = false }: { text: string; assets?: AssetResolver; breaks?: boolean }) {
-	const blocks = useMemo(() => splitBlocks(text), [text]);
+/**
+ * `document`: a whole file (a README) rather than a chat message: it is parsed in one piece and its raw HTML (`<div align>`,
+ * `<details>`, `<img width>`, `<table>`) renders, sanitized with GitHub's rules. Chat text never does: an agent writing
+ * `the <Composer> component` must not lose the word. `onOpenFile`: links to other files of the folder open there (the file viewer
+ * switches to them) instead of downloading.
+ */
+function Markdown({ text, assets, breaks = false, document = false, onOpenFile }: { text: string; assets?: AssetResolver; breaks?: boolean; document?: boolean; onOpenFile?: (path: string) => void }) {
+	const blocks = useMemo(() => (document ? [text] : splitBlocks(text)), [text, document]);
 	return (
 		<AssetsContext.Provider value={assets}>
-			<div className="prose-clam">
-				{blocks.map((b, i) => (
-					<Block key={i} text={b} breaks={breaks} />
-				))}
-			</div>
+			<OpenFileContext.Provider value={onOpenFile}>
+				<div className="prose-clam">
+					{blocks.map((b, i) => (
+						<Block key={i} text={b} breaks={breaks} html={document} />
+					))}
+				</div>
+			</OpenFileContext.Provider>
 		</AssetsContext.Provider>
 	);
 }

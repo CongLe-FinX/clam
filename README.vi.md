@@ -72,7 +72,7 @@ Các máy ghép nối với nhau qua **Cloudflare Tunnel của chính bạn** �
 ### Agent và chat
 
 - **Chat không cần repository** — nói chuyện với agent về bất cứ việc gì (nghiên cứu, viết lách, ảnh, video). Agent có thư mục riêng; tệp bạn đính kèm được tải lên thư mục `attachments/` của dự án.
-- **Đầu ra phong phú** — Markdown với code được tô màu (Shiki), công thức toán (KaTeX), sơ đồ Mermaid và khối `chart`; xem trước ảnh, video, âm thanh, PDF và văn bản.
+- **Đầu ra phong phú** — Markdown với code được tô màu (Shiki), công thức toán (KaTeX), sơ đồ Mermaid và khối `chart`; xem trước ảnh, video, âm thanh, PDF và văn bản. Tệp Markdown (README) hiển thị như trên GitHub, kể cả HTML thô (`<div align>`, `<details>`, `<img width>`, bảng bố cục, đã được sanitize) và mục lục bấm được; tệp HTML có chế độ xem trang chạy thật trong sandbox.
 - **Hoạt động của agent dễ đọc** — kết quả subagent hiện thành thẻ báo cáo (agent, trạng thái, thời lượng, câu đầu tiên; Markdown đầy đủ khi cần); kết quả background job thành thẻ gọn (lệnh đã chạy, kết quả, thời lượng, phần cuối output).
 - **Kiểm soát ngữ cảnh** — bảng **Ngữ cảnh** (Context) cho biết mức dùng context window, và **Thu gọn** (Compact) nén nó theo yêu cầu, có thể kèm trọng tâm.
 - **Composer** — khi agent đang chạy, một công tắc chọn giữa điều hướng (steer) agent và xếp hàng (queue) yêu cầu tiếp theo; nút dừng, bộ chọn model và mức suy nghĩ.

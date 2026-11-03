@@ -63,12 +63,26 @@ function Plain({ text }: { text: string }) {
 /**
  * Markdown renderer loaded on demand; shows the text with its code fences boxed until the chunk arrives. `assets` resolves
  * relative paths in images/links; pass a stable (memoized) resolver or the message re-renders on every parent render. `breaks`: every
- * single newline is a line break (text a person typed); agent text keeps standard markdown paragraphs.
+ * single newline is a line break (text a person typed); agent text keeps standard markdown paragraphs. `document`: a whole file
+ * (README) whose raw HTML renders too, sanitized like GitHub.
  */
-export const LazyMarkdown = memo(function LazyMarkdown({ text, assets, breaks = false }: { text: string; assets?: AssetResolver; breaks?: boolean }) {
+export const LazyMarkdown = memo(function LazyMarkdown({
+	text,
+	assets,
+	breaks = false,
+	document = false,
+	onOpenFile,
+}: {
+	text: string;
+	assets?: AssetResolver;
+	breaks?: boolean;
+	document?: boolean;
+	/** A link to another file of the folder opens it here (the file viewer) instead of downloading it. */
+	onOpenFile?: (path: string) => void;
+}) {
 	return (
 		<Suspense fallback={<Plain text={text} />}>
-			<Markdown text={text} assets={assets} breaks={breaks} />
+			<Markdown text={text} assets={assets} breaks={breaks} document={document} onOpenFile={onOpenFile} />
 		</Suspense>
 	);
 });

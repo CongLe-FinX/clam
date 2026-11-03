@@ -1,7 +1,7 @@
 import { type FileContent, routes } from "@clam/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AlertTriangle, ChevronRight, Download, FileQuestion, FileX, RefreshCw, WrapText, X } from "lucide-react";
+import { AlertTriangle, ChevronRight, Download, ExternalLink, FileQuestion, FileX, RefreshCw, WrapText, X } from "lucide-react";
 import { Fragment, lazy, type ReactNode, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { CopyButton, HlLineView } from "@/components/code-block";
 import { LazyMarkdown } from "@/components/lazy-markdown";
@@ -25,6 +25,8 @@ export interface FileViewerProps {
 	onClose?: () => void;
 	/** Extra toolbar controls (Quick Look: previous / next file, terminal), placed before the copy and download buttons. */
 	actions?: ReactNode;
+	/** Open another file of the project in this viewer (a document's links: `[License](LICENSE)`, `docs/guide.md`). */
+	onOpenFile?: (path: string) => void;
 }
 
 const LINE_HEIGHT = 20;
@@ -51,7 +53,7 @@ function useWrapPref() {
 
 const FilePreview = lazy(() => import("@/components/file-preview.tsx"));
 
-export function FileViewer({ projectId, path, className, onClose, actions }: FileViewerProps) {
+export function FileViewer({ projectId, path, className, onClose, actions, onOpenFile }: FileViewerProps) {
 	const kind = previewKind(path);
 	const media = isMediaKind(kind);
 	const rawUrl = localUrl(routes.projectRaw(projectId), { path });
@@ -66,6 +68,9 @@ export function FileViewer({ projectId, path, className, onClose, actions }: Fil
 	const [wrap, setWrap] = useWrapPref();
 	const [mode, setMode] = useState<"preview" | "source">("preview");
 	const isMd = /\.(md|mdx)$/i.test(path);
+	const isHtml = /\.html?$/i.test(path);
+	const previewable = isMd || isHtml;
+	const pageUrl = localUrl(routes.projectRaw(projectId), { path, page: 1 });
 	const data = q.data;
 	const lang = data?.language ?? langFromPath(path);
 	const segments = path.split("/");
@@ -91,8 +96,8 @@ export function FileViewer({ projectId, path, className, onClose, actions }: Fil
 						{lang}
 					</Badge>
 				) : null}
-				{isMd && data?.content != null ? (
-					<div role="group" aria-label={t("Markdown view")} className="flex shrink-0 rounded-md bg-surface-2 p-0.5 text-2xs font-medium">
+				{previewable && data?.content != null ? (
+					<div role="group" aria-label={isHtml ? t("Page view") : t("Markdown view")} className="flex shrink-0 rounded-md bg-surface-2 p-0.5 text-2xs font-medium">
 						{(["preview", "source"] as const).map((m) => (
 							<button
 								key={m}
@@ -106,10 +111,19 @@ export function FileViewer({ projectId, path, className, onClose, actions }: Fil
 						))}
 					</div>
 				) : null}
-				{data?.content != null && !(isMd && mode === "preview") ? (
+				{data?.content != null && !(previewable && mode === "preview") ? (
 					<Tip label={wrap ? t("Disable line wrap") : t("Wrap lines")}>
 						<Button variant="ghost" size="icon-sm" aria-label={t("Toggle line wrap")} aria-pressed={wrap} onClick={() => setWrap(!wrap)} className={cn(wrap && "bg-surface-3 text-foreground")}>
 							<WrapText />
+						</Button>
+					</Tip>
+				) : null}
+				{isHtml && mode === "preview" && data?.content != null ? (
+					<Tip label={t("Open the page in a new tab")}>
+						<Button asChild variant="ghost" size="icon-sm">
+							<a href={pageUrl} target="_blank" rel="noreferrer noopener" aria-label={t("Open the page in a new tab")}>
+								<ExternalLink />
+							</a>
 						</Button>
 					</Tip>
 				) : null}
@@ -164,9 +178,20 @@ export function FileViewer({ projectId, path, className, onClose, actions }: Fil
 				) : isMd && mode === "preview" ? (
 					<div className="scrollbar-thin h-full overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
 						<div className="mx-auto max-w-3xl">
-							<LazyMarkdown text={data.content} assets={assets} />
+							<LazyMarkdown text={data.content} assets={assets} document onOpenFile={onOpenFile} />
 						</div>
 					</div>
+				) : isHtml && mode === "preview" ? (
+					// The page runs in its own sandbox (opaque origin, no network calls: see PAGE_CSP on the server); the attribute repeats it
+					// for browsers that ignore a framed document's CSP sandbox.
+					<iframe
+						key={path}
+						src={pageUrl}
+						title={segments.at(-1) ?? path}
+						sandbox="allow-scripts allow-popups allow-popups-to-escape-sandbox allow-modals"
+						referrerPolicy="no-referrer"
+						className="h-full w-full border-0 bg-white"
+					/>
 				) : (
 					<CodeView content={data.content} lang={lang} wrap={wrap} />
 				)}

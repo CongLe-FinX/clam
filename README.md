@@ -70,7 +70,7 @@ Machines pair with each other through **your own Cloudflare Tunnel** — no port
 ### Agents and chats
 
 - **Chats without a repository** — talk to an agent about anything (research, writing, images, video). It gets its own folder; files you attach are uploaded to the project's `attachments/` folder.
-- **Rich output** — Markdown with highlighted code (Shiki), math (KaTeX), Mermaid diagrams and `chart` blocks; image, video, audio, PDF and text previews.
+- **Rich output** — Markdown with highlighted code (Shiki), math (KaTeX), Mermaid diagrams and `chart` blocks; image, video, audio, PDF and text previews. Markdown files (a README) render like on GitHub, raw HTML included (`<div align>`, `<details>`, `<img width>`, layout tables, sanitized) with a working table of contents; HTML files have a live page preview in a sandbox.
 - **Readable agent activity** — subagent results render as a report card (agent, status, duration, first sentence; full Markdown on demand); background-job results as a compact card (what ran, outcome, duration, output tail).
 - **Context control** — the **Context** panel shows context-window usage and **Compact** shrinks it on demand, with an optional focus.
 - **Composer** — while the agent works, a switch chooses between steering it and queuing a follow-up; a stop button, model and thinking-level pickers.
