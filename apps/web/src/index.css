@@ -160,6 +160,33 @@
 .clam-clip[data-collapsed="true"] { --clam-fade: 4rem; }
 @media (prefers-reduced-motion: reduce) { .clam-clip { transition: none; } }
 
+@property --clam-orbit { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@keyframes clam-orbit { to { --clam-orbit: 360deg } }
+/*
+ * The composer's edge while the agent works: a comet of the accent colour circling a 1.5px border (a conic gradient masked to the
+ * padding box). Reduced motion stops it in place (the global rule below), leaving a still accent arc.
+ */
+.clam-orbit-ring {
+	position: absolute;
+	inset: 0;
+	padding: 1.5px;
+	border-radius: inherit;
+	pointer-events: none;
+	background: conic-gradient(
+		from var(--clam-orbit),
+		transparent 0deg,
+		color-mix(in oklab, var(--accent) 25%, transparent) 70deg,
+		var(--accent) 140deg,
+		color-mix(in oklab, var(--accent) 55%, #38bdf8) 165deg,
+		transparent 200deg,
+		transparent 360deg
+	);
+	-webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+	-webkit-mask-composite: xor;
+	mask-composite: exclude;
+	animation: clam-orbit 3.2s linear infinite;
+}
+
 @utility animate-fade-in { animation: clam-fade-in 160ms var(--ease-out-quint) both; }
 @utility animate-slide-up { animation: clam-slide-up 220ms var(--ease-out-quint) both; }
 @utility animate-pop-in { animation: clam-pop-in 160ms var(--ease-spring) both; }

@@ -16,7 +16,7 @@ import { Tip } from "@/ui/tooltip";
 import { type SessionStream, useStreamMeta } from "./stream-store.ts";
 
 const chip =
-	"inline-flex h-7 max-w-full items-center gap-1.5 rounded-lg bg-surface-2 px-2 text-xs font-medium text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] outline-none transition-[background-color,color] hover:bg-surface-3 hover:text-foreground focus-visible:text-foreground disabled:pointer-events-none disabled:opacity-50 coarse:h-10 coarse:px-3 [&_svg]:size-3.5 [&_svg]:shrink-0";
+	"inline-flex h-7 max-w-full items-center gap-1.5 rounded-full px-2.5 text-xs font-medium text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)] outline-none transition-[background-color,color,box-shadow] hover:bg-surface-2 hover:text-foreground focus-visible:text-foreground focus-visible:shadow-[inset_0_0_0_1px_var(--border),0_0_0_2px_var(--accent)] disabled:pointer-events-none disabled:opacity-50 coarse:h-10 coarse:px-3 [&_svg]:size-3.5 [&_svg]:shrink-0";
 
 export function useModels() {
 	return useQuery({

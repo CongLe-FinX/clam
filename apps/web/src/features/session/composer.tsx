@@ -1,5 +1,5 @@
 import { PROMPT_IMAGES_MAX_COUNT, type PromptImage, routes } from "@clam/contracts";
-import { ArrowUp, Clock, CornerDownRight, EyeOff, Loader2, Paperclip, RotateCw, Square, TriangleAlert } from "lucide-react";
+import { ArrowUp, Clock, CornerDownRight, EyeOff, Loader2, Paperclip, RotateCw, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ComposerChips } from "@/components/composer/chips.tsx";
@@ -266,11 +266,14 @@ export function Composer({
 
 				<div
 					className={cn(
-						"relative flex flex-col rounded-2xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border-strong)] transition-shadow focus-within:shadow-[inset_0_0_0_1px_var(--accent),0_0_0_3px_var(--accent-soft)]",
-						dragging && "shadow-[inset_0_0_0_2px_var(--accent)]",
+						"relative flex flex-col rounded-[1.375rem] bg-surface-1 transition-shadow duration-300",
+						"shadow-[0_0_0_1px_var(--border-strong),0_12px_32px_-20px_rgb(15_18_25/0.4),0_2px_6px_-3px_rgb(15_18_25/0.08)]",
+						"focus-within:shadow-[0_0_0_1px_color-mix(in_oklab,var(--accent)_60%,transparent),0_0_0_4px_var(--accent-soft),0_14px_34px_-18px_color-mix(in_oklab,var(--accent)_50%,transparent)]",
+						dragging && "shadow-[0_0_0_2px_var(--accent)]",
 					)}
 					{...drop}
 				>
+					{busy ? <span aria-hidden className="clam-orbit-ring" /> : null}
 					<ComposerChips
 						chips={files.chips.map((c) => (c.kind === "image" && !vision.supported ? { ...c, unseen: t("The model cannot see this picture; only its file path is sent") } : c))}
 						onRemove={(id) => files.remove(id as number)}
@@ -321,7 +324,7 @@ export function Composer({
 						aria-label={t("Message")}
 						enterKeyHint={touch ? "enter" : "send"}
 						autoCapitalize="sentences"
-						className="scrollbar-thin block max-h-32 min-h-11 w-full resize-none overflow-y-auto bg-transparent px-3.5 pb-1 pt-3 text-base leading-relaxed outline-none [field-sizing:content] placeholder:text-subtle md:max-h-[12.5rem] md:text-sm"
+						className="scrollbar-thin block max-h-32 min-h-11 w-full resize-none overflow-y-auto bg-transparent px-4 pb-1 pt-3.5 text-base leading-relaxed outline-none [field-sizing:content] placeholder:text-subtle md:max-h-[12.5rem] md:text-sm"
 					/>
 					{dragging ? <DropOverlay>{t("Drop to attach to your message")}</DropOverlay> : null}
 					<div className="flex items-center gap-1.5 px-2 pb-2">
@@ -337,12 +340,24 @@ export function Composer({
 								}}
 							/>
 							<Tip label={t("Attach pictures and files (saved in the project folder)")}>
-								<Button size="icon" variant="ghost" aria-label={t("Attach files")} onClick={() => fileInput.current?.click()} className="rounded-xl">
+								<Button size="icon" variant="ghost" aria-label={t("Attach files")} onClick={() => fileInput.current?.click()} className="rounded-full text-muted-foreground hover:text-foreground">
 									<Paperclip />
 								</Button>
 							</Tip>
 							{busy ? (
-								<div role="radiogroup" aria-label={t("Delivery while the agent is working")} className="flex shrink-0 rounded-lg bg-surface-2 p-0.5 shadow-[inset_0_0_0_1px_var(--border)]">
+								<div
+									role="radiogroup"
+									aria-label={t("Delivery while the agent is working")}
+									className="relative grid shrink-0 animate-pop-in grid-cols-2 rounded-full bg-surface-2 p-0.5 shadow-[inset_0_0_0_1px_var(--border)]"
+								>
+									{/* The thumb slides under the chosen option; each column is half of the padded track, so 100% of its width is one column. */}
+									<span
+										aria-hidden
+										className={cn(
+											"absolute inset-y-0.5 left-0.5 w-[calc(50%-2px)] rounded-full bg-surface-1 shadow-[0_1px_3px_rgb(15_18_25/0.14),0_0_0_1px_var(--border)] transition-transform duration-300 ease-[var(--ease-spring)]",
+											mode === "followUp" && "translate-x-full",
+										)}
+									/>
 									{(
 										[
 											["steer", CornerDownRight, t("Steer"), t("Redirect the agent after its current step")],
@@ -357,15 +372,11 @@ export function Composer({
 												onClick={() => setMode(id)}
 												className={cn(
 													// Phones show the icon alone (the same arrow/clock that marks steering and queued messages above); wider screens add the word.
-													"inline-flex h-6 items-center justify-center gap-1 rounded-md px-2 text-2xs font-medium outline-none transition-[background-color,color,box-shadow] duration-200 focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-9 max-sm:w-8 max-sm:px-0 sm:coarse:px-3 [&_svg]:size-3.5 max-sm:[&_svg]:size-4",
-													mode === id
-														? id === "steer"
-															? "bg-accent-soft text-accent shadow-[0_1px_2px_rgb(0_0_0/0.06)]"
-															: "bg-surface-3 text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.06)]"
-														: "text-muted-foreground hover:text-foreground",
+													"relative inline-flex h-6 items-center justify-center gap-1 rounded-full px-2.5 text-2xs font-medium outline-none transition-colors duration-200 focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-9 max-sm:w-9 max-sm:px-0 sm:coarse:px-3 [&_svg]:size-3.5 max-sm:[&_svg]:size-4",
+													mode === id ? (id === "steer" ? "text-accent" : "text-foreground") : "text-subtle hover:text-foreground",
 												)}
 											>
-												<Icon aria-hidden className={cn("transition-transform duration-200 ease-[var(--ease-spring)]", mode === id && "scale-110")} />
+												<Icon aria-hidden className={cn("transition-transform duration-300 ease-[var(--ease-spring)]", mode === id ? "scale-110" : "scale-95")} />
 												<span className="max-sm:sr-only">{label}</span>
 											</button>
 										</Tip>
@@ -402,14 +413,36 @@ export function Composer({
 						</div>
 						{busy ? (
 							<Tip label={aborting ? t("Stopping…") : t("Stop the agent")} shortcut="Esc">
-								<Button size="icon" variant="outline" aria-label={t("Stop the agent")} onClick={abort} disabled={aborting} className="rounded-xl">
-									{aborting ? <Loader2 className="animate-spin" /> : <Square className="fill-current" />}
-								</Button>
+								{/* Stop sits inside a turning arc: the button itself says the agent is working. */}
+								<button
+									type="button"
+									aria-label={t("Stop the agent")}
+									onClick={abort}
+									disabled={aborting}
+									className="relative grid size-8 shrink-0 animate-pop-in place-items-center rounded-full bg-surface-2 text-foreground outline-none transition-[background-color,transform] duration-200 hover:bg-surface-3 focus-visible:shadow-[0_0_0_2px_var(--accent)] active:scale-90 disabled:opacity-60 coarse:size-11"
+								>
+									<svg viewBox="0 0 36 36" aria-hidden className="absolute inset-0 size-full animate-spin [animation-duration:1.6s]">
+										<circle cx="18" cy="18" r="16.75" fill="none" strokeWidth="1.5" className="stroke-border" />
+										<circle cx="18" cy="18" r="16.75" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeDasharray="28 78" className="stroke-accent" />
+									</svg>
+									{aborting ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <span aria-hidden className="size-2.5 rounded-[3px] bg-current coarse:size-3" />}
+								</button>
 							</Tip>
 						) : null}
-						<Button size="icon" variant={hasContent && !sendBlocked ? "primary" : "secondary"} aria-label={busy ? (mode === "steer" ? t("Send steering message") : t("Queue follow-up")) : t("Send message")} disabled={!hasContent || sendBlocked} onClick={() => void submit(mode)} className="rounded-xl">
-							{sending ? <Loader2 className="animate-spin" /> : <ArrowUp />}
-						</Button>
+						<button
+							type="button"
+							aria-label={busy ? (mode === "steer" ? t("Send steering message") : t("Queue follow-up")) : t("Send message")}
+							disabled={!hasContent || sendBlocked}
+							onClick={() => void submit(mode)}
+							className={cn(
+								"grid size-8 shrink-0 place-items-center rounded-full outline-none transition-[background-color,color,box-shadow,transform,filter] duration-300 ease-[var(--ease-spring)] focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:size-11 [&_svg]:size-4 coarse:[&_svg]:size-5",
+								hasContent && !sendBlocked
+									? "scale-100 bg-[linear-gradient(145deg,color-mix(in_oklab,var(--accent)_78%,#fff),var(--accent)_55%,color-mix(in_oklab,var(--accent)_82%,#000))] text-accent-foreground shadow-[0_6px_16px_-6px_color-mix(in_oklab,var(--accent)_75%,transparent),inset_0_1px_0_rgb(255_255_255/0.25)] hover:brightness-110 active:scale-90"
+									: "scale-95 bg-surface-2 text-subtle",
+							)}
+						>
+							{sending ? <Loader2 className="animate-spin" aria-hidden /> : <ArrowUp aria-hidden strokeWidth={2.5} />}
+						</button>
 					</div>
 				</div>
 			</div>
