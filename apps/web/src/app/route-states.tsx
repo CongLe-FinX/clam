@@ -21,6 +21,16 @@ export function NotFound() {
 	);
 }
 
+/**
+ * A lazy screen's code did not load (a rebuild replaced its chunk, the server was restarting, the access proxy redirected).
+ * `lazyRouteComponent` keeps that error for the life of the page and never re-imports, so `reset` would show this screen
+ * again: only a reload retries it (and picks up the current build).
+ */
+function isChunkLoadError(error: unknown): boolean {
+	const message = error instanceof Error ? error.message : "";
+	return /^(Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed|Unable to preload CSS)/.test(message);
+}
+
 export function RouteError({ error, reset }: ErrorComponentProps) {
 	return (
 		<EmptyState
@@ -29,7 +39,7 @@ export function RouteError({ error, reset }: ErrorComponentProps) {
 			title={t("This screen failed to load")}
 			description={errorMessage(error)}
 			action={
-				<Button variant="outline" onClick={reset}>
+				<Button variant="outline" onClick={isChunkLoadError(error) ? () => location.reload() : reset}>
 					{t("Try again")}
 				</Button>
 			}
