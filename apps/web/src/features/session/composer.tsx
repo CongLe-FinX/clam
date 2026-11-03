@@ -229,7 +229,7 @@ export function Composer({
 	const followUps = queued?.followUp ?? [];
 
 	return (
-		<div className={cn("shrink-0 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-1 sm:px-4", keyboardOpen ? "pb-2" : "pb-3 pb-safe", className)}>
+		<div className={cn("shrink-0 pl-[max(0.75rem,env(safe-area-inset-left))] pr-[max(0.75rem,env(safe-area-inset-right))] pt-1 sm:px-4", keyboardOpen ? "pb-2" : "pb-[max(0.75rem,env(safe-area-inset-bottom))]", className)}>
 			<div className="mx-auto w-full max-w-[60rem]">
 				{steering.length + followUps.length > 0 ? (
 					<ul aria-label={t("Queued messages")} className="scrollbar-none mb-2 flex gap-1.5 overflow-x-auto">
