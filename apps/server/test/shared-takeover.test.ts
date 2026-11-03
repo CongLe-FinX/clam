@@ -277,6 +277,14 @@ describe("transfer with both nodes online", () => {
 		expect(remoteBranches(pair.origin).filter((b) => b.startsWith("clam/rescue/"))).toEqual([]);
 		expect(calls(pair.a).some((argv) => argv.includes("moved") && argv.includes("node-b"))).toBe(true);
 		expect(former.participants.find((p) => p.nodeId === pair.aId)).toMatchObject({ role: "participant" });
+		expect(former.transfer?.phase).toBe("continuing");
+
+		// B hands the work back: A drives again, and its record of the first hand-over (to B) is gone, not shown as "handing over to node-b".
+		await whenSettled(pair.b, fresh.id);
+		const back = await api(pair.b).post<SharedSession>(`/shared/${shared.id}/transfer`, { toNodeId: pair.aId });
+		expect(back.status, JSON.stringify(back.body)).toBe(202);
+		const again = await waitForShared(pair.a, shared.id, (s) => s.localRole === "driver" && s.epoch === 3, "A drives again", 30_000);
+		expect(again.transfer).toBeNull();
 	});
 
 	it("is refused for a target that is offline, a stranger, or by a node that does not drive", async () => {

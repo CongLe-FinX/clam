@@ -285,7 +285,13 @@ export class TransferService implements TransferApi {
 	recover(): void {
 		for (const shared of this.store.active()) {
 			const transfer = shared.meta.transfer;
-			if (!transfer || !RUNNING.has(transfer.phase)) continue;
+			if (!transfer) continue;
+			// A finished hand-over whose target no longer drives (the role came back here or moved on): left over from an older epoch.
+			if (transfer.phase === "continuing" && shared.driverNodeId !== transfer.toNodeId) {
+				this.store.patchMeta(shared.id, { transfer: null });
+				continue;
+			}
+			if (!RUNNING.has(transfer.phase)) continue;
 			const text = i18nMsg("The hand-over to {name} was interrupted when this node restarted. Start it again.", { name: transfer.toNodeName });
 			this.write(shared.id, transfer.id, { phase: "failed", ...spread(text), error: { code: "interrupted", message: text.text, i18n: text.i18n } });
 		}

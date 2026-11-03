@@ -159,6 +159,8 @@ export class EpochService implements EpochApi {
 		const retire = [shared.mirrorSessionId, selfRow?.agentSessionId].filter((id): id is string => id != null && id !== session.id);
 		const announce = this.store.transaction(() => {
 			this.store.update(sharedId, { driverNodeId: this.self, driverNodeName: nodeName, localRole: "driver", localSessionId: session.id, mirrorSessionId: null, epoch });
+			// A hand-over record is about this node's previous turn as driver (it handed the work away, and now has it back): it no longer applies.
+			this.store.patchMeta(sharedId, { transfer: null });
 			this.store.upsertParticipant({
 				sharedSessionId: sharedId,
 				nodeId: this.self,
