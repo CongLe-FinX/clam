@@ -157,5 +157,8 @@ const vi: Catalog = {
 	"View image {number} of {count}": "Xem ảnh {number}/{count}",
 	"Image {number} of {count}": "Ảnh {number}/{count}",
 	"Files you attached": "Tệp bạn đã đính kèm",
+	"Background job": "Tác vụ nền",
+	"exit {code}": "exit {code}",
+	"Copy output": "Sao chép kết quả",
 };
 export default vi;

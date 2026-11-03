@@ -13,6 +13,7 @@ import { t } from "@/i18n";
 import { MeshMessageBubble, parseMeshMessage } from "@/features/tasks/mesh-message";
 import { cn, formatCompact, formatCost, formatDate, formatNumber, formatTime } from "@/lib/utils";
 import { type AttachedFileRef, splitAttachmentNote } from "./attachment-note.ts";
+import { AsyncResultCard } from "./async-result.tsx";
 import { useSessionEnv } from "./session-env.ts";
 import { type SessionStream, useMsgRec, useMsgRole, useMsgSlice, useRowOutputs } from "./stream-store.ts";
 import { ToolCard } from "./tool-card.tsx";
@@ -302,7 +303,9 @@ function UserRow({ stream, rowKey }: { stream: SessionStream; rowKey: string }) 
 function CustomRow({ stream, rowKey }: { stream: SessionStream; rowKey: string }) {
 	const rec = useMsgRec(stream, rowKey);
 	if (!rec) return null;
-	const text = rec.copyText;
+	if (rec.msg.customType === "async-result") return <AsyncResultCard stream={stream} rowKey={rowKey} text={rec.copyText} />;
+	// Other notices arrive wrapped in a tag (`<system-notice>…</system-notice>`): the tag is framing, not content.
+	const text = rec.copyText.replace(/^\s*<([a-z-]+)>\s*([\s\S]*?)\s*<\/\1>\s*$/i, "$2");
 	return (
 		<div className="flex flex-col gap-1 rounded-lg bg-surface-1 px-3 py-2 text-xs text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]">
 			{rec.msg.customType ? <span className="font-mono text-2xs uppercase tracking-wider text-subtle">{rec.msg.customType}</span> : null}
