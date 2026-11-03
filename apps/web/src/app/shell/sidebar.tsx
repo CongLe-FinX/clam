@@ -114,10 +114,47 @@ export function DisabledNav({ icon: Icon, label, milestone, rail }: { icon: Luci
 	);
 }
 
-function SectionLabel({ children, action }: { children: string; action?: React.ReactNode }) {
-	return (
-		<div className="mb-1 mt-4 flex items-center justify-between px-2 text-2xs font-semibold uppercase tracking-wider text-subtle">
+/**
+ * Heading of a sidebar section. Every section uses it, so CHATS, WORKSPACES, … line up and read as peers. With `collapse`, the label itself
+ * toggles the section (a small chevron right after it shows the state); `count` and `dot` stay visible while it is closed.
+ */
+function SectionLabel({
+	children,
+	action,
+	count,
+	dot,
+	collapse,
+}: {
+	children: string;
+	action?: React.ReactNode;
+	count?: number;
+	/** A quiet attention mark (e.g. a chat waiting for an answer) shown while the section is closed. */
+	dot?: string;
+	collapse?: { expanded: boolean; onToggle: () => void; controls: string };
+}) {
+	const label = (
+		<>
 			<span>{children}</span>
+			{count ? <span className="tabular rounded bg-surface-3 px-1 font-mono text-[10px] font-medium leading-4 tracking-normal text-muted-foreground">{count}</span> : null}
+			{collapse ? <ChevronRight aria-hidden className={cn("size-3 shrink-0 opacity-70 transition-transform duration-200", collapse.expanded && "rotate-90")} /> : null}
+			{dot && !collapse?.expanded ? <span role="img" aria-label={dot} title={dot} className="size-1.5 shrink-0 rounded-full bg-warning" /> : null}
+		</>
+	);
+	return (
+		<div className="mb-1 mt-4 flex h-6 items-center justify-between gap-2 px-2 text-2xs font-semibold uppercase tracking-wider text-subtle">
+			{collapse ? (
+				<button
+					type="button"
+					aria-expanded={collapse.expanded}
+					aria-controls={collapse.controls}
+					onClick={collapse.onToggle}
+					className="-mx-1 flex min-w-0 items-center gap-1.5 rounded-md px-1 py-0.5 uppercase outline-none transition-colors hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:py-2"
+				>
+					{label}
+				</button>
+			) : (
+				<span className="flex min-w-0 items-center gap-1.5">{label}</span>
+			)}
 			{action}
 		</div>
 	);
@@ -244,26 +281,20 @@ function ChatsSection() {
 	const expanded = useUi((s) => s.chatsExpanded);
 	const setExpanded = useUi((s) => s.setChatsExpanded);
 	const shown = chats.slice(0, CHATS_SHOWN);
-	const waiting = chats.some((c) => c.pendingRequests > 0);
 	return (
 		<>
-			<div className="mb-1 mt-4 flex items-center justify-between gap-1 px-1">
-				<button
-					type="button"
-					aria-expanded={expanded}
-					aria-controls="sidebar-chats"
-					onClick={() => setExpanded(!expanded)}
-					className="flex min-w-0 items-center gap-1 rounded-md px-1 py-0.5 text-2xs font-semibold uppercase tracking-wider text-subtle outline-none transition-colors hover:text-foreground focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:py-2"
-				>
-					<ChevronRight aria-hidden className={cn("size-3 shrink-0 transition-transform duration-200", expanded && "rotate-90")} />
-					<span>{t("Chats")}</span>
-					{chats.length > 0 ? <span className="tabular rounded bg-surface-3 px-1 font-mono text-[10px] font-medium normal-case tracking-normal text-muted-foreground">{chats.length}</span> : null}
-					{!expanded && waiting ? <span role="img" aria-label={t("Waiting for your answer")} className="size-1.5 rounded-full bg-warning" /> : null}
-				</button>
-				<Link to="/chats" preload="intent" className="rounded-md px-1 text-2xs font-medium text-subtle outline-none hover:text-foreground">
-					{chats.length > CHATS_SHOWN ? t("All {count}", { count: chats.length }) : t("All")}
-				</Link>
-			</div>
+			<SectionLabel
+				count={chats.length}
+				dot={chats.some((c) => c.pendingRequests > 0) ? t("Waiting for your answer") : undefined}
+				collapse={{ expanded, onToggle: () => setExpanded(!expanded), controls: "sidebar-chats" }}
+				action={
+					<Link to="/chats" preload="intent" className="rounded-md px-1 text-2xs font-medium normal-case tracking-normal text-subtle outline-none hover:text-foreground">
+						{chats.length > CHATS_SHOWN ? t("All {count}", { count: chats.length }) : t("All")}
+					</Link>
+				}
+			>
+				{t("Chats")}
+			</SectionLabel>
 			{expanded ? (
 				<div id="sidebar-chats" className="animate-fade-in flex flex-col gap-px">
 					{isPending ? <Skeleton className="mx-1 my-1 h-6" /> : null}
