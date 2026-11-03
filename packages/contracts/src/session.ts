@@ -158,7 +158,11 @@ export const UiBlock = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("text"), text: z.string() }),
 	z.object({ type: z.literal("thinking"), text: z.string(), redacted: z.boolean().optional() }),
 	z.object({ type: z.literal("toolCall"), id: z.string(), name: z.string(), arguments: z.unknown(), intent: z.string().optional() }),
-	z.object({ type: z.literal("image"), mimeType: z.string(), data: z.string() }),
+	/**
+	 * Inline picture. In a history page (`GET /sessions/:id/messages`) `data` is empty and `url` serves the bytes, so a page of a long
+	 * conversation stays small; live events carry `data`.
+	 */
+	z.object({ type: z.literal("image"), mimeType: z.string(), data: z.string(), url: z.string().optional() }),
 ]);
 export type UiBlock = z.infer<typeof UiBlock>;
 

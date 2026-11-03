@@ -58,6 +58,16 @@ describe("prompt images (vision input)", () => {
 		expect(users[0]?.event.message.content.map((b: { type: string }) => b.type)).toEqual(["text", "image", "image"]);
 		const page = (await http.get<MessagesPage>(`/sessions/${session.id}/messages`)).body;
 		expect(page.messages[0]?.content.map((b) => b.type)).toEqual(["text", "image", "image"]);
+		// The page carries no base64: each picture is a URL that serves the original bytes with its type.
+		const images = (page.messages[0]?.content ?? []).filter((b) => b.type === "image");
+		expect(images.map((b) => b.data)).toEqual(["", ""]);
+		for (const [i, [type, data]] of ([["image/png", PNG], ["image/jpeg", JPEG]] as const).entries()) {
+			const res = await fetch(`${full.url}${images[i]?.url}`);
+			expect(res.status).toBe(200);
+			expect(res.headers.get("content-type")).toBe(type);
+			expect(Buffer.from(await res.arrayBuffer()).toString("base64")).toBe(data);
+		}
+		expect((await fetch(`${full.url}/api/local/sessions/${session.id}/messages/nope/images/1`)).status).toBe(404);
 	});
 
 	it("rejects a bad type, too many images, too much data and bytes that are not the announced type", async () => {

@@ -133,6 +133,7 @@ export const routes = {
 	sessions: "/sessions", // GET ?projectId&archived → AgentSession[] · POST CreateSessionBody → AgentSession
 	session: (id: string) => `/sessions/${id}`, // GET · PATCH UpdateSessionBody · DELETE
 	sessionMessages: (id: string) => `/sessions/${id}/messages`, // GET ?cursor&limit → MessagesPage (newest page first when no cursor)
+	sessionMessageImage: (id: string, messageId: string, index: number | string) => `/sessions/${id}/messages/${messageId}/images/${index}`, // GET → image bytes of a history page's image block
 	sessionOutputs: (id: string) => `/sessions/${id}/outputs`, // GET → SessionOutputsPage (files each agent turn created/modified in the project folder)
 	sessionState: (id: string) => `/sessions/${id}/state`, // GET SessionLiveState (starts runtime if needed)
 	sessionPrompt: (id: string) => `/sessions/${id}/prompt`, // POST PromptBody → PromptAccepted

@@ -7,6 +7,7 @@ import {
 	SubagentMessagesQuery,
 	UiResponseBody,
 	UpdateSessionBody,
+	LOCAL_API_PREFIX,
 	routes,
 	type SessionOutputsPage,
 } from "@clam/contracts";
@@ -15,6 +16,7 @@ import { eq } from "drizzle-orm";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { RoutePluginOptions } from "../context.ts";
+import { ApiError } from "../http/errors.ts";
 import { assertPromptImages } from "../services/prompt-images.ts";
 import { createChatProject, deleteManagedFolder } from "../services/project-folders.ts";
 
@@ -37,6 +39,7 @@ const DeleteQuery = z.object({
 		.optional()
 		.transform((v) => v === "true" || v === "1"),
 });
+const ImageParams = z.object({ id: z.string().min(1), messageId: z.string().min(1), index: z.coerce.number().int().min(0).max(1000) });
 const SessionIdParams = z.object({ sessionId: z.string().min(1) });
 const SubagentParams = z.object({ id: z.string().min(1), subagentId: z.string().min(1) });
 
@@ -78,9 +81,42 @@ export default async function sessionRoutes(app: FastifyInstance, { ctx }: Route
 		return reply.status(204).send();
 	});
 
+	// Pictures (screenshots the agent took, images you attached) go out as URLs, not base64: they are most of a page's bytes and the
+	// browser loads them only when they scroll into view.
 	app.get(routes.sessionMessages(":id"), async (req) => {
 		const { id } = IdParams.parse(req.params);
-		return sessions.messages(id, MessagesQuery.parse(req.query));
+		const page = await sessions.messages(id, MessagesQuery.parse(req.query));
+		return {
+			...page,
+			messages: page.messages.map((m) =>
+				m.content.some((b) => b.type === "image" && b.data)
+					? {
+							...m,
+							content: m.content.map((b, i) =>
+								b.type === "image" && b.data ? { type: "image" as const, mimeType: b.mimeType, data: "", url: `${LOCAL_API_PREFIX}${routes.sessionMessageImage(encodeURIComponent(id), encodeURIComponent(m.id), i)}` } : b,
+							),
+						}
+					: m,
+			),
+		};
+	});
+
+	app.get(routes.sessionMessageImage(":id", ":messageId", ":index"), { config: { compress: false } }, async (req, reply) => {
+		const { id, messageId, index } = ImageParams.parse(req.params);
+		// Walk the conversation back from the newest page (held in memory by the runtime or the mirror) until the message turns up.
+		let cursor: string | undefined;
+		for (;;) {
+			const page = await sessions.messages(id, { limit: 256, ...(cursor && { cursor }) });
+			const message = page.messages.find((m) => m.id === messageId);
+			if (message) {
+				const block = message.content[index];
+				if (block?.type !== "image" || !block.data) throw ApiError.notFound("Image");
+				// A message's content never changes once it is in the history: the bytes can be cached for good.
+				return reply.header("Content-Type", block.mimeType).header("Cache-Control", "private, max-age=31536000, immutable").header("X-Content-Type-Options", "nosniff").send(Buffer.from(block.data, "base64"));
+			}
+			if (!page.nextCursor) throw ApiError.notFound("Image");
+			cursor = page.nextCursor;
+		}
 	});
 
 	// The files each turn produced. Mirrors have no folder of their own (their driver node holds the files), so they have none.

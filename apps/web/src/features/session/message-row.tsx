@@ -49,9 +49,13 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, streaming, redacted }:
 	);
 });
 
-/** `data:` URL of an inline image, built once per block object (the store keeps unchanged blocks referentially stable). */
+/**
+ * Where an inline image's bytes are: the server URL of a history-page image, else a `data:` URL of a live one, built once per block object
+ * (the store keeps unchanged blocks referentially stable).
+ */
 const dataUrls = new WeakMap<object, string>();
-function dataUrl(block: { mimeType: string; data: string }): string {
+function dataUrl(block: { mimeType: string; data: string; url?: string }): string {
+	if (block.url) return block.url;
 	let url = dataUrls.get(block);
 	if (!url) {
 		url = `data:${block.mimeType};base64,${block.data}`;
