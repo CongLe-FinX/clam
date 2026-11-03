@@ -171,5 +171,8 @@ const vi: Catalog = {
 	"Cancel": "Hủy",
 	"Compacting…": "Đang thu gọn…",
 	"Compact now": "Thu gọn ngay",
+	"Subagent": "Subagent",
+	"Subagent report": "Báo cáo subagent",
+	"The beginning of the report; the agent kept the rest.": "Phần đầu của báo cáo; agent giữ phần còn lại.",
 };
 export default vi;
