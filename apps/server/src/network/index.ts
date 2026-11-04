@@ -238,7 +238,7 @@ export function createNetwork(base: NetworkBase, options: NetworkOptions = {}): 
 				await app.close();
 				app = null;
 				if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
-					throw new Error(`Port ${config.networkPort} on ${config.networkHost} is already in use. Set CLAM_NETWORK_PORT to use another one.`);
+					throw Object.assign(new Error(`Port ${config.networkPort} on ${config.networkHost} is already in use. Set CLAM_NETWORK_PORT to use another one.`), { code: "EADDRINUSE" });
 				}
 				throw error;
 			}

@@ -1,5 +1,6 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { createOmpCli, createOmpControl, createOmpRuntime } from "@clam/agent-runtime/omp";
 import { openDatabase } from "@clam/database";
 import { createGitEngine } from "@clam/git-engine";
@@ -18,6 +19,22 @@ import { ensureDefaultAgent, ensureNodeRow } from "./services/bootstrap.ts";
 import { readNodeSettings, toSupervisorSettings } from "./services/settings.ts";
 
 const SHUTDOWN_DEADLINE_MS = 20_000;
+
+/**
+ * A restart starts the new process while the old one is still shutting down: it frees the UI port first and the network port
+ * only after its tasks, tunnel and runtimes stop. Wait out a busy port for as long as that shutdown may take instead of exiting.
+ */
+async function whilePortBusy<T>(attempt: () => Promise<T>): Promise<T> {
+	const deadline = Date.now() + SHUTDOWN_DEADLINE_MS;
+	for (;;) {
+		try {
+			return await attempt();
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE" || Date.now() >= deadline) throw error;
+			await sleep(250);
+		}
+	}
+}
 
 function createLogger() {
 	const level = process.env.CLAM_LOG_LEVEL ?? "info";
@@ -125,7 +142,7 @@ async function main(): Promise<void> {
 	}
 	config.port = (app.server.address() as { port: number }).port; // the real port when CLAM_PORT=0
 	try {
-		await network.listen();
+		await whilePortBusy(() => network.listen());
 	} catch (error) {
 		log.fatal(error instanceof Error ? error.message : String(error));
 		await shutdown("network listener failed", 1);
