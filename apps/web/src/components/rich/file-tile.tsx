@@ -21,6 +21,8 @@ export interface FileTileProps {
 	file: RichFile;
 	/** Called by "Open" (session view: open in the Files panel). Without it the tile opens its own viewer. */
 	onOpen?: (file: RichFile) => void;
+	/** A dense one-line row (icon, name, folder, size; download on hover) for lists of many files. Images keep their thumbnail. */
+	row?: boolean;
 	className?: string;
 }
 
@@ -57,8 +59,13 @@ function Actions({ file, onOpen, openLabel, direct }: { file: RichFile; onOpen: 
 
 const shell = "rich-card @container w-full max-w-sm overflow-hidden rounded-xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border-strong)]";
 
+const rowMain =
+	"flex min-w-0 flex-1 items-center gap-2.5 self-stretch rounded-lg pl-1.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
+const rowAction =
+	"grid size-7 shrink-0 place-items-center rounded-md text-subtle opacity-0 outline-none transition-[opacity,color,background-color] hover:bg-surface-3 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 coarse:size-10 coarse:opacity-100 [&_svg]:size-3.5";
+
 /** One file rendered by what it is: image thumbnail, inline video/audio player, PDF first-page card, or a typed file card. */
-export const FileTile = memo(function FileTile({ file, onOpen, className }: FileTileProps) {
+export const FileTile = memo(function FileTile({ file, onOpen, row = false, className }: FileTileProps) {
 	const group = useContext(ImageGroupContext);
 	const [lightbox, setLightbox] = useState<number | null>(null);
 	const [dialog, setDialog] = useState(false);
@@ -87,7 +94,42 @@ export const FileTile = memo(function FileTile({ file, onOpen, className }: File
 	);
 
 	let body: React.ReactNode;
-	if (file.kind === "image" && !failed) {
+	const asRow = row && file.kind !== "image";
+	if (asRow) {
+		// The folder tells apart files of the same name (two package.json); the whole row opens the file, download sits at the end.
+		const slash = file.path?.lastIndexOf("/") ?? -1;
+		const dir = file.path && slash > 0 ? file.path.slice(0, slash) : null;
+		const label = (
+			<>
+				<FileIcon category={cat} className="size-6 rounded-md [&_svg]:size-3.5" />
+				<span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+					{/* The name keeps its width (truncated only when it alone overflows); the folder takes what is left. */}
+					<span className="max-w-full shrink-0 truncate text-[13px] font-medium text-foreground">{file.name}</span>
+					{dir ? <span className="min-w-0 truncate text-2xs text-subtle">{dir}</span> : null}
+				</span>
+			</>
+		);
+		body = (
+			<div className="group/row flex h-9 items-center gap-1.5 rounded-lg pr-1 transition-colors hover:bg-surface-2 coarse:h-12">
+				{direct ? (
+					<a className={rowMain} href={file.url} target="_blank" rel="noreferrer noopener" aria-label={t("Open {name}", { name: file.name })} title={file.path ?? file.name}>
+						{label}
+					</a>
+				) : (
+					<button type="button" className={rowMain} onClick={open} aria-label={t("Open {name}", { name: file.name })} title={file.path ?? file.name}>
+						{label}
+					</button>
+				)}
+				<span className="tabular flex shrink-0 items-center gap-1 text-2xs text-subtle">
+					{file.pending ? <Loader2 className="size-3 animate-spin text-warning" aria-label={t("fetching from a member")} /> : null}
+					{file.size ? formatBytes(file.size) : null}
+				</span>
+				<a className={rowAction} href={file.downloadUrl} download={file.name} aria-label={t("Download {name}", { name: file.name })} title={t("Download")}>
+					<Download aria-hidden />
+				</a>
+			</div>
+		);
+	} else if (file.kind === "image" && !failed) {
 		body = (
 			<>
 				<button
@@ -162,7 +204,7 @@ export const FileTile = memo(function FileTile({ file, onOpen, className }: File
 	}
 
 	return (
-		<div ref={ref} className={cn(shell, className)}>
+		<div ref={ref} className={cn(asRow ? "min-w-0" : shell, className)}>
 			{body}
 			{lightbox !== null ? (
 				<LazyLightbox
