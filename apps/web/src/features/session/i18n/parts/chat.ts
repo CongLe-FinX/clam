@@ -16,7 +16,8 @@ const vi: Catalog = {
 	"Jump to latest": "Xuống tin mới nhất",
 
 	// message-row.tsx
-	"Thinking…": "Đang suy nghĩ…",
+	"Thinking it through": "Đang suy nghĩ",
+	"{count, plural, one {# word} other {# words}}": "{count, plural, other {# từ}}",
 	"Reasoning (redacted)": "Lập luận (đã ẩn)",
 	"Thought · {count, plural, one {# word} other {# words}}": "Đã suy nghĩ · {count, plural, other {# từ}}",
 	"Thought": "Đã suy nghĩ",

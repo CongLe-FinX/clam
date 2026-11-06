@@ -1,6 +1,6 @@
 import type { UiBlock, UiMessage } from "@clam/contracts";
-import { AlertTriangle, BookMarked, Bot, Brain, ChevronRight } from "lucide-react";
-import { memo, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, BookMarked, Bot, Brain, ChevronRight, Sparkle } from "lucide-react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { CollapsibleText } from "@/components/collapsible-text";
 import { CopyButton } from "@/components/code-block";
 import { LazyMarkdown } from "@/components/lazy-markdown";
@@ -18,10 +18,14 @@ import { useSessionEnv } from "./session-env.ts";
 import { type SessionStream, useMsgRec, useMsgRole, useMsgSlice, useRowOutputs } from "./stream-store.ts";
 import { ToolCard } from "./tool-card.tsx";
 
-function Shimmer({ children }: { children: ReactNode }) {
+/** The brain while the model reasons: it breathes inside two widening accent rings and a spark twinkles over it. */
+function ThinkingIcon() {
 	return (
-		<span className="relative inline-block overflow-hidden text-muted-foreground before:absolute before:inset-0 before:-translate-x-full before:animate-[clam-shimmer_1.6s_ease-in-out_infinite] before:bg-gradient-to-r before:from-transparent before:via-foreground/20 before:to-transparent">
-			{children}
+		<span aria-hidden className="relative grid size-3.5 shrink-0 place-items-center text-accent">
+			<span className="absolute inset-0 animate-[clam-pulse-ring_2.4s_ease-out_infinite] rounded-full border border-accent/60" />
+			<span className="absolute inset-0 animate-[clam-pulse-ring_2.4s_ease-out_1.2s_infinite] rounded-full border border-accent/40" />
+			<Brain className="relative size-3.5 animate-[clam-breathe_1.8s_ease-in-out_infinite] drop-shadow-[0_0_4px_color-mix(in_oklab,var(--accent)_55%,transparent)]" />
+			<Sparkle className="absolute -right-1.5 -top-1.5 size-2 animate-[clam-twinkle_2.6s_ease-in-out_infinite] fill-current text-[color-mix(in_oklab,var(--accent)_45%,#38bdf8)]" />
 		</span>
 	);
 }
@@ -29,6 +33,8 @@ function Shimmer({ children }: { children: ReactNode }) {
 const ThinkingBlock = memo(function ThinkingBlock({ text, streaming, redacted }: { text: string; streaming: boolean; redacted?: boolean }) {
 	const [open, setOpen] = useState(false);
 	const words = text.trim() ? text.trim().split(/\s+/).length : 0;
+	// While it streams, the newest words of the reasoning run along one line under the label (older ones fade out on the left).
+	const tail = streaming && !open && !redacted ? text.slice(-240).replace(/\s+/g, " ").trim() : "";
 	return (
 		<div className="flex flex-col gap-1">
 			<button
@@ -38,9 +44,32 @@ const ThinkingBlock = memo(function ThinkingBlock({ text, streaming, redacted }:
 				className="group/think flex w-fit items-center gap-1.5 rounded-md py-0.5 pr-2 text-xs text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:text-foreground coarse:py-2"
 			>
 				<ChevronRight className={cn("size-3 transition-transform duration-150", open && "rotate-90")} aria-hidden />
-				<Brain className="size-3.5" aria-hidden />
-				{streaming ? <Shimmer>{t("Thinking…")}</Shimmer> : <span>{redacted ? t("Reasoning (redacted)") : words ? t("Thought · {count, plural, one {# word} other {# words}}", { count: words }) : t("Thought")}</span>}
+				{streaming ? (
+					<>
+						<ThinkingIcon />
+						<span className="clam-text-shimmer font-medium">{t("Thinking it through")}</span>
+						<span aria-hidden className="flex items-end gap-0.5 pb-0.5">
+							{[0, 1, 2].map((i) => (
+								<span key={i} className="size-[3px] animate-typing-dot rounded-full bg-accent" style={{ animationDelay: `${i * 160}ms` }} />
+							))}
+						</span>
+						{words > 0 ? <span className="tabular text-2xs text-subtle">· {t("{count, plural, one {# word} other {# words}}", { count: words })}</span> : null}
+					</>
+				) : (
+					<>
+						<Brain className="size-3.5" aria-hidden />
+						<span>{redacted ? t("Reasoning (redacted)") : words ? t("Thought · {count, plural, one {# word} other {# words}}", { count: words }) : t("Thought")}</span>
+					</>
+				)}
 			</button>
+			{tail ? (
+				<div aria-hidden className="ml-[2.375rem] flex max-w-md justify-end overflow-hidden whitespace-nowrap text-[11px] italic leading-4 text-subtle [mask-image:linear-gradient(to_right,transparent,#000_35%)]">
+					<span className="shrink-0">
+						{tail}
+						<span className="ml-0.5 inline-block h-2.5 w-px translate-y-px animate-caret bg-accent" />
+					</span>
+				</div>
+			) : null}
 			{open ? (
 				<div className="animate-fade-in ml-1.5 border-l pl-3.5">
 					<div className="scrollbar-thin max-h-72 overflow-y-auto whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">{redacted ? t("This reasoning is not available.") : text || "…"}</div>

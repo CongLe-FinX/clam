@@ -187,6 +187,31 @@
 	animation: clam-orbit 3.2s linear infinite;
 }
 
+/*
+ * "Thinking": a band of light sweeps through the letters themselves (a gradient clipped to the text, no box behind it), the brain icon
+ * breathes inside two widening rings, a spark twinkles over it. Reduced motion (rule below) leaves the plain label and a still icon.
+ */
+@keyframes clam-text-sweep { from { background-position: 100% 0 } to { background-position: 0% 0 } }
+@keyframes clam-breathe { 0%, 100% { transform: scale(1) } 50% { transform: scale(1.14) } }
+@keyframes clam-twinkle { 0%, 100% { opacity: 0; transform: scale(0.3) rotate(0deg) } 45%, 55% { opacity: 1; transform: scale(1) rotate(90deg) } }
+.clam-text-shimmer {
+	background-image: linear-gradient(
+		100deg,
+		var(--muted-foreground) 0%,
+		var(--muted-foreground) 38%,
+		var(--accent) 45%,
+		color-mix(in oklab, var(--accent) 40%, #38bdf8) 50%,
+		var(--accent) 55%,
+		var(--muted-foreground) 62%,
+		var(--muted-foreground) 100%
+	);
+	background-size: 250% 100%;
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	animation: clam-text-sweep 2.4s linear infinite;
+}
+
 @utility animate-fade-in { animation: clam-fade-in 160ms var(--ease-out-quint) both; }
 @utility animate-slide-up { animation: clam-slide-up 220ms var(--ease-out-quint) both; }
 @utility animate-pop-in { animation: clam-pop-in 160ms var(--ease-spring) both; }
