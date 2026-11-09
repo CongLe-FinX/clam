@@ -17,7 +17,9 @@ export function useQuotaReport() {
 	return useQuery({
 		queryKey: qk.usageQuota,
 		queryFn: ({ signal }) => api.get<QuotaReport>(routes.usageQuota, undefined, { signal }),
-		refetchInterval: (q) => (q.state.data?.stale ? 4000 : false),
+		// Stale snapshot: poll until the server's refresh lands. Otherwise every 2 min (the server's cache age) while the tab is visible,
+		// so the quota meter next to the composer stays current during a working session.
+		refetchInterval: (q) => (q.state.data?.stale ? 4000 : 120_000),
 		staleTime: 60_000,
 	});
 }

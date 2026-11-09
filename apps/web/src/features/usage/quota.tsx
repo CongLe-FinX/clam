@@ -5,18 +5,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/ui/card";
 import { T, msg, t, tr, type Msg } from "@/i18n";
 import { formatDuration, formatNumber, formatPercent } from "@/lib/utils";
 import { Progress } from "@/ui/progress";
-import { fmtAgo, limitLabel, useNow, windowText } from "./format";
+import { fmtAgo, limitLabel, useNow, usedFraction, windowText } from "./format";
 
 /** Provider-reported limit statuses other than `ok`; anything unlisted is shown as the provider wrote it. */
 const LIMIT_STATUS_LABEL: Readonly<Record<string, Msg>> = { warning: msg("Warning"), exhausted: msg("Exhausted"), limited: msg("Limited"), unknown: msg("Unknown") };
-
-/** Fraction used in [0,1], or null when the provider reported no usable numbers. */
-export function usedFraction(l: QuotaLimit): number | null {
-	if (l.used != null && l.limit != null && l.limit > 0) return Math.min(1, Math.max(0, l.used / l.limit));
-	if (l.unit === "percent" && l.used != null) return Math.min(1, Math.max(0, l.used / 100));
-	if (l.unit === "percent" && l.remaining != null) return Math.min(1, Math.max(0, 1 - l.remaining / 100));
-	return null;
-}
 
 function amount(l: QuotaLimit, v: number | null): string {
 	if (v == null) return "—";

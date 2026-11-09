@@ -18,6 +18,7 @@ import { ModelPicker } from "./model-pickers.tsx";
 import { useUpdateSession } from "./session-actions.ts";
 import { isBusy, type SessionStream, useStreamMeta } from "./stream-store.ts";
 import { SessionMenu } from "./session-menu.tsx";
+import { QuotaMeter } from "@/features/usage/quota-meter.tsx";
 
 const iconBtn =
 	"grid size-8 shrink-0 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-surface-2 hover:text-foreground focus-visible:bg-surface-2 aria-pressed:bg-surface-3 aria-pressed:text-foreground coarse:size-11 [&_svg]:size-4";
@@ -175,7 +176,9 @@ export function SessionHeader({
 						) : (
 							<>
 								<StatusDot status={dot} label={stateLabel} className="size-1.5 [&>span]:size-1.5" />
-								<span className="first-letter:uppercase">{stateLabel}</span>
+								{/* With the quota meter beside it the state is the dot alone (its word stays for screen readers), so both fit on a phone. */}
+								<span className="shrink-0 first-letter:uppercase [&:has(+[data-quota])]:sr-only">{stateLabel}</span>
+								<QuotaMeter compact />
 								{project && !isChat ? <span className="truncate">· {project.name}</span> : null}
 							</>
 						)}

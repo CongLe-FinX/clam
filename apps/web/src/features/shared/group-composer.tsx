@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/ui/popover";
 import { Kbd } from "@/ui/kbd";
+import { QuotaMeter } from "@/features/usage/quota-meter.tsx";
 import { AttachButton, AttachmentTray, type AttachmentUploads } from "./attachments.tsx";
 import { driverOf, participantLabel, teamOf } from "./format.ts";
 import { MachineChip } from "./identity.tsx";
@@ -355,6 +356,7 @@ export function GroupComposer({
 								</span>
 							)}
 						</div>
+						<QuotaMeter className="hidden md:inline-flex" />
 						<Button
 							size="icon"
 							variant={(text.trim() || uploads.ready.length > 0) && !uploads.busy && uploads.failed === 0 ? "primary" : "secondary"}

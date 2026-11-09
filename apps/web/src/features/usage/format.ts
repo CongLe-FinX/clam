@@ -1,7 +1,7 @@
 import type { QuotaLimit } from "@clam/contracts";
 import { useEffect, useState } from "react";
 import { t } from "@/i18n";
-import { formatCompact, formatDate, formatDateTime as formatDateTimeIntl, formatDuration, formatNumber, formatSpan } from "@/lib/utils";
+import { formatCompact, formatDate, formatDateTime as formatDateTimeIntl, formatDuration, formatNumber, formatSpan, formatUnit } from "@/lib/utils";
 
 /** Token counts: exact below 1000, compact ("1.2K" / "1,2 N") above. */
 export function fmtTokens(n: number | null | undefined): string {
@@ -18,6 +18,31 @@ export function windowText(l: Pick<QuotaLimit, "windowLabel" | "windowMs">): str
 export function limitLabel(l: QuotaLimit): string {
 	const w = windowText(l);
 	return l.windowLabel && w && w !== l.windowLabel ? l.label.replace(l.windowLabel, w) : l.label;
+}
+
+/** Fraction used in [0,1], or null when the provider reported no usable numbers. */
+export function usedFraction(l: QuotaLimit): number | null {
+	if (l.used != null && l.limit != null && l.limit > 0) return Math.min(1, Math.max(0, l.used / l.limit));
+	if (l.unit === "percent" && l.used != null) return Math.min(1, Math.max(0, l.used / 100));
+	if (l.unit === "percent" && l.remaining != null) return Math.min(1, Math.max(0, 1 - l.remaining / 100));
+	return null;
+}
+
+/**
+ * A limit as a short tag in the active language: its window ("5h" / "5 giờ", "7d" / "7 ngày") plus the model it is for when the
+ * provider names one in the label ("Claude 7 Day (Fable)" → "7d Fable"). Falls back to the provider's own text.
+ */
+export function limitTag(l: QuotaLimit): string {
+	const ms = l.windowMs;
+	const window = !ms
+		? (l.windowLabel ?? l.label)
+		: ms % 86_400_000 === 0
+			? formatUnit(ms / 86_400_000, "day")
+			: ms >= 3_600_000
+				? formatUnit(ms / 3_600_000, "hour", 1)
+				: formatUnit(ms / 60_000, "minute");
+	const variant = /\(([^)]+)\)\s*$/.exec(l.label)?.[1];
+	return variant ? `${window} ${variant}` : window;
 }
 
 /** "5m 3s ago" / "just now" / "never"; falls back to an absolute date after a week. */

@@ -16,6 +16,7 @@ import { filesFromClipboard } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { Kbd } from "@/ui/kbd";
+import { QuotaMeter } from "@/features/usage/quota-meter.tsx";
 import { Tip } from "@/ui/tooltip";
 import { withAttachmentNote } from "./attachment-note.ts";
 import { type ComposerFile, useComposerFiles } from "./composer-files.ts";
@@ -411,6 +412,7 @@ export function Composer({
 								</span>
 							)}
 						</div>
+						<QuotaMeter className="hidden md:inline-flex" />
 						{busy ? (
 							<Tip label={aborting ? t("Stopping…") : t("Stop the agent")} shortcut="Esc">
 								{/* Stop sits inside a turning arc: the button itself says the agent is working. */}
