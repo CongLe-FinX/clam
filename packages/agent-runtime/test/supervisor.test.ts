@@ -245,6 +245,25 @@ describe("OmpSupervisor", () => {
 		await waitFor(() => session.status().state === "ready", "ready");
 	});
 
+	it("reports a session that waits only on background work as busy in the background, and abort does not end that", async () => {
+		const { supervisor, events, statuses } = create();
+		// The turn ends while a job the agent left running keeps the session from settling for 3 s.
+		const session = await supervisor.open(spec("bg"));
+		await session.prompt({ message: "start the scan\n@@fake-background 3000", clientId: "c-bg" });
+		await waitFor(() => events.some((e) => e.sessionId === "bg" && e.event.type === "prompt_result"), "turn over");
+		// Within the grace period a normal end of turn (settled moments later) must not read as background work.
+		expect(session.status()).toMatchObject({ state: "busy", background: false });
+		await waitFor(() => session.status().background === true, "background after the grace period", 3_000);
+		expect(session.status().state).toBe("busy");
+		expect(statuses.some((s) => s.sessionId === "bg" && s.state === "busy" && s.background === true)).toBe(true);
+		// As in OMP, abort does not end the job: still busy, still background.
+		await session.abort();
+		expect(session.status()).toMatchObject({ state: "busy", background: true });
+		// The job finishes: the session settles and the flag drops.
+		await waitFor(() => events.some((e) => e.sessionId === "bg" && e.event.type === "settled"), "settled after the job", 6_000);
+		expect(session.status()).toMatchObject({ state: "ready", background: false });
+	});
+
 	it("rejects a prompt whose acknowledgement never arrives and stays usable", async () => {
 		const { supervisor } = create({ requestTimeoutMs: 300 });
 		const session = await supervisor.open(spec("noack"));

@@ -486,10 +486,11 @@ export class MirrorService implements MirrorApi, SessionViews {
 		return { applied: true, lastSeq: request.seq };
 	}
 
-	/** The driver's state as seen through the mirror: this node's session id, never `crashed`, busy as the driver is. */
+	/** The driver's state as seen through the mirror: this node's session id, never `crashed`, busy (or busy only in the background) as the driver is. */
 	private rewriteState(state: SessionLiveState, mirrorId: string): SessionLiveState {
 		const busy = state.isStreaming || !state.isSettled;
-		return { ...state, sessionId: mirrorId, runtime: { sessionId: mirrorId, state: busy ? "busy" : "ready", pid: null, startedAt: null, restarts: 0, lastError: null, lastActivityAt: new Date().toISOString() } };
+		const background = busy && !state.isStreaming && (state.runtime.background ?? false);
+		return { ...state, sessionId: mirrorId, runtime: { sessionId: mirrorId, state: busy ? "busy" : "ready", pid: null, startedAt: null, restarts: 0, lastError: null, lastActivityAt: new Date().toISOString(), background } };
 	}
 
 	/** A request of the driver as the viewers of this mirror see it: `raisedAt` rebased from the driver's clock onto this node's (the countdown must not inherit the skew between the machines). */

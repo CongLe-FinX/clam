@@ -260,6 +260,8 @@ stateDiagram-v2
   crashed --> stopped: restarts exhausted → session status = error
 ```
 
+`busy` lasts until OMP reports the session **settled**, which also waits for background jobs the agent left running (a long shell command OMP moved to a background job wakes the session with its result). Once the turn is over and only such work keeps it busy (no live run, nothing in flight, 1.5 s grace so a normal settle never flashes it), `RuntimeStatus.background` is `true`. The server's own logic (task completion, message delivery, idle reaping) still treats the session as busy; the UI does not show the agent as working, the composer takes new messages, and its strip offers **Stop the job**, which restarts the runtime: OMP's `abort` ends the run but not background jobs, and it has no command for them, whereas the process going away ends them and the conversation resumes from disk. Mirrors of a shared session carry the driver's flag; the agent directory reports such an agent as online, not busy.
+
 ### 4.2 Supervisor, backoff, idle reaping
 
 * **Concurrency cap:** `NodeSettings.maxConcurrentRuntimes` (default 4, range 1–64). Opening a session beyond the cap stops the least-recently-active idle (ready + settled, no pending approval) runtimes until a slot is free (**LRU eviction**); if none can go, the supervisor throws `capacity`, which the API maps to `503`.

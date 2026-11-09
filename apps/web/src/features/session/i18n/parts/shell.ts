@@ -43,6 +43,7 @@ const vi: Catalog = {
 	"Rename thread": "Đổi tên luồng",
 	"Untitled session": "Phiên chưa đặt tên",
 	"Unavailable": "Không khả dụng",
+	"Background job": "Tác vụ nền",
 	"Back to chats": "Quay lại danh sách chat",
 	"Back to project": "Quay lại dự án",
 	"Moved to {name}": "Đã chuyển đến {name}",

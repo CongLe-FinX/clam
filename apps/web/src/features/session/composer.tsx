@@ -1,5 +1,5 @@
 import { PROMPT_IMAGES_MAX_COUNT, type PromptImage, routes } from "@clam/contracts";
-import { ArrowUp, Clock, CornerDownRight, EyeOff, Loader2, Paperclip, RotateCw, TriangleAlert } from "lucide-react";
+import { ArrowUp, Clock, CornerDownRight, EyeOff, Loader2, Paperclip, RotateCw, Square, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ComposerChips } from "@/components/composer/chips.tsx";
@@ -22,7 +22,7 @@ import { withAttachmentNote } from "./attachment-note.ts";
 import { type ComposerFile, useComposerFiles } from "./composer-files.ts";
 import { ModelPicker, ModelSettings, ThinkingPicker, useVisionInput } from "./model-pickers.tsx";
 import { useSessionEnv } from "./session-env.ts";
-import { isBusy, type SessionStream, useStreamMeta } from "./stream-store.ts";
+import { isBackground, isBusy, type SessionStream, useStreamMeta } from "./stream-store.ts";
 
 const MOD_KEY = typeof navigator !== "undefined" && /mac|iphone|ipad/i.test(navigator.platform) ? "⌘" : "Ctrl";
 
@@ -98,6 +98,7 @@ export function Composer({
 	const mobile = useIsMobile();
 	const touch = mobile || (coarsePointer?.matches ?? false);
 	const busy = useStreamMeta(stream, isBusy);
+	const background = useStreamMeta(stream, isBackground);
 	const aborting = useStreamMeta(stream, (m) => m.aborting);
 	const queued = useStreamMeta(stream, (m) => m.live?.queued);
 	const blocked = useBlockedReason(stream);
@@ -262,6 +263,18 @@ export function Composer({
 								<RotateCw /> {t("Restart")}
 							</Button>
 						) : null}
+					</div>
+				) : background ? (
+					// The turn is over; a job the agent left running (a long shell command) can still wake it with its result. Stop cannot
+					// end such a job (the agent runtime has no command for it): restarting the runtime does, and keeps the conversation.
+					<div role="status" className="mb-2 flex items-center gap-2 rounded-lg bg-surface-2 px-3 py-1.5 text-xs text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]">
+						<Loader2 className="size-3.5 shrink-0 animate-spin [animation-duration:2.4s]" aria-hidden />
+						<span className="min-w-0 flex-1 truncate" title={t("The agent will get its result when it finishes. You can keep chatting.")}>
+							{t("A background job is still running")}
+						</span>
+						<Button size="sm" variant="outline" loading={restarting} onClick={() => void restart()} title={t("Restarts the agent runtime: the job ends, the conversation stays")}>
+							<Square className="fill-current" /> {t("Stop the job")}
+						</Button>
 					</div>
 				) : null}
 

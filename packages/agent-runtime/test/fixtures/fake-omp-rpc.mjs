@@ -365,8 +365,8 @@ export async function runRpc(argv, env) {
 			tokensPerSecond: null,
 			messageCount: messages.length,
 			queuedMessageCount: queue.length,
-			hasPendingAsyncWork: false,
-			isSettled: run === undefined && queue.length === 0,
+			hasPendingAsyncWork: Date.now() < backgroundUntil,
+			isSettled: run === undefined && queue.length === 0 && Date.now() >= backgroundUntil,
 			queuedMessages: { steering: [], followUp: queue.map((q) => q.message), liveSteered: 0 },
 			todoPhases: [],
 			contextUsage: contextUsage(),
@@ -402,6 +402,8 @@ export async function runRpc(argv, env) {
 	let aborted = false;
 	let closing = false;
 	let inflight = 0;
+	/** Until when a `@@fake-background` job keeps the session from settling (epoch ms; 0 = none). */
+	let backgroundUntil = 0;
 	let finishResolve;
 	const finished = new Promise((resolve) => {
 		finishResolve = resolve;
@@ -1070,10 +1072,20 @@ export async function runRpc(argv, env) {
 		while (item) {
 			run = item;
 			const outcome = await executePrompt(item.id, item.message, item.images);
+			// `@@fake-background <ms>`: the run leaves a background job that keeps the session from settling for <ms>. As in OMP,
+			// `abort` does not end it; only the process going away does.
+			const background = /^@@fake-background\s+(\d+)\s*$/m.exec(item.message ?? "");
 			run = undefined;
 			item = queue.shift();
 			if (item) {
 				emit({ type: "queue_update", steering: [], followUp: queue.map((q) => q.message) });
+			} else if (background) {
+				const ms = Number(background[1]);
+				backgroundUntil = Date.now() + ms;
+				setTimeout(() => {
+					backgroundUntil = 0;
+					if (run === undefined && queue.length === 0) emit({ type: "session_settled" });
+				}, ms);
 			} else {
 				emit({ type: "session_settled" });
 			}

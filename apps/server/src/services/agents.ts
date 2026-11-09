@@ -19,11 +19,12 @@ export function toAgents(ctx: AgentsContext, rows: Array<typeof agents.$inferSel
 			.from(agentSessions)
 			.where(inArray(agentSessions.id, live.map((s) => s.sessionId)))
 			.all();
-		const stateOf = new Map(live.map((s) => [s.sessionId, s.state]));
+		// Busy means the agent is in a turn: a session waiting only on background work it left running is not "working".
+		const busy = new Set(live.filter((s) => s.state === "busy" && !s.background).map((s) => s.sessionId));
 		for (const owner of owners) {
 			const entry = byAgent.get(owner.agentId) ?? { active: 0, busy: false };
 			entry.active++;
-			if (stateOf.get(owner.id) === "busy") entry.busy = true;
+			if (busy.has(owner.id)) entry.busy = true;
 			byAgent.set(owner.agentId, entry);
 		}
 	}

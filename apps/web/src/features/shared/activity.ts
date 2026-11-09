@@ -26,7 +26,11 @@ export function useWorkingAgents(shared: SharedSession): WorkingAgent[] {
 		if (p.nodeStatus === "offline" || p.nodeStatus === "revoked") return false;
 		if (p.nodeStatus === "self") {
 			const sessionId = p.agentSessionId ?? (shared.localRole === "driver" ? shared.localSessionId : null);
-			if (sessionId) return runtime?.find((r) => r.sessionId === sessionId)?.state === "busy";
+			// A session waiting only on background work its agent left running is not working on anything the group is waiting for.
+			if (sessionId) {
+				const r = runtime?.find((x) => x.sessionId === sessionId);
+				return r?.state === "busy" && r.background !== true;
+			}
 			return agents?.find((a) => a.id === p.agentId)?.status === "busy";
 		}
 		return directory?.find((d) => d.nodeId === p.nodeId && d.agentId === p.agentId)?.status === "busy";

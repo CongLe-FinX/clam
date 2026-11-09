@@ -63,7 +63,7 @@ const tabs = [
 export function MobileTabBar() {
 	// The Runtime tab counts the sessions whose agent is up (the sidebar's "Running" list); the count pulses while one of them is working.
 	const live = (useRuntime().data ?? []).filter((r) => r.state !== "stopped");
-	const busy = live.some((r) => r.state === "busy");
+	const busy = live.some((r) => r.state === "busy" && r.background !== true);
 	return (
 		<nav aria-label={t("Tabs")} className="grid shrink-0 grid-cols-5 border-t bg-surface-1/95 pb-safe backdrop-blur">
 			{tabs.map(({ to, label, icon: Icon, ...rest }) => (

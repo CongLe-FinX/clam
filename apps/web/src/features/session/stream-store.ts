@@ -101,7 +101,10 @@ const initialMeta: StreamMeta = {
 	resyncing: false,
 };
 
-export const isBusy = (m: StreamMeta): boolean => m.agentRunning || m.live?.runtime.state === "busy";
+/** The agent is in a turn. A session that only waits on background work it left running is not busy: it can take a new message. */
+export const isBusy = (m: StreamMeta): boolean => m.agentRunning || (m.live?.runtime.state === "busy" && m.live.runtime.background !== true);
+/** The turn is over but background work the agent left running (a long shell command) can still wake the session. */
+export const isBackground = (m: StreamMeta): boolean => !m.agentRunning && m.live?.runtime.state === "busy" && m.live.runtime.background === true;
 
 /** The last runtime state each session reported in this tab: a reopened session shows it at once instead of waiting a round trip (slow over a tunnel). */
 const lastLive = new Map<string, SessionLiveState>();

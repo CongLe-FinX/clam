@@ -35,6 +35,12 @@ export const RuntimeStatus = z.object({
 	restarts: z.number().int(),
 	lastError: z.string().nullable(),
 	lastActivityAt: IsoDate.nullable(),
+	/**
+	 * `busy` only because work the agent left running in the background (a long shell command it moved to a background job) can still
+	 * wake the session: its turn is over, nothing streams, and `abort` does not stop such a job (OMP has no command for it; restarting the
+	 * runtime does). Absent from older peers and mirrors: treat as false.
+	 */
+	background: z.boolean().optional(),
 });
 export type RuntimeStatus = z.infer<typeof RuntimeStatus>;
 

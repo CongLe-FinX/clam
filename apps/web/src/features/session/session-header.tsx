@@ -128,8 +128,9 @@ export function SessionHeader({
 	const aborting = useStreamMeta(stream, (m) => m.aborting);
 	const approvals = useStreamMeta(stream, (m) => m.uiRequests.length);
 
-	const stateLabel = runtime ? tr(RUNTIME_STATE_LABEL[runtime.state]) : liveStatus === "error" ? t("Unavailable") : t("Connecting");
-	const dot = runtime ? runtimeDot(runtime.state) : liveStatus === "error" ? "crashed" : "starting";
+	const background = runtime?.state === "busy" && runtime.background === true && !busy;
+	const stateLabel = background ? t("Background job") : runtime ? tr(RUNTIME_STATE_LABEL[runtime.state]) : liveStatus === "error" ? t("Unavailable") : t("Connecting");
+	const dot = background ? "online" : runtime ? runtimeDot(runtime.state) : liveStatus === "error" ? "crashed" : "starting";
 	const driver = shared ? driverOf(shared) : undefined;
 	const teamUnread = shared?.unreadMessages ?? 0;
 	const openDialog = useUi((s) => s.openDialog);

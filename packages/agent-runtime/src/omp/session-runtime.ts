@@ -70,6 +70,11 @@ const HANDOFF_TIMEOUT_MS = 5 * 60_000;
 const STEER_TIMEOUT_MS = 30_000;
 /** The roster is written at most this often while subagents report progress. */
 const ROSTER_SAVE_MS = 1_000;
+/**
+ * A run that yielded but whose session is not settled is reported as background work only after this long: a normal turn ends with
+ * `agent_end` and `session_settled` moments apart, and must not flash as "background" in between.
+ */
+const BACKGROUND_GRACE_MS = 1_500;
 
 function runtimeCodeOf(error: unknown): string | undefined {
 	if (error instanceof AgentRuntimeError && isRecord(error.details)) {
@@ -116,6 +121,9 @@ export class OmpSessionRuntime implements RuntimeSession {
 	private shuttingDown = false;
 	private agentRunning = false;
 	private settled = true;
+	/** Busy only because background work can still wake the session (see `RuntimeStatus.background`). */
+	private background = false;
+	private backgroundTimer: NodeJS.Timeout | null = null;
 	private readonly inflight = new Map<string, string>();
 	private readonly waiters = new Set<Waiter>();
 	private refreshTimer: NodeJS.Timeout | null = null;
@@ -153,6 +161,7 @@ export class OmpSessionRuntime implements RuntimeSession {
 			restarts: this.restartCount,
 			lastError: this.lastError,
 			lastActivityAt: this.lastActivity === null ? null : new Date(this.lastActivity).toISOString(),
+			background: this.background,
 		};
 	}
 
@@ -457,9 +466,11 @@ export class OmpSessionRuntime implements RuntimeSession {
 				break;
 			case "agent_end":
 				this.agentRunning = false;
+				this.refreshRunState();
 				break;
 			case "prompt_result":
 				this.inflight.delete(event.promptId);
+				this.refreshRunState();
 				break;
 			case "settled":
 				if (this.settled) return false;
@@ -509,6 +520,7 @@ export class OmpSessionRuntime implements RuntimeSession {
 	private transition(next: RuntimeState): void {
 		if (this.stateName === next) return;
 		this.stateName = next;
+		if (next !== "busy") this.clearBackground();
 		if (next === "ready" || next === "busy") this.resolveWaiters();
 		if (!this.shuttingDown) this.opts.callbacks.onStatus(this.status());
 	}
@@ -517,6 +529,43 @@ export class OmpSessionRuntime implements RuntimeSession {
 		if (this.stateName !== "ready" && this.stateName !== "busy") return;
 		const busy = this.agentRunning || !this.settled || this.inflight.size > 0;
 		this.transition(busy ? "busy" : "ready");
+		this.syncBackground();
+	}
+
+	/** The run yielded, nothing is in flight, yet the session is not settled: background work can still wake it. */
+	private get waitingOnBackground(): boolean {
+		return this.stateName === "busy" && !this.agentRunning && this.inflight.size === 0;
+	}
+
+	/**
+	 * Publish `background` after the grace period, and drop it (publishing the change) as soon as the agent runs again. The session's
+	 * `state` is refreshed too: its `runtime` carries the flag to the session page and to the mirrors of a shared session.
+	 */
+	private syncBackground(): void {
+		if (!this.waitingOnBackground) {
+			const was = this.background;
+			this.clearBackground();
+			if (was && !this.shuttingDown) {
+				this.opts.callbacks.onStatus(this.status());
+				this.scheduleRefresh();
+			}
+			return;
+		}
+		if (this.background || this.backgroundTimer) return;
+		this.backgroundTimer = setTimeout(() => {
+			this.backgroundTimer = null;
+			if (!this.waitingOnBackground || this.background || this.shuttingDown) return;
+			this.background = true;
+			this.opts.callbacks.onStatus(this.status());
+			this.scheduleRefresh();
+		}, BACKGROUND_GRACE_MS);
+		this.backgroundTimer.unref();
+	}
+
+	private clearBackground(): void {
+		if (this.backgroundTimer) clearTimeout(this.backgroundTimer);
+		this.backgroundTimer = null;
+		this.background = false;
 	}
 
 	private touch(): void {
