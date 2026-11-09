@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { t } from "@/i18n";
-import { useOmpStateOptional, useOptionalOmpStore } from "./omp/omp-store.ts";
+import { useOmpAwaiting, useOptionalOmpStore } from "./omp/omp-store.ts";
 import { useSessionEnv } from "./session-env.ts";
 import { isBusy, type SessionStream, useMsgSlice, useOrder, useStreamMeta } from "./stream-store.ts";
 
@@ -14,7 +14,7 @@ export const TypingIndicator = memo(function TypingIndicator({ stream }: { strea
 	const env = useSessionEnv();
 	const busy = useStreamMeta(stream, isBusy);
 	const aborting = useStreamMeta(stream, (m) => m.aborting);
-	const waiting = useOmpStateOptional(useOptionalOmpStore()).requests.length > 0;
+	const waiting = useOmpAwaiting(useOptionalOmpStore());
 	const order = useOrder(stream);
 	const last = order[order.length - 1] ?? "";
 	// Text (or a thinking/tool block) is already streaming into the last row: that row shows its own progress.

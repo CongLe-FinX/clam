@@ -220,6 +220,10 @@ export function GroupTimeline({
 
 	const parentRef = useRef<HTMLDivElement>(null);
 	const stick = useRef(true);
+	/** The person's latest scroll gesture went towards older messages: the tail is not re-taken until they head back down. */
+	const headingUp = useRef(false);
+	/** `scrollTop` while the person holds the scrollbar (a press on the scroller itself), else null. */
+	const dragTop = useRef<number | null>(null);
 	const [atBottom, setAtBottom] = useState(true);
 	const [unseen, setUnseen] = useState(0);
 	/** First row at least partly visible, as (key, distance from the viewport top): where to put the viewport back when rows appear above. */
@@ -228,14 +232,16 @@ export function GroupTimeline({
 	const lastKey = useRef<string | undefined>(undefined);
 	const lastLen = useRef(0);
 
+	const estimateSize = useCallback((i: number) => estimateRow(rows[i]), [rows]);
+	const getItemKey = useCallback((i: number) => rows[i]?.key ?? i, [rows]);
 	const v = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => parentRef.current,
-		estimateSize: (i) => estimateRow(rows[i]),
+		estimateSize,
 		overscan: 8,
 		paddingStart: 16,
 		paddingEnd: 16,
-		getItemKey: (i) => rows[i]?.key ?? i,
+		getItemKey,
 	});
 
 	const remember = useCallback(() => {
@@ -252,8 +258,20 @@ export function GroupTimeline({
 	const onScroll = useCallback(() => {
 		const el = parentRef.current;
 		if (!el) return;
+		// Dragging the scrollbar has no wheel or touch event to tell the direction: read it from the thumb's movement. This runs before the
+		// virtualizer's own scroll listener re-renders the list, so the tail is released before that render could follow it.
+		const drag = dragTop.current;
+		if (drag !== null) {
+			if (el.scrollTop < drag - 1) {
+				headingUp.current = true;
+				stick.current = false;
+			} else if (el.scrollTop > drag + 1) headingUp.current = false;
+			dragTop.current = el.scrollTop;
+		}
 		const near = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD;
-		stick.current = near;
+		// Near the bottom only re-takes the tail when the person is not on their way up: a slow drag or a trackpad's small steps stay within
+		// the threshold for many frames, and following the tail there yanked the page back down under their finger.
+		stick.current = near && !headingUp.current;
 		setAtBottom(near);
 		if (near) setUnseen(0);
 		remember();
@@ -264,12 +282,72 @@ export function GroupTimeline({
 		const el = parentRef.current;
 		if (!el) return;
 		stick.current = true;
+		headingUp.current = false;
 		el.scrollTop = el.scrollHeight;
 		setAtBottom(true);
 		setUnseen(0);
 	}, []);
 
-	// Every render: keep the viewport where the user is (anchored when rows appear above) and follow the tail only while they are at the bottom.
+	// Which way the person scrolls, from the input itself (wheel, finger, keys, dragging the scrollbar): only their own gestures release or
+	// re-take the tail, never the page moving because rows were measured or appended.
+	useEffect(() => {
+		const el = parentRef.current;
+		if (!el) return;
+		let touchY: number | null = null;
+		const up = () => {
+			headingUp.current = true;
+			stick.current = false;
+		};
+		const down = () => {
+			headingUp.current = false;
+		};
+		const onWheel = (e: WheelEvent) => (e.deltaY < 0 ? up() : e.deltaY > 0 ? down() : undefined);
+		const onTouchStart = (e: TouchEvent) => {
+			touchY = e.touches[0]?.clientY ?? null;
+		};
+		const onTouchMove = (e: TouchEvent) => {
+			const y = e.touches[0]?.clientY;
+			if (y === undefined || touchY === null) return;
+			// The finger moving down drags the content down: older messages come into view.
+			if (y > touchY + 2) up();
+			else if (y < touchY - 2) down();
+			touchY = y;
+		};
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === "ArrowUp" || e.key === "PageUp" || e.key === "Home") up();
+			else if (e.key === "ArrowDown" || e.key === "PageDown" || e.key === "End" || e.key === " ") down();
+		};
+		// A press on the scroller itself (not on a message) is its scrollbar: `onScroll` follows the thumb's direction until release.
+		const onPointerDown = (e: PointerEvent) => {
+			dragTop.current = e.target === el ? el.scrollTop : null;
+		};
+		const onPointerUp = () => {
+			dragTop.current = null;
+		};
+		// wheel / touch fire before the scroll they cause, so the tail is released before any render could follow it.
+		el.addEventListener("wheel", onWheel, { passive: true });
+		el.addEventListener("touchstart", onTouchStart, { passive: true });
+		el.addEventListener("touchmove", onTouchMove, { passive: true });
+		el.addEventListener("keydown", onKey);
+		el.addEventListener("pointerdown", onPointerDown);
+		window.addEventListener("pointerup", onPointerUp);
+		return () => {
+			el.removeEventListener("wheel", onWheel);
+			el.removeEventListener("touchstart", onTouchStart);
+			el.removeEventListener("touchmove", onTouchMove);
+			el.removeEventListener("keydown", onKey);
+			el.removeEventListener("pointerdown", onPointerDown);
+			window.removeEventListener("pointerup", onPointerUp);
+		};
+	}, []);
+
+	// After every render: keep the viewport where the user is (anchored when rows appear above) and follow the tail only while they are at
+	// the bottom AND something below actually changed (a row appended, a row resized, the "working" line shown or hidden). A render for any
+	// other reason (an agent working re-renders the chat many times a second) must not touch the scroll position: writing `scrollTop`
+	// cancels a phone's momentum scroll, and the page jumped under the finger while an agent worked.
+	const tail = working.length > 0 || waiting;
+	const lastTotal = useRef(-1);
+	const lastTail = useRef(tail);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: intentionally runs after every render, size changes of rows included
 	useLayoutEffect(() => {
 		const el = parentRef.current;
@@ -279,18 +357,25 @@ export function GroupTimeline({
 		const grew = rows.length > lastLen.current;
 		const prepended = grew && lastKey.current !== undefined && last?.key === lastKey.current && first !== firstKey.current;
 		const appendedOwn = grew && !prepended && last?.type === "msg" && last.message.author.kind === "human" && last.message.author.nodeId === selfNodeId;
-		if (appendedOwn) stick.current = true;
+		if (appendedOwn) {
+			stick.current = true;
+			headingUp.current = false;
+		}
+		const total = v.getTotalSize();
+		const changed = grew || total !== lastTotal.current || tail !== lastTail.current;
+		firstKey.current = first;
+		lastKey.current = last?.key;
+		lastLen.current = rows.length;
+		lastTotal.current = total;
+		lastTail.current = tail;
 		if (prepended && !stick.current && viewAnchor.current) {
 			const idx = rows.findIndex((r) => r.key === viewAnchor.current?.key);
 			const off = idx >= 0 ? v.getOffsetForIndex(idx, "start") : undefined;
 			if (off) el.scrollTop = off[0] - viewAnchor.current.offset;
-		} else if (stick.current) {
+			remember();
+		} else if (stick.current && changed) {
 			el.scrollTop = el.scrollHeight;
 		}
-		firstKey.current = first;
-		lastKey.current = last?.key;
-		lastLen.current = rows.length;
-		remember();
 	});
 
 	// The user expands or collapses a long message: stop following the tail so the page does not jump away from it.

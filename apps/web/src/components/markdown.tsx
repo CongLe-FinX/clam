@@ -1,6 +1,6 @@
 import { isLocalAppUrl, OpenInMachineBrowser } from "@/features/browser/open-in-browser.tsx";
 import { OpenPreview } from "@/features/preview/open-preview.tsx";
-import { createContext, memo, type MouseEvent, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, memo, type MouseEvent, type ReactElement, type ReactNode, useContext, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components, defaultUrlTransform, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
@@ -338,22 +338,39 @@ function rehypeHeadingAnchors() {
 /** Raw HTML worth parsing: a tag, a closing tag or a comment, outside of what is obviously prose. */
 const HAS_HTML = /<(?:[a-z][\w-]*[\s/>]|\/[a-z]|!--)/i;
 
+/**
+ * Rendered blocks by their input, most recently used last. A virtualized chat unmounts a message when it scrolls away and mounts it again
+ * when it comes back; parsing it again (remark, rehype, building the React elements) was most of the main-thread work of a scroll frame.
+ * The cached elements read their contexts (assets, source text) when they render, so one tree is valid under any provider.
+ */
+const PARSED = new Map<string, ReactElement>();
+const PARSED_MAX = 400;
+
 const Block = memo(function Block({ text, breaks, html }: { text: string; breaks: boolean; html: boolean }) {
 	const math = useLazyPlugins(useMemo(() => hasMath(text), [text]), loadedMath, loadMath);
 	const wantsHtml = useMemo(() => html && HAS_HTML.test(text), [html, text]);
 	const raw = useLazyPlugins<HtmlPlugins>(wantsHtml, loadedHtml, loadHtml);
-	const remark = useMemo(() => (math ? [...(breaks ? REMARK_BREAKS : REMARK_BASE), ...math.remark] : breaks ? REMARK_BREAKS : REMARK_BASE), [math, breaks]);
-	const rehype = useMemo(() => [...(raw?.rehype ?? []), rehypeAlerts, ...(math?.rehype ?? []), rehypeHeadingAnchors], [raw, math]);
-	const source = useMemo(() => (math ? protectCurrency(text) : text), [math, text]);
-	// Never flash the document's HTML as text while the parser loads.
-	if (wantsHtml && !raw) return null;
-	return (
-		<SourceContext.Provider value={text}>
-			<ReactMarkdown remarkPlugins={remark} rehypePlugins={rehype} components={components} urlTransform={urlTransform}>
-				{source}
-			</ReactMarkdown>
-		</SourceContext.Provider>
-	);
+	const tree = useMemo(() => {
+		// Never flash the document's HTML as text while the parser loads.
+		if (wantsHtml && !raw) return null;
+		const source = math ? protectCurrency(text) : text;
+		const key = `${breaks ? 1 : 0}${math ? 1 : 0}${raw ? 1 : 0}\u0000${source}`;
+		const hit = PARSED.get(key);
+		if (hit) {
+			PARSED.delete(key);
+			PARSED.set(key, hit);
+			return hit;
+		}
+		const remark = [...(breaks ? REMARK_BREAKS : REMARK_BASE), ...(math?.remark ?? [])];
+		const rehype = [...(raw?.rehype ?? []), rehypeAlerts, ...(math?.rehype ?? []), rehypeHeadingAnchors];
+		// The synchronous renderer is a plain function without hooks: its result is an element tree that can be kept and mounted again.
+		const made = ReactMarkdown({ children: source, remarkPlugins: remark, rehypePlugins: rehype, components, urlTransform });
+		PARSED.set(key, made);
+		if (PARSED.size > PARSED_MAX) PARSED.delete(PARSED.keys().next().value as string);
+		return made;
+	}, [text, breaks, math, raw, wantsHtml]);
+	if (!tree) return null;
+	return <SourceContext.Provider value={text}>{tree}</SourceContext.Provider>;
 });
 
 /**

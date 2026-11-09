@@ -337,10 +337,10 @@ export function useOmpState(store: OmpStore): OmpState {
 
 const EMPTY_STATE_STORE = { subscribe: () => () => {}, getState: () => INITIAL };
 
-/** Same as `useOmpState` but safe without a store (returns the empty state). */
-export function useOmpStateOptional(store: OmpStore | null): OmpState {
+/** A question or approval of the agent is waiting. Re-renders only when that changes, never on the many subagent updates of a working agent. */
+export function useOmpAwaiting(store: OmpStore | null): boolean {
 	const source = store ?? EMPTY_STATE_STORE;
-	return useSyncExternalStore(source.subscribe, source.getState, source.getState);
+	return useSyncExternalStore(source.subscribe, () => source.getState().requests.length > 0, () => false);
 }
 
 /** Re-renders when one subagent changes; the returned number is only a change marker. */

@@ -1,7 +1,7 @@
 import type { Checkpoint, Participant, SharedSession, SharedSessionDetail } from "@clam/contracts";
 import { BarChart3, Camera, Check, FileText, Film, Search, Users } from "lucide-react";
 import { type ComponentType, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
-import { useOmpStateOptional, useOptionalOmpStore } from "@/features/session/omp/omp-store.ts";
+import { useOmpAwaiting, useOptionalOmpStore } from "@/features/session/omp/omp-store.ts";
 import { AGENT_MESSAGE_LIMIT } from "@/features/tasks/format";
 import { type Msg, msg, renderServerText, t, tr } from "@/i18n";
 import { useNode } from "@/lib/queries";
@@ -235,7 +235,9 @@ export function GroupChat({
 	// The conversation the session had before it became a group is the beginning of the timeline, shown once the group log is loaded to its first line.
 	const earlier = useEarlierConversation(session.id, messages[0] ? Date.parse(messages[0].createdAt) : Number.POSITIVE_INFINITY, !history.hasOlder);
 	const working = useWorkingAgents(shared);
-	const waiting = useOmpStateOptional(useOptionalOmpStore()).requests.length > 0;
+	// Only whether something waits: the whole OMP state changes with every subagent progress report while the agent works, and re-rendering the
+	// chat for each of those moved the page under the person's finger.
+	const waiting = useOmpAwaiting(useOptionalOmpStore());
 	const uploads = useAttachmentUploads(shared.id);
 	const [fill, setFill] = useState<{ text: string; nonce: number } | null>(null);
 	const { dragging, handlers: drop } = useFileDrop(uploads.add);
