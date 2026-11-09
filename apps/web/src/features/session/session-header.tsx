@@ -176,9 +176,7 @@ export function SessionHeader({
 						) : (
 							<>
 								<StatusDot status={dot} label={stateLabel} className="size-1.5 [&>span]:size-1.5" />
-								{/* With the quota meter beside it the state is the dot alone (its word stays for screen readers), so both fit on a phone. */}
-								<span className="shrink-0 first-letter:uppercase [&:has(+[data-quota])]:sr-only">{stateLabel}</span>
-								<QuotaMeter compact />
+								<span className="first-letter:uppercase">{stateLabel}</span>
 								{project && !isChat ? <span className="truncate">· {project.name}</span> : null}
 							</>
 						)}
@@ -267,6 +265,7 @@ export function SessionHeader({
 				</Tip>
 			) : null}
 
+			{compact ? <QuotaMeter compact /> : null}
 			{compact ? (
 				<PanelToggle label={t("Threads")} pressed={panels.showLeft} onClick={panels.onToggleLeft}>
 					<MessagesSquare />

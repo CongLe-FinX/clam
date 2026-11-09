@@ -34,6 +34,7 @@ interface Pool {
 
 const toneOf = (fraction: number): FillTone => (fraction >= 0.9 ? "danger" : fraction >= 0.7 ? "warning" : "accent");
 const TEXT: Record<FillTone, string> = { accent: "text-foreground", warning: "text-warning", danger: "text-danger" };
+const RING: Record<FillTone, string> = { accent: "stroke-accent", warning: "stroke-warning", danger: "stroke-danger" };
 
 /**
  * Pools the limits of every account by provider and limit id. Capacity adds up: percentages are averaged (every account's window is
@@ -207,16 +208,41 @@ export function QuotaMeter({ compact = false, className }: { compact?: boolean; 
 	const details = <QuotaDetails report={report} pools={pools} onRefresh={() => refresh.mutate()} refreshing={refresh.isPending} />;
 
 	if (compact) {
+		// Rings from the inside out: the shorter window (5 h) inside, the longer one (7 d) around it; the busiest share in the middle.
+		const rings = shown.map((p, i) => ({ pool: p, r: shown.length === 1 ? 14 : i === 0 ? 10 : 15 }));
+		const peak = Math.max(...shown.map((p) => p.used));
 		return (
 			<>
-				<button type="button" data-quota aria-label={label} onClick={() => setOpen(true)} className={cn("inline-flex shrink-0 items-center gap-1 rounded outline-none focus-visible:ring-2 focus-visible:ring-ring", className)}>
-					<Gauge aria-hidden className={cn("size-3", worst >= 0.9 ? "text-danger" : worst >= 0.7 ? "text-warning" : "text-subtle")} />
-					{shown.map((p, i) => (
-						<span key={p.key} className="tabular">
-							{i > 0 ? <span className="text-subtle"> · </span> : null}
-							{p.tag} <span className={cn("font-semibold", TEXT[toneOf(p.used)])}>{formatPercent(p.used)}</span>
-						</span>
-					))}
+				<button
+					type="button"
+					aria-label={label}
+					onClick={() => setOpen(true)}
+					className={cn("relative grid size-8 shrink-0 place-items-center rounded-full outline-none transition-transform active:scale-90 focus-visible:ring-2 focus-visible:ring-ring coarse:size-11", className)}
+				>
+					<svg viewBox="0 0 36 36" aria-hidden className="size-8 -rotate-90">
+						{rings.map(({ pool, r }) => {
+							const c = 2 * Math.PI * r;
+							return (
+								<g key={pool.key}>
+									<circle cx="18" cy="18" r={r} fill="none" strokeWidth="3" className="stroke-surface-3" />
+									<circle
+										cx="18"
+										cy="18"
+										r={r}
+										fill="none"
+										strokeWidth="3"
+										strokeLinecap="round"
+										strokeDasharray={c}
+										strokeDashoffset={c * (1 - Math.max(0.02, pool.used))}
+										className={cn("transition-[stroke-dashoffset] duration-700 ease-[var(--ease-out-quint)]", RING[toneOf(pool.used)])}
+									/>
+								</g>
+							);
+						})}
+					</svg>
+					<span aria-hidden className={cn("tabular absolute text-[8px] font-bold leading-none", TEXT[toneOf(peak)], worst >= 0.9 && "animate-pulse")}>
+						{Math.round(peak * 100)}
+					</span>
 				</button>
 				<Sheet open={open} onOpenChange={setOpen}>
 					<SheetContent side="bottom" aria-describedby={undefined} className="px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
