@@ -1,16 +1,18 @@
 import { execFile, spawn } from "node:child_process";
-import { lstat, readFile, statfs } from "node:fs/promises";
+import { lstat, readdir, readFile, statfs } from "node:fs/promises";
 import { cpus, freemem, homedir, hostname, loadavg, platform, totalmem, uptime } from "node:os";
 import path from "node:path";
-import { type DiskUsageReport, type SystemDisk, type SystemMemory, type SystemProcesses, type SystemStatus, i18nMsg } from "@clam/contracts";
+import { type DiskUsageReport, type SystemBattery, type SystemDisk, type SystemMemory, type SystemProcesses, type SystemStatus, i18nMsg } from "@clam/contracts";
 import { ApiError } from "../http/errors.ts";
 import {
 	type CpuTimes,
+	batteryFromSysfs,
 	computeAlerts,
 	cpuPercent,
 	diskFromStatfs,
 	groupProcesses,
 	parseMeminfo,
+	parsePmsetBatt,
 	parsePressureLevel,
 	parseSwapUsage,
 	parseVmStat,
@@ -25,6 +27,8 @@ const HISTORY = 20;
 const ALERT_WINDOW = 10;
 const ALERT_MIN_SAMPLES = 3;
 const STATUS_TTL_MS = 2_000;
+const BATTERY_TTL_MS = 10_000;
+const POWER_SUPPLY = "/sys/class/power_supply";
 const PROCESSES_TTL_MS = 3_000;
 const COMMAND_TIMEOUT_MS = 2_500;
 const DISK_SCAN_TIMEOUT_MS = 60_000;
@@ -136,12 +140,24 @@ export class SystemMonitor {
 		return out;
 	});
 
+	/** The battery changes slowly: one `pmset` (or sysfs read) every 10 s at most, whatever the polling rate of the UI. */
+	private readonly battery = cached(BATTERY_TTL_MS, async (): Promise<SystemBattery | null> => {
+		const os = platform();
+		if (os === "darwin") {
+			const out = await run("pmset", ["-g", "batt"]);
+			return out ? parsePmsetBatt(out) : null;
+		}
+		if (os === "linux") return linuxBattery();
+		return null;
+	});
+
 	async status(): Promise<SystemStatus> {
-		const [memory, disks] = await Promise.all([this.memory(), this.disks()]);
+		const [memory, disks, battery] = await Promise.all([this.memory(), this.disks(), this.battery().catch(() => null)]);
 		return {
 			cpu: this.cpuSnapshot(),
 			memory,
 			disks,
+			battery,
 			uptimeSec: Math.round(uptime()),
 			platform: platform(),
 			hostname: hostname(),
@@ -194,6 +210,25 @@ export class SystemMonitor {
 
 function build(reading: { total: number; used: number; available: number }, swapUsed: number, swapTotal: number, pressure: SystemMemory["pressure"]): SystemMemory {
 	return { ...reading, percent: round1(reading.total > 0 ? (reading.used / reading.total) * 100 : 0), swapUsed, swapTotal, pressure };
+}
+
+/** The first battery under `/sys/class/power_supply`, with the AC adapter's `online` when there is one. */
+async function linuxBattery(): Promise<SystemBattery | null> {
+	const names = await readdir(POWER_SUPPLY).catch(() => [] as string[]);
+	const read = (name: string, file: string) => readFile(path.join(POWER_SUPPLY, name, file), "utf8").catch(() => null);
+	let battery: SystemBattery | null = null;
+	let acOnline: boolean | null = null;
+	for (const name of names) {
+		const type = (await read(name, "type"))?.trim();
+		if (type === "Mains" || type === "USB") {
+			const online = (await read(name, "online"))?.trim();
+			if (online !== undefined) acOnline = (acOnline ?? false) || online === "1";
+		} else if (type === "Battery" && !battery) {
+			const [capacity, status] = await Promise.all([read(name, "capacity"), read(name, "status")]);
+			if (capacity !== null) battery = batteryFromSysfs(capacity, status ?? "", null);
+		}
+	}
+	return battery && acOnline !== null ? { ...battery, pluggedIn: acOnline } : battery;
 }
 
 const round1 = (n: number): number => Math.round(n * 10) / 10;

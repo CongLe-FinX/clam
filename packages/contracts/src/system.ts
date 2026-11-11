@@ -57,10 +57,24 @@ export const SystemDisk = z.object({
 });
 export type SystemDisk = z.infer<typeof SystemDisk>;
 
+/** The machine's battery (laptops). */
+export const SystemBattery = z.object({
+	/** Charge, 0–100. */
+	percent: z.number(),
+	charging: z.boolean(),
+	/** On AC power: charging, full, or held below full by the OS. */
+	pluggedIn: z.boolean(),
+	/** Minutes to empty while discharging, to full while charging; null when the OS has no estimate yet. */
+	minutesRemaining: z.number().nullable(),
+});
+export type SystemBattery = z.infer<typeof SystemBattery>;
+
 export const SystemStatus = z.object({
 	cpu: SystemCpu,
 	memory: SystemMemory,
 	disks: z.array(SystemDisk),
+	/** Null on a machine without a battery, or where it cannot be read. */
+	battery: SystemBattery.nullable(),
 	uptimeSec: z.number(),
 	platform: z.string(),
 	hostname: z.string(),

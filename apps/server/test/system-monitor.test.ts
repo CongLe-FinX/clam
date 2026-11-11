@@ -3,11 +3,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import systemRoutes from "../src/api/system.ts";
 import {
 	appNameOf,
+	batteryFromSysfs,
 	computeAlerts,
 	cpuPercent,
 	groupProcesses,
 	parseMeminfo,
 	parsePressureLevel,
+	parsePmsetBatt,
 	parsePsLine,
 	parseSwapUsage,
 	parseVmStat,
@@ -49,6 +51,30 @@ describe("memory parsing", () => {
 	it("computes cpu percent from time deltas", () => {
 		expect(cpuPercent({ idle: 100, total: 200 }, { idle: 150, total: 300 })).toBe(50);
 		expect(cpuPercent({ idle: 1, total: 1 }, { idle: 1, total: 1 })).toBe(0);
+	});
+});
+
+describe("battery parsing", () => {
+	const pmset = (line: string, source = "AC Power") => `Now drawing from '${source}'\n -InternalBattery-0 (id=6357091)\t${line}\n`;
+
+	it("reads charge, state, power source and the estimate from pmset", () => {
+		expect(parsePmsetBatt(pmset("4%; charging; 20:00 remaining present: true"))).toEqual({ percent: 4, charging: true, pluggedIn: true, minutesRemaining: 1200 });
+		expect(parsePmsetBatt(pmset("63%; discharging; 3:07 remaining present: true", "Battery Power"))).toEqual({ percent: 63, charging: false, pluggedIn: false, minutesRemaining: 187 });
+		// No estimate yet, full, or held below full on AC: no time, plugged in, not charging (except while still charging).
+		expect(parsePmsetBatt(pmset("5%; charging; (no estimate) present: true"))).toMatchObject({ charging: true, minutesRemaining: null });
+		expect(parsePmsetBatt(pmset("100%; charged; 0:00 remaining present: true"))).toEqual({ percent: 100, charging: false, pluggedIn: true, minutesRemaining: null });
+		expect(parsePmsetBatt(pmset("80%; AC attached; not charging present: true"))).toMatchObject({ percent: 80, charging: false, pluggedIn: true });
+	});
+
+	it("has no battery on a desktop Mac or when the battery is not present", () => {
+		expect(parsePmsetBatt("Now drawing from 'AC Power'\n")).toBeNull();
+		expect(parsePmsetBatt(pmset("0%; discharging; (no estimate) present: false", "Battery Power"))).toBeNull();
+	});
+
+	it("reads a Linux battery from sysfs, the AC adapter deciding plugged-in when known", () => {
+		expect(batteryFromSysfs("57\n", "Discharging\n", false)).toEqual({ percent: 57, charging: false, pluggedIn: false, minutesRemaining: null });
+		expect(batteryFromSysfs("100", "Full", null)).toMatchObject({ charging: false, pluggedIn: true });
+		expect(batteryFromSysfs("", "Unknown", null)).toBeNull();
 	});
 });
 

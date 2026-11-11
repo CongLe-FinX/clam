@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, FolderSearch, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useOmpProviders, useNode, useSystemProcesses, useSystemStatus, qk } from "@/lib/queries";
+import { BatteryGauge, batteryState } from "@/components/battery";
 import { renderServerText, t } from "@/i18n";
 import { api, errorMessage } from "@/lib/api";
 import { cn, formatBytes, formatDuration, relativeTime, shortFingerprint } from "@/lib/utils";
@@ -376,6 +377,12 @@ export default function SystemPage() {
 				}
 				actions={
 					<>
+						{s?.battery ? (
+							<span className="inline-flex items-center gap-2 rounded-md bg-surface-2 py-0.5 pl-1.5 pr-2 text-2xs text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]">
+								<BatteryGauge battery={s.battery} size="md" />
+								<span aria-hidden>{batteryState(s.battery)}</span>
+							</span>
+						) : null}
 						<Badge variant={omp.data && !omp.data.install.installed ? "warning" : "neutral"}>OMP {ompVersion}</Badge>
 						{n ? <span className="rounded-md bg-surface-2 px-1.5 py-0.5 font-mono text-2xs text-subtle" title={n.fingerprint}>{shortFingerprint(n.fingerprint)}</span> : null}
 					</>

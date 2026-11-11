@@ -1,4 +1,4 @@
-import { type AppUsage, type I18nMessage, type SystemAlert, type SystemDisk, type SystemMemoryPressure, i18nMsg } from "@clam/contracts";
+import { type AppUsage, type I18nMessage, type SystemAlert, type SystemBattery, type SystemDisk, type SystemMemoryPressure, i18nMsg } from "@clam/contracts";
 
 /** Pure parsers and thresholds behind the System page; the OS-touching sampler is `system-monitor.ts`. */
 
@@ -95,6 +95,38 @@ export function parseMeminfo(text: string): (MemoryReading & { swapTotal: number
 	const swapTotal = kb("SwapTotal") ?? 0;
 	const swapFree = kb("SwapFree") ?? 0;
 	return { total, available, used: Math.max(0, total - available), swapTotal, swapUsed: Math.max(0, swapTotal - swapFree) };
+}
+
+/**
+ * `pmset -g batt` (macOS):
+ *   Now drawing from 'AC Power'
+ *    -InternalBattery-0 (id=6357091)	4%; charging; 20:00 remaining present: true
+ * States are `charging`, `finishing charge`, `discharging`, `charged`, `AC attached` (held below full); the estimate may read
+ * `(no estimate)`. Null without an internal battery (desktop Macs) or when it is not present.
+ */
+export function parsePmsetBatt(output: string): SystemBattery | null {
+	const m = /-InternalBattery-\d+[^\n]*?\s(\d{1,3})%;\s*([^;\n]+);([^\n]*)/.exec(output);
+	if (!m || /present:\s*false/i.test(m[0])) return null;
+	const state = m[2]!.trim().toLowerCase();
+	const charging = state === "charging" || state === "finishing charge";
+	const time = /(\d+):(\d{2})\s+remaining/.exec(m[3]!);
+	const minutes = time ? Number(time[1]) * 60 + Number(time[2]) : 0;
+	return {
+		percent: Math.min(100, Number(m[1])),
+		charging,
+		pluggedIn: /'AC Power'/.test(output) || charging || state === "charged" || state === "ac attached",
+		// `0:00 remaining` is what pmset prints when there is nothing to estimate (full, or held on AC).
+		minutesRemaining: minutes > 0 ? minutes : null,
+	};
+}
+
+/** A battery of `/sys/class/power_supply` (Linux): `capacity` (0–100) and `status` (Charging, Discharging, Full, Not charging). */
+export function batteryFromSysfs(capacity: string, status: string, acOnline: boolean | null): SystemBattery | null {
+	const percent = Number.parseInt(capacity.trim(), 10);
+	if (!Number.isFinite(percent)) return null;
+	const s = status.trim().toLowerCase();
+	const charging = s === "charging";
+	return { percent: Math.max(0, Math.min(100, percent)), charging, pluggedIn: acOnline ?? (charging || s === "full" || s === "not charging"), minutesRemaining: null };
 }
 
 /** Space figures of a volume from `fs.statfs` (blocks of `bsize`; `bavail` is what a non-root user can still use). */

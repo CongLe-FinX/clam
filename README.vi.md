@@ -104,7 +104,7 @@ Các máy ghép nối với nhau qua **Cloudflare Tunnel của chính bạn** �
 
 ### Giám sát
 
-- **System monitor** — thẻ máy ở thanh bên hiện CPU, RAM và ổ đĩa dạng vòng đo trực tiếp và đưa ra cảnh báo (bộ nhớ sắp hết hoặc bị áp lực, CPU cao theo trung bình ~30 giây, ổ đĩa sắp đầy).
+- **System monitor** — thẻ máy ở thanh bên hiện CPU, RAM và ổ đĩa dạng vòng đo trực tiếp và đưa ra cảnh báo (bộ nhớ sắp hết hoặc bị áp lực, CPU cao theo trung bình ~30 giây, ổ đĩa sắp đầy). Trên laptop, thẻ còn hiện pin kiểu iOS kèm phần trăm (xanh khi đang sạc, đỏ khi còn 20 % trở xuống); trên điện thoại, thẻ này nằm ở tab Runtime và trong menu.
 - **Trang Hệ thống** (System) — tải CPU, bộ nhớ, swap và áp lực bộ nhớ, mọi volume, ứng dụng dùng nhiều CPU và nhiều bộ nhớ nhất, và lượt quét *Thư mục lớn nhất trong thư mục home* chạy theo yêu cầu, không thay đổi hay tải lên gì.
 - **Trang Runtime** — các tiến trình OMP đứng sau phiên của bạn, có dừng và khởi động lại; **Mức dùng LLM** (LLM Usage) cho token, chi phí và hạn mức nhà cung cấp; runtime log cho từng phiên.
 

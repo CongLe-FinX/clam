@@ -2,6 +2,7 @@ import type { SystemAlert, SystemStatus } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight } from "lucide-react";
 import { type CSSProperties, useId } from "react";
+import { BatteryGauge } from "@/components/battery";
 import { renderServerText, t, msg, tr } from "@/i18n";
 import { useHealth, useNode, useSystemStatus } from "@/lib/queries";
 import { cn, formatBytes } from "@/lib/utils";
@@ -120,15 +121,20 @@ export function NodeStatusCard({ className }: { className?: string }) {
 			<div className="flex h-5 items-center gap-2">
 				<StatusDot status={dot} label={t("Machine {status}", { status: tr(dotWord[dot]) })} />
 				{node.data ? <span className="min-w-0 flex-1 truncate text-[13px] font-semibold tracking-tight">{node.data.name}</span> : <Skeleton className="h-4 w-24" />}
-				<span
-					className={cn(
-						"ml-auto inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium leading-4 transition-opacity group-hover/card:opacity-0",
-						live ? "bg-success/12 text-success" : "bg-surface-3 text-subtle",
-					)}
-				>
-					{live ? <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-success" /> : null}
-					{live ? t("live") : wsStatus === "connecting" ? "…" : t("offline")}
-				</span>
+				{live && system.data?.battery ? (
+					// The machine's battery where "live" was: the connection is fine (the health dot says otherwise), the charge is what to see.
+					<BatteryGauge battery={system.data.battery} className="ml-auto transition-opacity group-hover/card:opacity-0" />
+				) : (
+					<span
+						className={cn(
+							"ml-auto inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium leading-4 transition-opacity group-hover/card:opacity-0",
+							live ? "bg-success/12 text-success" : "bg-surface-3 text-subtle",
+						)}
+					>
+						{live ? <span aria-hidden className="size-1.5 animate-pulse rounded-full bg-success" /> : null}
+						{live ? t("live") : wsStatus === "connecting" ? "…" : t("offline")}
+					</span>
+				)}
 				<ArrowUpRight aria-hidden className="absolute right-2.5 top-2.5 size-3.5 translate-x-1 text-muted-foreground opacity-0 transition-[opacity,transform] duration-200 group-hover/card:translate-x-0 group-hover/card:opacity-100" />
 			</div>
 			{system.data ? (

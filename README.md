@@ -102,7 +102,7 @@ Machines pair with each other through **your own Cloudflare Tunnel** — no port
 
 ### Observability
 
-- **System monitor** — the sidebar machine card shows live CPU, RAM and disk as ring gauges and raises alerts (memory low or under pressure, CPU high on a ~30 s average, disk getting full).
+- **System monitor** — the sidebar machine card shows live CPU, RAM and disk as ring gauges and raises alerts (memory low or under pressure, CPU high on a ~30 s average, disk getting full). On a laptop it also shows an iOS-style battery with the charge (green while charging, red at 20 % or less); the same card sits on the phone's Runtime tab and in its menu.
 - **System page** — CPU load, memory, swap and pressure, every volume, top apps by CPU and by memory, and an on-demand *Largest folders in your home* scan that changes and uploads nothing.
 - **Runtime page** — the OMP processes behind your sessions, with stop and restart; **LLM Usage** for tokens, cost and provider quota; a runtime log per session.
 
