@@ -6,6 +6,7 @@ import { lazy, type ReactNode, type RefObject, Suspense, useCallback, useEffect,
 import { type ImperativePanelHandle, Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { toast } from "sonner";
 import { useGitStatus } from "@/features/git/hooks";
+import type { EntryReference } from "@/features/projects/entry-ops.tsx";
 import { FileExplorer } from "@/features/projects/file-explorer.tsx";
 import { useSharedDetail, useSharedLive } from "@/features/shared/hooks";
 import { GroupBar, GroupChat, GroupSummary } from "@/features/shared/group-chat";
@@ -362,11 +363,17 @@ function Workspace({ session }: { session: AgentSession }) {
 	 * "Add to chat" in the Files tab: an `@path` mention at the composer's cursor; OMP puts the file (a folder's listing) into the agent's
 	 * context when the message goes. The composer comes into view: the agent's own view of a shared session, the phone's sheet closes.
 	 */
-	const referenceInChat = useCallback((path: string, dir: boolean) => {
-		setView("workspace");
-		setSheets((s) => (s.right ? { ...s, right: false } : s));
-		setInsert({ text: fileMention(path, dir), nonce: Date.now() });
-	}, []);
+	const reference = useMemo<EntryReference>(
+		() => ({
+			label: t("Add to chat"),
+			onSelect: (path, dir) => {
+				setView("workspace");
+				setSheets((s) => (s.right ? { ...s, right: false } : s));
+				setInsert({ text: fileMention(path, dir), nonce: Date.now() });
+			},
+		}),
+		[],
+	);
 	const rightShown = desktop ? !right.collapsed : sheets.right;
 	/** `f` / the Files button: show the Files tab, or hide the panel when it already shows it. */
 	const toggleFiles = useCallback(() => {
@@ -425,7 +432,7 @@ function Workspace({ session }: { session: AgentSession }) {
 			onTab={(t) => (t === "team" ? openTeam() : setRightTab(t))}
 			context={<ContextPanel stream={stream} session={session} project={project} />}
 			memory={<MemoryPanel session={session} />}
-			files={<FileExplorer projectId={session.checkoutId} selectedPath={ql.file ?? null} onOpenFile={openFile} onReference={readOnly ? undefined : referenceInChat} className="h-full" />}
+			files={<FileExplorer projectId={session.checkoutId} selectedPath={ql.file ?? null} onOpenFile={openFile} reference={readOnly ? undefined : reference} className="h-full" />}
 			team={<TeamPanel session={session} onAddAgent={() => setAddAgent(true)} />}
 			teamUnread={detail?.shared.unreadMessages ?? 0}
 			agents={<SubagentsPanel store={omp} />}

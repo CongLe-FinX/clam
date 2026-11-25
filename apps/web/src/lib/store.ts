@@ -5,7 +5,8 @@ export type GlobalDialog =
 	| { kind: "create-workspace" }
 	| { kind: "edit-workspace"; workspaceId: string }
 	| { kind: "create-project"; workspaceId?: string; mode?: "existing" | "clone" | "empty" }
-	| { kind: "create-session"; projectId?: string }
+	/** `prompt`: the first prompt, filled in (a file's "Add to a new chat"). */
+	| { kind: "create-session"; projectId?: string; prompt?: string }
 	| { kind: "new-chat" }
 	| { kind: "delete-chat"; sessionId: string }
 	| { kind: "invite-node"; workspaceId?: string }

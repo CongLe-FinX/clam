@@ -181,5 +181,6 @@ const vi: Catalog = {
 	"Read into the agent's context": "Đã đưa vào ngữ cảnh của agent",
 	"Not read: {reason}": "Không đọc: {reason}",
 	"{path} · {count} lines": "{path} · {count} dòng",
+	"Add to chat": "Thêm vào chat",
 };
 export default vi;

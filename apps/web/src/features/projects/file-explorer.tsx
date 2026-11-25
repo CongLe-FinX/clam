@@ -2,40 +2,22 @@ import { type FileEntry, routes } from "@clam/contracts";
 import { Link } from "@tanstack/react-router";
 import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import {
-	AlertCircle,
-	AtSign,
-	ChevronRight,
-	Copy,
-	FilePlus,
-	Folder,
-	FolderOpen,
-	FolderPlus,
-	Link2,
-	Pencil,
-	RefreshCw,
-	Search,
-	Terminal,
-	Upload,
-	X,
-} from "lucide-react";
-import { type KeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { AlertCircle, ChevronRight, FilePlus, Folder, FolderOpen, FolderPlus, Link2, Move, RefreshCw, Search, Terminal, Upload, X } from "lucide-react";
+import { type KeyboardEvent, memo, type PointerEvent as ReactPointerEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { t } from "@/i18n";
-import { api, errorText, localUrl } from "@/lib/api";
-import { hasFiles, uploadFile } from "@/lib/upload";
+import { api, errorText } from "@/lib/api";
+import { hasFiles } from "@/lib/upload";
+import { coarsePointer, createEntry, DragGrip, EntryMenu, type EntryReference, MenuButton, type MenuTarget, menuTargetOf, moveEntry, NameInput, type NewKind, useEntryDrag } from "./entry-ops.tsx";
 import { ancestorsOf, byKindThenName, fileIcon, parentOf } from "./file-utils.ts";
 import { UploadDock, useProjectUploads } from "./uploads.tsx";
 import { qk } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/ui/dropdown-menu";
-import { Kbd } from "@/ui/kbd";
 import { Tip } from "@/ui/tooltip";
 
-/** Below this panel width the filter collapses into an icon button. */
-const NARROW_PX = 270;
+/** Below this panel width the filter collapses into an icon button (touch screens have bigger buttons, and one more). */
+const NARROW_PX = coarsePointer ? 440 : 270;
 
 export interface FileExplorerProps {
 	projectId: string;
@@ -43,8 +25,8 @@ export interface FileExplorerProps {
 	onOpenFile: (path: string) => void;
 	/** Also called when a folder row is activated (the Files tab shows that folder in its list). */
 	onSelectDir?: (path: string) => void;
-	/** "Add to chat" in a row's right-click menu (absent: no such item): the host puts a mention of the file or folder in its composer. */
-	onReference?: (path: string, dir: boolean) => void;
+	/** "Add to chat" in a row's menu (absent: no such item): the host puts a mention of the file or folder in a chat. */
+	reference?: EntryReference;
 	/** Tree only: no toolbar, no upload (the host page provides both). */
 	bare?: boolean;
 	className?: string;
@@ -98,10 +80,7 @@ type Row =
 	| { type: "loading"; key: string; depth: number }
 	| { type: "empty"; key: string; depth: number }
 	| { type: "error"; key: string; depth: number; path: string; message: string }
-	/** The name box of a file or folder being created in `dir` (first row of that folder, like VS Code). */
 	| { type: "create"; key: string; depth: number; dir: string; kind: NewKind };
-
-type NewKind = "file" | "dir";
 
 const INDENT = 14;
 const BASE_PAD = 8;
@@ -114,16 +93,16 @@ interface DirState {
 
 // ───────────────────────────── component ─────────────────────────────
 
-export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir, onReference, bare, className }: FileExplorerProps) {
+export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir, reference, bare, className }: FileExplorerProps) {
 	const qc = useQueryClient();
 	const [expanded, updateExpanded] = useExpanded(projectId);
 	const [filter, setFilter] = useState("");
 	const [creating, setCreating] = useState<{ dir: string; kind: NewKind } | null>(null);
-	/** The row whose name is being edited in place (right-click → Rename, or F2). */
+	/** The row whose name is being edited in place (menu → Rename, or F2). */
 	const [renaming, setRenaming] = useState<string | null>(null);
-	const [menu, setMenu] = useState<{ path: string; dir: boolean; x: number; y: number } | null>(null);
-	/** What a menu item does once the menu has closed: while it is open the menu holds the focus, so a name box or the composer could not take it. */
-	const afterMenu = useRef<(() => void) | null>(null);
+	const [menu, setMenu] = useState<MenuTarget | null>(null);
+	/** Touch screens: "drag to move" shows a grip on each row (off by default: a finger on a row scrolls the tree); otherwise a "⋯". */
+	const [touchMove, setTouchMove] = useState(false);
 	const [activeKey, setActiveKey] = useState<string | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const filterRef = useRef<HTMLInputElement>(null);
@@ -140,8 +119,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 	}, []);
 	const filterShown = !narrow || filterOpen || filter !== "";
 	const treeId = useId();
-	const [coarse] = useState(() => typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches);
-	const rowHeight = coarse ? 36 : 28;
+	const rowHeight = coarsePointer ? 36 : 28;
 
 	// Reveal the selected file's ancestors when it changes (deep link / outside selection).
 	useEffect(() => {
@@ -362,18 +340,11 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 		if (targetDir) toggleDir(targetDir, true);
 		setCreating({ dir: targetDir, kind });
 	};
-	/**
-	 * Creates the empty file (and opens it in the editor) or the folder (and selects it); a name with `/` creates its folders too.
-	 * Returns an error to show, if any.
-	 */
+	/** Creates the empty file (and opens it in the editor) or the folder (and selects it); a name with `/` creates its folders too. */
 	const create = async (kind: NewKind, dir: string, name: string): Promise<string | null> => {
 		const path = dir ? `${dir}/${name}` : name;
-		try {
-			if (kind === "dir") await api.post<FileEntry>(routes.projectFolder(projectId), { path });
-			else await uploadFile<FileEntry>(localUrl(routes.projectUpload(projectId), { path }), new File([""], name.split("/").at(-1) ?? name)).promise;
-		} catch (e) {
-			return errorText(e);
-		}
+		const failed = await createEntry(projectId, kind, path);
+		if (failed) return failed;
 		setCreating(null);
 		updateExpanded((prev) => new Set([...prev, ...ancestorsOf(path), ...(kind === "dir" ? [path] : [])]));
 		refresh();
@@ -382,36 +353,10 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 		else onOpenFile(path);
 		return null;
 	};
-
-	// Drag a row onto a folder (or a file, meaning its folder; or the empty tree, meaning the project root) to move it there.
-	const [moving, setMoving] = useState<{ path: string; kind: FileEntry["kind"] } | null>(null);
-	const [dropDir, setDropDir] = useState<string | null>(null);
-	const openOnHover = useRef<{ path: string; timer: number } | null>(null);
-	const stopHoverOpen = () => {
-		if (openOnHover.current) window.clearTimeout(openOnHover.current.timer);
-		openOnHover.current = null;
-	};
-	/** The folder the dragged entry would land in under `target`, or null where it cannot go (where it already is, or into itself). */
-	const dropDirAt = (target: EventTarget): string | null => {
-		if (!moving) return null;
-		const row = target instanceof Element ? target.closest<HTMLElement>("[data-path]") : null;
-		const dir = !row ? "" : row.dataset.kind === "dir" ? (row.dataset.path ?? "") : parentOf(row.dataset.path ?? "");
-		if (dir === parentOf(moving.path)) return null;
-		if (moving.kind === "dir" && (dir === moving.path || dir.startsWith(`${moving.path}/`))) return null;
-		return dir;
-	};
-	const endDrag = () => {
-		stopHoverOpen();
-		setMoving(null);
-		setDropDir(null);
-	};
 	/** Moves (or renames) one entry; the tree follows it. Returns the error to show, if any. */
-	const moveEntry = async (from: string, to: string): Promise<string | null> => {
-		try {
-			await api.post<FileEntry>(routes.projectMove(projectId), { from, to });
-		} catch (e) {
-			return errorText(e);
-		}
+	const move = async (from: string, to: string): Promise<string | null> => {
+		const failed = await moveEntry(projectId, from, to);
+		if (failed) return failed;
 		// The destination opens, and the open folders inside a moved folder stay open at its new place.
 		const renamed = (p: string) => (p === from || p.startsWith(`${from}/`) ? to + p.slice(from.length) : p);
 		updateExpanded((prev) => new Set([...ancestorsOf(to), ...[...prev].map(renamed)]));
@@ -421,14 +366,30 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 		if (onSelectDir && selectedPath && renamed(selectedPath) !== selectedPath) onSelectDir(renamed(selectedPath));
 		return null;
 	};
-	const renameEntry = async (path: string, name: string): Promise<string | null> => {
+	const rename = async (path: string, name: string): Promise<string | null> => {
 		const parent = parentOf(path);
-		const failed = await moveEntry(path, parent ? `${parent}/${name}` : name);
+		const failed = await move(path, parent ? `${parent}/${name}` : name);
 		if (failed) return failed;
 		setRenaming(null);
 		scrollRef.current?.focus();
 		return null;
 	};
+	// Drag a row onto a folder (onto a file: its folder; onto the empty tree: the project root) to move it there; a closed folder the
+	// drag rests on opens.
+	const drag = useEntryDrag({
+		projectId,
+		scrollRef,
+		onMove: (from, _kind, dir) => {
+			const name = from.slice(from.lastIndexOf("/") + 1);
+			void move(from, dir ? `${dir}/${name}` : name).then((error) => {
+				if (error) toast.error(t("Could not move {name}", { name }), { description: error });
+			});
+		},
+		onHold: (row) => {
+			const path = row.dataset.path;
+			if (path && row.dataset.kind === "dir" && row.getAttribute("aria-expanded") === "false") toggleDir(path, true);
+		},
+	});
 
 	return (
 		<div
@@ -529,6 +490,11 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 								<Upload />
 							</Button>
 						</Tip>
+						{coarsePointer ? (
+							<Button variant="ghost" size="icon-sm" aria-label={t("Drag to move")} aria-pressed={touchMove} onClick={() => setTouchMove((on) => !on)} className={cn(touchMove && "bg-accent-soft text-accent")}>
+								<Move />
+							</Button>
+						) : null}
 						<Tip label={t("Open terminal here")}>
 							<Button asChild variant="ghost" size="icon-sm" aria-label={t("Open terminal here")}>
 								<Link to="/terminal" search={{ project: projectId }}>
@@ -562,62 +528,18 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 				onFocus={() => {
 					if (activeKey === null && rows[0]?.type === "entry") setActiveKey(rows[0].key);
 				}}
-				onDragStart={(e) => {
-					const row = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-path]") : null;
-					const path = row?.dataset.path;
-					if (!path) return;
-					e.dataTransfer.effectAllowed = "move";
-					e.dataTransfer.setData("text/plain", path);
-					setMoving({ path, kind: (row.dataset.kind ?? "file") as FileEntry["kind"] });
-				}}
-				onDragOver={(e) => {
-					if (!moving) return;
-					const dir = dropDirAt(e.target);
-					setDropDir(dir);
-					// A closed folder held under the pointer opens, so a deeper folder can be reached.
-					const row = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-path]") : null;
-					const closedDir = row?.dataset.kind === "dir" && row.getAttribute("aria-expanded") === "false" ? row.dataset.path : undefined;
-					if (closedDir !== openOnHover.current?.path) {
-						stopHoverOpen();
-						if (closedDir) openOnHover.current = { path: closedDir, timer: window.setTimeout(() => toggleDir(closedDir, true), 600) };
-					}
-					if (dir === null) return;
-					e.preventDefault();
-					e.dataTransfer.dropEffect = "move";
-				}}
-				onDragLeave={(e) => {
-					if (moving && !(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) {
-						stopHoverOpen();
-						setDropDir(null);
-					}
-				}}
-				onDrop={(e) => {
-					if (!moving) return;
-					const dir = dropDirAt(e.target);
-					const source = moving;
-					endDrag();
-					if (dir === null) return;
-					e.preventDefault();
-					const name = source.path.slice(source.path.lastIndexOf("/") + 1);
-					void moveEntry(source.path, dir ? `${dir}/${name}` : name).then((error) => {
-						if (error) toast.error(t("Could not move {name}", { name }), { description: error });
-					});
-				}}
-				onDragEnd={endDrag}
+				{...drag.dropProps}
 				onContextMenu={(e) => {
-					// A row under the pointer, or (the menu key on the focused tree) the active row.
-					const pointed = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-path]") : null;
-					const el = pointed ?? (e.target === e.currentTarget && activeId ? document.getElementById(activeId) : null);
-					const path = el?.dataset.path;
-					if (!el || !path) return;
+					const target = menuTargetOf(e, e.target === e.currentTarget && activeId ? document.getElementById(activeId) : null);
+					if (!target) return;
 					e.preventDefault();
-					const box = el.getBoundingClientRect();
-					setActiveKey(path);
-					setMenu({ path, dir: el.dataset.kind === "dir", x: pointed ? e.clientX : box.left + 24, y: pointed ? e.clientY : box.bottom });
+					setActiveKey(target.path);
+					setMenu(target);
 				}}
+				data-drop-dir=""
 				className={cn(
 					"group/tree scrollbar-thin min-h-0 flex-1 overflow-auto overscroll-contain outline-none transition-[background-color,box-shadow]",
-					dropDir === "" && "bg-accent-soft/50 shadow-[inset_0_0_0_2px_var(--accent)]",
+					drag.dropDir === "" && "bg-accent-soft/50 shadow-[inset_0_0_0_2px_var(--accent)]",
 				)}
 			>
 				{q && rows.length === 0 ? (
@@ -633,35 +555,39 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 								style={{ height: rowHeight, transform: `translateY(${item.start}px)` }}
 							>
 								{row.type === "create" ? (
-									<NameRow
-										kind={row.kind}
-										depth={row.depth}
-										label={
-											row.kind === "dir"
-												? row.dir
-													? t("Name of the new folder in /{dir}", { dir: row.dir })
-													: t("Name of the new folder")
-												: row.dir
-													? t("Name of the new file in /{dir}", { dir: row.dir })
-													: t("Name of the new file")
-										}
-										taken={new Set((dirs.get(row.dir)?.entries ?? []).map((e) => e.name))}
-										onSubmit={(name) => create(row.kind, row.dir, name)}
-										onCancel={() => setCreating(null)}
-									/>
+									<div className="flex h-full items-center pr-2" style={{ paddingLeft: BASE_PAD + row.depth * INDENT + (row.kind === "dir" ? 0 : 20) }}>
+										{row.kind === "dir" ? <ChevronRight aria-hidden className="mr-1.5 size-3.5 shrink-0 text-subtle" /> : null}
+										<NameInput
+											kind={row.kind}
+											label={
+												row.kind === "dir"
+													? row.dir
+														? t("Name of the new folder in /{dir}", { dir: row.dir })
+														: t("Name of the new folder")
+													: row.dir
+														? t("Name of the new file in /{dir}", { dir: row.dir })
+														: t("Name of the new file")
+											}
+											taken={new Set((dirs.get(row.dir)?.entries ?? []).map((e) => e.name))}
+											onSubmit={(name) => create(row.kind, row.dir, name)}
+											onCancel={() => setCreating(null)}
+										/>
+									</div>
 								) : row.type === "entry" && row.key === renaming ? (
-									<NameRow
-										kind={row.entry.kind === "dir" ? "dir" : "file"}
-										depth={row.depth}
-										initial={row.entry.name}
-										label={t("New name for {name}", { name: row.entry.name })}
-										taken={new Set((dirs.get(parentOf(row.key))?.entries ?? []).flatMap((e) => (e.path === row.key ? [] : [e.name])))}
-										onSubmit={(name) => renameEntry(row.key, name)}
-										onCancel={() => {
-											setRenaming(null);
-											scrollRef.current?.focus();
-										}}
-									/>
+									<div className="flex h-full items-center pr-2" style={{ paddingLeft: BASE_PAD + row.depth * INDENT + (row.entry.kind === "dir" ? 0 : 20) }}>
+										{row.entry.kind === "dir" ? <ChevronRight aria-hidden className={cn("mr-1.5 size-3.5 shrink-0 text-subtle", row.expanded && "rotate-90")} /> : null}
+										<NameInput
+											kind={row.entry.kind === "dir" ? "dir" : "file"}
+											initial={row.entry.name}
+											label={t("New name for {name}", { name: row.entry.name })}
+											taken={new Set((dirs.get(parentOf(row.key))?.entries ?? []).flatMap((e) => (e.path === row.key ? [] : [e.name])))}
+											onSubmit={(name) => rename(row.key, name)}
+											onCancel={() => {
+												setRenaming(null);
+												scrollRef.current?.focus();
+											}}
+										/>
+									</div>
 								) : (
 									<TreeRow
 										id={`${treeId}-${item.index}`}
@@ -669,12 +595,14 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 										selected={row.type === "entry" && row.key === selectedPath}
 										active={item.index === activeIndex}
 										menuOpen={row.key === menu?.path}
-										draggable={!coarse}
-										dragged={row.key === moving?.path}
-										dropTarget={!dropDir ? null : row.key === dropDir ? "folder" : row.key.startsWith(`${dropDir}/`) ? "inside" : null}
+										touch={coarsePointer ? (touchMove ? "drag" : "menu") : null}
+										dragged={row.key === drag.moving}
+										dropTarget={!drag.dropDir ? null : row.key === drag.dropDir ? "folder" : row.key.startsWith(`${drag.dropDir}/`) ? "inside" : null}
 										onActivate={activate}
 										onRetry={refresh}
 										onHoverDir={prefetchDir}
+										onMenu={setMenu}
+										onGrip={drag.startTouch}
 									/>
 								)}
 							</div>
@@ -683,56 +611,8 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 				</div>
 			</div>
 			{bare ? null : <UploadDock uploads={uploads} />}
-			{menu ? (
-				<DropdownMenu
-					open
-					onOpenChange={(open) => {
-						if (!open) setMenu(null);
-					}}
-				>
-					{/* The anchor lives in <body>: a containing ancestor of the panel would otherwise re-base `fixed` and push the menu off screen. */}
-					{createPortal(
-						<DropdownMenuTrigger asChild>
-							<span aria-hidden className="pointer-events-none fixed size-0" style={{ left: menu.x, top: menu.y }} />
-						</DropdownMenuTrigger>,
-						document.body,
-					)}
-					{/* No focus return on close: Rename's name box and the composer take the focus. */}
-					<DropdownMenuContent
-						align="start"
-						sideOffset={2}
-						onCloseAutoFocus={(e) => {
-							e.preventDefault();
-							afterMenu.current?.();
-							afterMenu.current = null;
-						}}
-						className="min-w-48"
-					>
-						{onReference ? (
-							<>
-								<DropdownMenuItem onSelect={() => (afterMenu.current = () => onReference(menu.path, menu.dir))}>
-									<AtSign /> {t("Add to chat")}
-								</DropdownMenuItem>
-								<DropdownMenuSeparator />
-							</>
-						) : null}
-						<DropdownMenuItem onSelect={() => (afterMenu.current = () => setRenaming(menu.path))}>
-							<Pencil /> {t("Rename")}
-							<Kbd className="ml-auto">F2</Kbd>
-						</DropdownMenuItem>
-						<DropdownMenuItem
-							onSelect={() => {
-								void navigator.clipboard.writeText(menu.path).then(
-									() => toast.success(t("Path copied")),
-									(e: unknown) => toast.error(errorText(e)),
-								);
-							}}
-						>
-							<Copy /> {t("Copy path")}
-						</DropdownMenuItem>
-					</DropdownMenuContent>
-				</DropdownMenu>
-			) : null}
+			{menu ? <EntryMenu target={menu} reference={reference} onRename={setRenaming} onClose={() => setMenu(null)} /> : null}
+			{drag.ghost}
 			{dragging ? (
 				<div aria-hidden className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl bg-accent-soft text-xs font-medium text-accent shadow-[inset_0_0_0_2px_var(--accent)]">
 					{targetDir ? t("Drop to upload into /{dir}", { dir: targetDir }) : t("Drop to upload into the project folder")}
@@ -748,21 +628,26 @@ const TreeRow = memo(function TreeRow({
 	selected,
 	active,
 	menuOpen,
-	draggable,
+	touch,
 	dragged,
 	dropTarget,
 	onActivate,
 	onRetry,
 	onHoverDir,
+	onMenu,
+	onGrip,
 }: {
 	id: string;
 	row: Exclude<Row, { type: "create" }>;
 	selected: boolean;
 	active: boolean;
-	/** Its right-click menu is open. */
+	/** Its menu is open. */
 	menuOpen: boolean;
-	/** The row can be dragged onto a folder to move it (the tree handles the drag; touch screens scroll instead). */
-	draggable: boolean;
+	/**
+	 * A touch screen's control at the end of the row: the "⋯" of its menu, or the grip that drags it while "drag to move" is on. Null: a
+	 * mouse, which right-clicks and drags the row itself.
+	 */
+	touch: "menu" | "drag" | null;
 	/** This row is being dragged. */
 	dragged: boolean;
 	/** A drag would drop into this folder, or into the folder this row is inside of. */
@@ -770,6 +655,8 @@ const TreeRow = memo(function TreeRow({
 	onActivate: (row: Row) => void;
 	onRetry: () => void;
 	onHoverDir: (path: string) => void;
+	onMenu: (target: MenuTarget) => void;
+	onGrip: (e: ReactPointerEvent, entry: { path: string; kind: FileEntry["kind"]; name: string }) => void;
 }) {
 	const pad = BASE_PAD + row.depth * INDENT;
 	const guides = Array.from({ length: row.depth }, (_, i) => (
@@ -820,11 +707,13 @@ const TreeRow = memo(function TreeRow({
 			aria-expanded={isDir ? row.expanded : undefined}
 			data-path={entry.path}
 			data-kind={entry.kind}
-			draggable={draggable}
+			data-drop-dir={isDir ? entry.path : parentOf(entry.path)}
+			draggable={touch === null}
 			onClick={() => onActivate(row)}
 			onPointerEnter={isDir && !row.expanded ? () => onHoverDir(entry.path) : undefined}
 			className={cn(
-				"relative flex h-full cursor-pointer select-none items-center gap-1.5 pr-3 text-[13px] transition-colors hover:bg-surface-2",
+				"relative flex h-full cursor-pointer select-none items-center gap-1.5 text-[13px] transition-colors hover:bg-surface-2",
+				touch ? "pr-1" : "pr-3",
 				selected && "bg-accent-soft text-foreground hover:bg-accent-soft",
 				active && "group-focus-within/tree:shadow-[inset_0_0_0_1px_var(--accent)]",
 				menuOpen && "shadow-[inset_0_0_0_1px_var(--accent)]",
@@ -852,110 +741,11 @@ const TreeRow = memo(function TreeRow({
 			<span className={cn("whitespace-nowrap", selected ? "font-medium" : isDir ? "text-foreground" : "text-muted-foreground")}>{entry.name}</span>
 			{entry.kind === "symlink" ? <Link2 aria-label={t("Symbolic link")} className="size-3 shrink-0 text-subtle" /> : null}
 			{row.hint ? <span className="whitespace-nowrap font-mono text-2xs text-subtle">{row.hint}</span> : null}
-		</div>
-	);
-});
-
-/** Why a name cannot be a new file or folder here, or null. A `/` inside makes folders (`docs/notes.md`); the server confines the path. */
-function nameProblem(name: string, taken: ReadonlySet<string>, kind: NewKind): string | null {
-	const shape = kind === "dir" ? t("Use a folder name like assets or docs/assets") : t("Use a file name like notes.md or docs/notes.md");
-	if (!name) return kind === "dir" ? t("Type a name for the folder") : t("Type a name for the file");
-	if (name.startsWith("/") || name.endsWith("/") || name.includes("\\")) return shape;
-	if (name.split("/").some((part) => part === "" || part === "." || part === "..")) return shape;
-	if (taken.has(name.split("/")[0] as string) && !name.includes("/")) return t("{name} already exists here", { name });
-	return null;
-}
-
-/**
- * The name box of a new file or folder, or of one being renamed, VS Code style: Enter saves (a new file opens in the editor), Esc
- * cancels, leaving the box with a valid name saves too; a rename starts with the name selected up to its extension. Problems show
- * right under the box without moving the tree.
- */
-function NameRow({
-	kind,
-	depth,
-	initial = "",
-	label,
-	taken,
-	onSubmit,
-	onCancel,
-}: {
-	kind: NewKind;
-	depth: number;
-	/** The current name, when renaming. */
-	initial?: string;
-	label: string;
-	/** Names already used in the folder (the entry's own name excluded). */
-	taken: ReadonlySet<string>;
-	onSubmit: (name: string) => Promise<string | null>;
-	onCancel: () => void;
-}) {
-	const [name, setName] = useState(initial);
-	const [error, setError] = useState<string | null>(null);
-	const busy = useRef(false);
-	const input = useRef<HTMLInputElement>(null);
-	const pad = BASE_PAD + depth * INDENT;
-	// biome-ignore lint/correctness/useExhaustiveDependencies: select once, when the box opens
-	useEffect(() => {
-		const dot = initial.lastIndexOf(".");
-		input.current?.setSelectionRange(0, kind === "file" && dot > 0 ? dot : initial.length);
-	}, []);
-	const submit = async (fromBlur: boolean) => {
-		if (busy.current) return;
-		const value = name.trim();
-		if ((!value && fromBlur) || (initial && value === initial)) return onCancel();
-		const problem = nameProblem(value, taken, kind);
-		if (problem) {
-			if (fromBlur) return onCancel();
-			return setError(problem);
-		}
-		busy.current = true;
-		const failed = await onSubmit(value);
-		busy.current = false;
-		if (failed) setError(failed);
-	};
-	const { Icon, tone } = kind === "dir" ? { Icon: Folder, tone: "text-muted-foreground" } : fileIcon(name.trim() || "file");
-	return (
-		<div className="relative flex h-full items-center gap-1.5 pr-2" style={{ paddingLeft: pad + (kind === "dir" ? 0 : 20) }}>
-			{kind === "dir" ? <ChevronRight aria-hidden className="size-3.5 shrink-0 text-subtle" /> : null}
-			<Icon aria-hidden className={cn("size-4 shrink-0", tone)} />
-			<input
-				ref={input}
-				// biome-ignore lint/a11y/noAutofocus: the box exists only because the person just asked to name a file or folder
-				autoFocus
-				value={name}
-				spellCheck={false}
-				autoCapitalize="off"
-				autoCorrect="off"
-				aria-label={label}
-				aria-invalid={error !== null}
-				onChange={(e) => {
-					setName(e.target.value);
-					setError(null);
-				}}
-				onKeyDown={(e) => {
-					// Every key belongs to the box: the tree's own arrow / Enter handling must not see them.
-					e.stopPropagation();
-					if (e.key === "Enter") {
-						e.preventDefault();
-						void submit(false);
-					} else if (e.key === "Escape") {
-						e.preventDefault();
-						onCancel();
-					}
-				}}
-				onBlur={() => void submit(true)}
-				placeholder={kind === "dir" ? t("Folder name, e.g. assets") : t("File name, e.g. notes.md")}
-				className={cn(
-					"h-6 min-w-0 flex-1 rounded bg-background px-1.5 font-mono text-base outline-none shadow-[inset_0_0_0_1px_var(--accent)] placeholder:font-sans placeholder:text-subtle md:text-xs coarse:h-8",
-					error && "shadow-[inset_0_0_0_1px_var(--danger)]",
-				)}
-			/>
-			{error ? (
-				<div role="alert" className="absolute right-2 top-full z-10 animate-fade-in rounded-md bg-danger px-2 py-1 text-2xs font-medium text-white shadow-pop" style={{ left: pad + 40 }}>
-					{error}
-				</div>
+			{touch === "drag" ? (
+				<DragGrip name={entry.name} onPointerDown={(e) => onGrip(e, { path: entry.path, kind: entry.kind, name: entry.name })} className="ml-auto" />
+			) : touch === "menu" ? (
+				<MenuButton path={entry.path} dir={isDir} name={entry.name} onOpen={onMenu} className="ml-auto" />
 			) : null}
 		</div>
 	);
-}
+});

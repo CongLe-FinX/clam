@@ -2,20 +2,44 @@ import { type FileEntry, routes } from "@clam/contracts";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDown, ArrowUp, ChevronRight, Folder, FolderOpen, FolderTree, LayoutGrid, Link2, List, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Terminal, Upload, X } from "lucide-react";
-import { Fragment, type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+	ArrowDown,
+	ArrowUp,
+	ChevronRight,
+	FilePlus,
+	Folder,
+	FolderOpen,
+	FolderPlus,
+	FolderTree,
+	LayoutGrid,
+	Link2,
+	List,
+	Move,
+	PanelLeftClose,
+	PanelLeftOpen,
+	RefreshCw,
+	Search,
+	Terminal,
+	Upload,
+	X,
+} from "lucide-react";
+import { Fragment, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { type ImperativePanelHandle, Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
+import { toast } from "sonner";
 import { CATEGORY_LABEL } from "@/components/rich/file-icon.tsx";
+import { fileMention } from "@/features/session/file-mention.ts";
 import { t, tr } from "@/i18n";
 import { api, errorText, localUrl } from "@/lib/api";
 import { fileCategory, previewKind } from "@/lib/file-kind";
 import { qk } from "@/lib/queries";
+import { useUi } from "@/lib/store";
 import { hasFiles } from "@/lib/upload";
 import { cn, formatBytes, relativeTime } from "@/lib/utils";
 import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { Skeleton } from "@/ui/skeleton";
 import { Tip } from "@/ui/tooltip";
+import { coarsePointer, createEntry, DragGrip, EntryMenu, type EntryReference, MenuButton, type MenuTarget, menuTargetOf, moveEntry, NameInput, type NewKind, useEntryDrag } from "./entry-ops.tsx";
 import { FileExplorer } from "./file-explorer.tsx";
 import { byKindThenName, fileIcon, parentOf } from "./file-utils.ts";
 import { UploadDock, useProjectUploads } from "./uploads.tsx";
@@ -74,8 +98,23 @@ export default function FileBrowser({ projectId, openPath, onOpenFile }: FileBro
 	const [dir, setDir] = useState(() => (openPath ? parentOf(openPath) : ""));
 	const treeRef = useRef<ImperativePanelHandle>(null);
 	const [treeCollapsed, setTreeCollapsed] = useState(false);
+	// No composer here: "Add to a new chat" opens a new session of the project whose first prompt starts with the mention.
+	const openDialog = useUi((s) => s.openDialog);
+	const reference = useMemo<EntryReference>(
+		() => ({ label: t("Add to a new chat"), onSelect: (path, isDir) => openDialog({ kind: "create-session", projectId, prompt: `${fileMention(path, isDir)} ` }) }),
+		[openDialog, projectId],
+	);
 
-	const main = <FolderPane projectId={projectId} dir={dir} onDir={setDir} onOpenFile={onOpenFile} tree={md ? { collapsed: treeCollapsed, toggle: () => (treeCollapsed ? treeRef.current?.expand() : treeRef.current?.collapse()) } : undefined} />;
+	const main = (
+		<FolderPane
+			projectId={projectId}
+			dir={dir}
+			onDir={setDir}
+			onOpenFile={onOpenFile}
+			reference={reference}
+			tree={md ? { collapsed: treeCollapsed, toggle: () => (treeCollapsed ? treeRef.current?.expand() : treeRef.current?.collapse()) } : undefined}
+		/>
+	);
 	if (!md) return <div className="h-full min-h-0">{main}</div>;
 	return (
 		<PanelGroup direction="horizontal" autoSaveId="clam.files.cols" className="h-full min-h-0">
@@ -92,7 +131,7 @@ export default function FileBrowser({ projectId, openPath, onOpenFile }: FileBro
 				onExpand={() => setTreeCollapsed(false)}
 				className="min-w-0"
 			>
-				<FileExplorer projectId={projectId} selectedPath={dir || null} onOpenFile={onOpenFile} onSelectDir={setDir} bare className="border-r" />
+				<FileExplorer projectId={projectId} selectedPath={dir || null} onOpenFile={onOpenFile} onSelectDir={setDir} reference={reference} bare className="border-r" />
 			</Panel>
 			<PanelResizeHandle aria-label={t("Resize folder tree")} />
 			<Panel id="folder" order={2} minSize={40} className="min-w-0">
@@ -104,7 +143,21 @@ export default function FileBrowser({ projectId, openPath, onOpenFile }: FileBro
 
 // ───────────────────────────── current folder ─────────────────────────────
 
-function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: string; dir: string; onDir: (d: string) => void; onOpenFile: (p: string) => void; tree?: { collapsed: boolean; toggle: () => void } }) {
+function FolderPane({
+	projectId,
+	dir,
+	onDir,
+	onOpenFile,
+	reference,
+	tree,
+}: {
+	projectId: string;
+	dir: string;
+	onDir: (d: string) => void;
+	onOpenFile: (p: string) => void;
+	reference: EntryReference;
+	tree?: { collapsed: boolean; toggle: () => void };
+}) {
 	const qc = useQueryClient();
 	const q = useQuery({
 		queryKey: qk.projectFiles(projectId, dir),
@@ -117,10 +170,21 @@ function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: st
 	const uploads = useProjectUploads(projectId);
 	const dragDepth = useRef(0);
 	const [dragging, setDragging] = useState(false);
+	const [creating, setCreating] = useState<NewKind | null>(null);
+	/** The entry whose name is being edited in place (menu → Rename, or F2). */
+	const [renaming, setRenaming] = useState<string | null>(null);
+	const [menu, setMenu] = useState<MenuTarget | null>(null);
+	/** Touch screens: "drag to move" shows a grip on each row (off by default: a finger on a row scrolls the list); otherwise a "⋯". */
+	const [touchMove, setTouchMove] = useState(false);
+	const scrollRef = useRef<HTMLDivElement>(null);
 
-	// A different folder starts with a clean filter.
+	// A different folder starts with a clean filter and no name box.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: reset on folder change only
-	useEffect(() => setFilter(""), [dir]);
+	useEffect(() => {
+		setFilter("");
+		setCreating(null);
+		setRenaming(null);
+	}, [dir]);
 
 	const needle = filter.trim().toLowerCase();
 	const entries = useMemo(() => {
@@ -137,6 +201,7 @@ function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: st
 		// Folders stay on top whichever way the column sorts.
 		return [...sorted.filter((e) => e.kind === "dir").reverse(), ...sorted.filter((e) => e.kind !== "dir").reverse()];
 	}, [q.data, needle, sort]);
+	const taken = useMemo(() => new Set((q.data ?? []).map((e) => e.name)), [q.data]);
 
 	const activate = useCallback(
 		(e: FileEntry) => {
@@ -147,10 +212,67 @@ function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: st
 	);
 	const refresh = () => void qc.invalidateQueries({ queryKey: ["local", "project", projectId, "files"] });
 	const crumbs = dir ? dir.split("/") : [];
+	const startCreate = (kind: NewKind) => {
+		setFilter("");
+		setRenaming(null);
+		setCreating(kind);
+	};
+	/** Creates the empty file (it opens in the editor) or the folder in the folder on show; a name with `/` creates its folders too. */
+	const create = async (kind: NewKind, name: string): Promise<string | null> => {
+		const path = dir ? `${dir}/${name}` : name;
+		const failed = await createEntry(projectId, kind, path);
+		if (failed) return failed;
+		setCreating(null);
+		refresh();
+		if (kind === "file") onOpenFile(path);
+		return null;
+	};
+	const rename = async (path: string, name: string): Promise<string | null> => {
+		const failed = await moveEntry(projectId, path, dir ? `${dir}/${name}` : name);
+		if (failed) return failed;
+		setRenaming(null);
+		refresh();
+		return null;
+	};
+	// Drag a row onto a folder of the list, a folder of the path above it, or (from the tree) the list itself.
+	const drag = useEntryDrag({
+		projectId,
+		scrollRef,
+		onMove: (from, _kind, to) => {
+			const name = from.slice(from.lastIndexOf("/") + 1);
+			void moveEntry(projectId, from, to ? `${to}/${name}` : name).then((error) => {
+				if (error) toast.error(t("Could not move {name}", { name }), { description: error });
+				else refresh();
+			});
+		},
+	});
+	const controls: RowControls = {
+		touch: coarsePointer ? (touchMove ? "drag" : "menu") : null,
+		moving: drag.moving,
+		dropDir: drag.dropDir,
+		menuPath: menu?.path ?? null,
+		renaming,
+		onMenu: setMenu,
+		onGrip: drag.startTouch,
+		renameBox: (e, icon) => (
+			<NameInput
+				kind={e.kind === "dir" ? "dir" : "file"}
+				initial={e.name}
+				label={t("New name for {name}", { name: e.name })}
+				taken={new Set([...taken].filter((n) => n !== e.name))}
+				onSubmit={(name) => rename(e.path, name)}
+				onCancel={() => setRenaming(null)}
+				icon={icon}
+				inputClassName="h-7 md:text-[13px]"
+			/>
+		),
+	};
 
 	return (
 		<div
 			className="relative flex h-full min-h-0 flex-col bg-background"
+			onDragStart={drag.dropProps.onDragStart}
+			onDragEnd={drag.dropProps.onDragEnd}
 			onDragEnter={(e) => {
 				if (!hasFiles(e)) return;
 				e.preventDefault();
@@ -158,17 +280,17 @@ function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: st
 				setDragging(true);
 			}}
 			onDragOver={(e) => {
-				if (!hasFiles(e)) return;
+				if (!hasFiles(e)) return drag.dropProps.onDragOver(e);
 				e.preventDefault();
 				e.dataTransfer.dropEffect = "copy";
 			}}
 			onDragLeave={(e) => {
-				if (!hasFiles(e)) return;
+				if (!hasFiles(e)) return drag.dropProps.onDragLeave(e);
 				dragDepth.current = Math.max(0, dragDepth.current - 1);
 				if (dragDepth.current === 0) setDragging(false);
 			}}
 			onDrop={(e) => {
-				if (!hasFiles(e)) return;
+				if (!hasFiles(e)) return drag.dropProps.onDrop(e);
 				e.preventDefault();
 				dragDepth.current = 0;
 				setDragging(false);
@@ -188,7 +310,12 @@ function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: st
 						type="button"
 						onClick={() => onDir("")}
 						aria-current={dir === "" ? "location" : undefined}
-						className={cn("inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 outline-none transition-colors hover:bg-surface-2 focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-10", dir === "" ? "font-medium text-foreground" : "text-muted-foreground")}
+						data-drop-dir=""
+						className={cn(
+							"inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md px-1.5 outline-none transition-colors hover:bg-surface-2 focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-10",
+							dir === "" ? "font-medium text-foreground" : "text-muted-foreground",
+							drag.dropDir === "" && "bg-accent-soft text-accent shadow-[inset_0_0_0_1px_var(--accent)]",
+						)}
 					>
 						<FolderTree className="size-3.5" aria-hidden /> {t("Project root")}
 					</button>
@@ -202,7 +329,12 @@ function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: st
 									type="button"
 									onClick={() => onDir(path)}
 									aria-current={last ? "location" : undefined}
-									className={cn("h-7 shrink-0 whitespace-nowrap rounded-md px-1.5 outline-none transition-colors hover:bg-surface-2 focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-10", last ? "font-medium text-foreground" : "text-muted-foreground")}
+									data-drop-dir={path}
+									className={cn(
+										"h-7 shrink-0 whitespace-nowrap rounded-md px-1.5 outline-none transition-colors hover:bg-surface-2 focus-visible:shadow-[0_0_0_2px_var(--accent)] coarse:h-10",
+										last ? "font-medium text-foreground" : "text-muted-foreground",
+										drag.dropDir === path && "bg-accent-soft text-accent shadow-[inset_0_0_0_1px_var(--accent)]",
+									)}
 								>
 									{seg}
 								</button>
@@ -212,8 +344,9 @@ function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: st
 				</nav>
 			</div>
 
-			<div className="flex shrink-0 items-center gap-1.5 border-b px-2 py-1.5 coarse:py-2">
-				<div className="relative min-w-0 flex-1 sm:max-w-sm">
+			{/* On a phone the filter has the first line to itself and the buttons go on the next one. */}
+			<div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b px-2 py-1.5 coarse:py-2">
+				<div className="relative w-full min-w-0 sm:w-auto sm:max-w-sm sm:flex-1">
 					<Search aria-hidden className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-subtle" />
 					<input
 						value={filter}
@@ -231,8 +364,7 @@ function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: st
 						</button>
 					) : null}
 				</div>
-				<span className="hidden flex-1 sm:block" />
-				<div role="group" aria-label={t("Folder view")} className="flex shrink-0 rounded-lg bg-surface-2 p-0.5">
+				<div role="group" aria-label={t("Folder view")} className="flex shrink-0 rounded-lg bg-surface-2 p-0.5 sm:order-last">
 					{(["list", "grid"] as const).map((v) => (
 						<Tip key={v} label={v === "list" ? t("List view") : t("Grid view")}>
 							<button
@@ -247,18 +379,34 @@ function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: st
 						</Tip>
 					))}
 				</div>
+				<span className="flex-1" />
 				<Tip label={t("Refresh")}>
-					<Button variant="ghost" size="icon-sm" aria-label={t("Refresh folder")} onClick={refresh}>
+					<Button variant="ghost" size="icon-sm" aria-label={t("Refresh folder")} onClick={refresh} className="sm:order-last">
 						<RefreshCw className={cn(q.isFetching && "animate-spin")} />
 					</Button>
 				</Tip>
+				<Tip label={dir ? t("New file in /{dir}", { dir }) : t("New file")}>
+					<Button variant="ghost" size="icon-sm" aria-label={t("New file")} onClick={() => startCreate("file")} className="sm:order-last">
+						<FilePlus />
+					</Button>
+				</Tip>
+				<Tip label={dir ? t("New folder in /{dir}", { dir }) : t("New folder")}>
+					<Button variant="ghost" size="icon-sm" aria-label={t("New folder")} onClick={() => startCreate("dir")} className="sm:order-last">
+						<FolderPlus />
+					</Button>
+				</Tip>
+				{coarsePointer ? (
+					<Button variant="ghost" size="icon-sm" aria-label={t("Drag to move")} aria-pressed={touchMove} onClick={() => setTouchMove((on) => !on)} className={cn("sm:order-last", touchMove && "bg-accent-soft text-accent")}>
+						<Move />
+					</Button>
+				) : null}
 				<Tip label={dir ? t("Upload to /{dir}", { dir }) : t("Upload files")}>
-					<Button variant="outline" size="sm" aria-label={t("Upload files")} onClick={() => fileInput.current?.click()} className="coarse:h-11">
+					<Button variant="outline" size="sm" aria-label={t("Upload files")} onClick={() => fileInput.current?.click()} className="coarse:h-11 sm:order-last">
 						<Upload /> <span className="hidden lg:inline">{t("Upload")}</span>
 					</Button>
 				</Tip>
 				<Tip label={t("Open terminal here")}>
-					<Button asChild variant="ghost" size="icon-sm" aria-label={t("Open terminal here")} className="hidden sm:inline-flex">
+					<Button asChild variant="ghost" size="icon-sm" aria-label={t("Open terminal here")} className="hidden sm:order-last sm:inline-flex">
 						<Link to="/terminal" search={{ project: projectId }}>
 							<Terminal />
 						</Link>
@@ -276,37 +424,68 @@ function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: st
 				/>
 			</div>
 
-			<div className="min-h-0 flex-1">
-				{q.isPending ? (
-					<div className="flex flex-col gap-2 p-3" aria-busy aria-label={t("Loading files")}>
-						{Array.from({ length: 9 }, (_, i) => (
-							<Skeleton key={i} className="h-8" style={{ width: `${55 + ((i * 13) % 40)}%` }} />
-						))}
+			<div
+				data-drop-dir={dir}
+				onContextMenu={(e) => {
+					const target = menuTargetOf(e, document.activeElement instanceof HTMLElement ? document.activeElement : null);
+					if (!target) return;
+					e.preventDefault();
+					setMenu(target);
+				}}
+				onKeyDown={(e) => {
+					const row = document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>("[data-path]") : null;
+					if (e.key !== "F2" || !row?.dataset.path) return;
+					e.preventDefault();
+					setRenaming(row.dataset.path);
+				}}
+				className={cn("flex min-h-0 flex-1 flex-col transition-[background-color,box-shadow]", drag.dropDir === dir && "bg-accent-soft/50 shadow-[inset_0_0_0_2px_var(--accent)]")}
+			>
+				{creating ? (
+					<div className="flex h-11 shrink-0 items-center border-b px-3 coarse:h-14">
+						<NameInput
+							kind={creating}
+							label={creating === "dir" ? (dir ? t("Name of the new folder in /{dir}", { dir }) : t("Name of the new folder")) : dir ? t("Name of the new file in /{dir}", { dir }) : t("Name of the new file")}
+							taken={taken}
+							onSubmit={(name) => create(creating, name)}
+							onCancel={() => setCreating(null)}
+							inputClassName="h-7 md:text-[13px]"
+						/>
 					</div>
-				) : q.error ? (
-					<EmptyState
-						icon={Folder}
-						title={t("Could not load this folder")}
-						description={errorText(q.error)}
-						action={
-							<Button size="sm" variant="outline" onClick={() => void q.refetch()}>
-								<RefreshCw /> {t("Retry")}
-							</Button>
-						}
-					/>
-				) : entries.length === 0 ? (
-					needle ? (
-						<EmptyState icon={Search} title={t("No matching files")} description={t("No file in this folder matches “{query}”.", { query: filter.trim() })} />
+				) : null}
+				<div className="min-h-0 flex-1">
+					{q.isPending ? (
+						<div className="flex flex-col gap-2 p-3" aria-busy aria-label={t("Loading files")}>
+							{Array.from({ length: 9 }, (_, i) => (
+								<Skeleton key={i} className="h-8" style={{ width: `${55 + ((i * 13) % 40)}%` }} />
+							))}
+						</div>
+					) : q.error ? (
+						<EmptyState
+							icon={Folder}
+							title={t("Could not load this folder")}
+							description={errorText(q.error)}
+							action={
+								<Button size="sm" variant="outline" onClick={() => void q.refetch()}>
+									<RefreshCw /> {t("Retry")}
+								</Button>
+							}
+						/>
+					) : entries.length === 0 ? (
+						creating ? null : needle ? (
+							<EmptyState icon={Search} title={t("No matching files")} description={t("No file in this folder matches “{query}”.", { query: filter.trim() })} />
+						) : (
+							<EmptyState icon={FolderOpen} title={t("This folder is empty")} description={t("Drop files here or use Upload to add some.")} />
+						)
+					) : view === "list" ? (
+						<ListView entries={entries} scrollRef={scrollRef} controls={controls} sort={sort} onSort={(key) => setSort((s) => (s.key === key ? { key, asc: !s.asc } : { key, asc: true }))} onActivate={activate} />
 					) : (
-						<EmptyState icon={FolderOpen} title={t("This folder is empty")} description={t("Drop files here or use Upload to add some.")} />
-					)
-				) : view === "list" ? (
-					<ListView entries={entries} sort={sort} onSort={(key) => setSort((s) => (s.key === key ? { key, asc: !s.asc } : { key, asc: true }))} onActivate={activate} />
-				) : (
-					<GridView projectId={projectId} entries={entries} onActivate={activate} />
-				)}
+						<GridView projectId={projectId} entries={entries} scrollRef={scrollRef} controls={controls} onActivate={activate} />
+					)}
+				</div>
 			</div>
 			<UploadDock uploads={uploads} />
+			{menu ? <EntryMenu target={menu} reference={reference} onRename={setRenaming} onClose={() => setMenu(null)} /> : null}
+			{drag.ghost}
 			{dragging ? (
 				<div aria-hidden className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl bg-accent-soft text-xs font-medium text-accent shadow-[inset_0_0_0_2px_var(--accent)]">
 					{dir ? t("Drop to upload into /{dir}", { dir }) : t("Drop to upload into the project folder")}
@@ -314,6 +493,28 @@ function FolderPane({ projectId, dir, onDir, onOpenFile, tree }: { projectId: st
 			) : null}
 		</div>
 	);
+}
+
+/**
+ * What every row of the list or grid shares: the drag, the menu, the name box of a rename, and a touch screen's control. A row carries
+ * `data-path` / `data-kind` (what is dragged, what the menu is about) and, a folder, `data-drop-dir` (where a drop on it lands).
+ */
+interface RowControls {
+	/** A touch screen's control on each row: the "⋯" of its menu, or the grip that drags it. Null: a mouse (right-click, drag the row). */
+	touch: "menu" | "drag" | null;
+	moving: string | null;
+	dropDir: string | null;
+	menuPath: string | null;
+	renaming: string | null;
+	onMenu: (target: MenuTarget) => void;
+	onGrip: (e: ReactPointerEvent, entry: { path: string; kind: FileEntry["kind"]; name: string }) => void;
+	renameBox: (e: FileEntry, icon: boolean) => ReactNode;
+}
+
+function RowControl({ entry, c, className }: { entry: FileEntry; c: RowControls; className?: string }) {
+	if (c.touch === "drag") return <DragGrip name={entry.name} onPointerDown={(ev) => c.onGrip(ev, { path: entry.path, kind: entry.kind, name: entry.name })} className={className} />;
+	if (c.touch === "menu") return <MenuButton path={entry.path} dir={entry.kind === "dir"} name={entry.name} onOpen={c.onMenu} className={className} />;
+	return null;
 }
 
 // ───────────────────────────── list ─────────────────────────────
@@ -326,10 +527,22 @@ function EntryIcon({ entry, className }: { entry: FileEntry; className?: string 
 	return <Icon aria-hidden className={cn("shrink-0", tone, className)} />;
 }
 
-function ListView({ entries, sort, onSort, onActivate }: { entries: FileEntry[]; sort: { key: SortKey; asc: boolean }; onSort: (k: SortKey) => void; onActivate: (e: FileEntry) => void }) {
-	const scrollRef = useRef<HTMLDivElement>(null);
-	const [coarse] = useState(() => typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches);
-	const rowHeight = coarse ? 56 : 40;
+function ListView({
+	entries,
+	scrollRef,
+	controls: c,
+	sort,
+	onSort,
+	onActivate,
+}: {
+	entries: FileEntry[];
+	scrollRef: RefObject<HTMLDivElement | null>;
+	controls: RowControls;
+	sort: { key: SortKey; asc: boolean };
+	onSort: (k: SortKey) => void;
+	onActivate: (e: FileEntry) => void;
+}) {
+	const rowHeight = coarsePointer ? 56 : 40;
 	const v = useVirtualizer({ count: entries.length, getScrollElement: () => scrollRef.current, estimateSize: () => rowHeight, overscan: 12, getItemKey: (i) => entries[i]?.path ?? i });
 
 	const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
@@ -369,25 +582,46 @@ function ListView({ entries, sort, onSort, onActivate }: { entries: FileEntry[];
 						const dirRow = e.kind === "dir";
 						const when = e.modifiedAt ? relativeTime(e.modifiedAt) : "—";
 						return (
-							<li key={item.key} className="absolute inset-x-0 top-0" style={{ height: rowHeight, transform: `translateY(${item.start}px)` }}>
-								<button
-									type="button"
-									data-row={item.index}
-									onClick={() => onActivate(e)}
-									className={cn("grid size-full grid-cols-[minmax(0,1fr)] items-center gap-2 border-b border-border/50 px-3 text-left text-[13px] outline-none transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:shadow-[inset_0_0_0_1px_var(--accent)]", COLS)}
-								>
-									<span className="flex min-w-0 items-center gap-2.5">
-										<EntryIcon entry={e} className="size-[18px]" />
-										<span className="flex min-w-0 flex-col">
-											<span className={cn("truncate", dirRow ? "font-medium text-foreground" : "text-foreground/90")}>{e.name}</span>
-											<span className="truncate text-2xs text-subtle md:hidden">{dirRow ? when : `${e.size === null ? "—" : formatBytes(e.size)} · ${when}`}</span>
-										</span>
-										{e.kind === "symlink" ? <Link2 aria-label={t("Symbolic link")} className="size-3 shrink-0 text-subtle" /> : null}
-									</span>
-									<span className="tabular hidden justify-self-end font-mono text-xs text-muted-foreground md:block">{dirRow || e.size === null ? "—" : formatBytes(e.size)}</span>
-									<span className="hidden truncate text-xs text-muted-foreground md:block">{when}</span>
-									<span className="hidden truncate text-xs text-muted-foreground md:block">{typeLabel(e)}</span>
-								</button>
+							<li
+								key={item.key}
+								data-path={e.path}
+								data-kind={e.kind}
+								data-drop-dir={dirRow ? e.path : undefined}
+								draggable={c.touch === null && c.renaming !== e.path}
+								className={cn(
+									"absolute inset-x-0 top-0 flex items-center border-b border-border/50 transition-colors",
+									c.moving === e.path && "opacity-50",
+									c.dropDir === e.path && "bg-accent-soft shadow-[inset_0_0_0_1px_var(--accent)]",
+									c.menuPath === e.path && "shadow-[inset_0_0_0_1px_var(--accent)]",
+									c.renaming === e.path && "z-10",
+								)}
+								style={{ height: rowHeight, transform: `translateY(${item.start}px)` }}
+							>
+								{c.renaming === e.path ? (
+									<div className="flex size-full items-center px-3">{c.renameBox(e, true)}</div>
+								) : (
+									<>
+										<button
+											type="button"
+											data-row={item.index}
+											onClick={() => onActivate(e)}
+											className={cn("grid h-full min-w-0 flex-1 grid-cols-[minmax(0,1fr)] items-center gap-2 px-3 text-left text-[13px] outline-none transition-colors hover:bg-surface-2 focus-visible:bg-surface-2 focus-visible:shadow-[inset_0_0_0_1px_var(--accent)]", COLS)}
+										>
+											<span className="flex min-w-0 items-center gap-2.5">
+												<EntryIcon entry={e} className="size-[18px]" />
+												<span className="flex min-w-0 flex-col">
+													<span className={cn("truncate", dirRow ? "font-medium text-foreground" : "text-foreground/90")}>{e.name}</span>
+													<span className="truncate text-2xs text-subtle md:hidden">{dirRow ? when : `${e.size === null ? "—" : formatBytes(e.size)} · ${when}`}</span>
+												</span>
+												{e.kind === "symlink" ? <Link2 aria-label={t("Symbolic link")} className="size-3 shrink-0 text-subtle" /> : null}
+											</span>
+											<span className="tabular hidden justify-self-end font-mono text-xs text-muted-foreground md:block">{dirRow || e.size === null ? "—" : formatBytes(e.size)}</span>
+											<span className="hidden truncate text-xs text-muted-foreground md:block">{when}</span>
+											<span className="hidden truncate text-xs text-muted-foreground md:block">{typeLabel(e)}</span>
+										</button>
+										<RowControl entry={e} c={c} className="mr-1.5 size-11" />
+									</>
+								)}
 							</li>
 						);
 					})}
@@ -399,32 +633,54 @@ function ListView({ entries, sort, onSort, onActivate }: { entries: FileEntry[];
 
 // ───────────────────────────── grid ─────────────────────────────
 
-function GridView({ projectId, entries, onActivate }: { projectId: string; entries: FileEntry[]; onActivate: (e: FileEntry) => void }) {
+function GridView({ projectId, entries, scrollRef, controls: c, onActivate }: { projectId: string; entries: FileEntry[]; scrollRef: RefObject<HTMLDivElement | null>; controls: RowControls; onActivate: (e: FileEntry) => void }) {
 	return (
-		<div className="scrollbar-thin h-full overflow-y-auto overscroll-contain p-3">
+		<div ref={scrollRef} className="scrollbar-thin h-full overflow-y-auto overscroll-contain p-3">
 			<ul role="list" aria-label={t("Files in this folder")} className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-2.5 sm:grid-cols-[repeat(auto-fill,minmax(10rem,1fr))]">
 				{entries.map((e) => {
 					const thumb = e.kind === "file" && previewKind(e.name) === "image" && (e.size ?? 0) <= 8_000_000;
+					const preview = (
+						<span className="relative grid aspect-[4/3] w-full place-items-center overflow-hidden bg-surface-2">
+							{thumb ? (
+								<img src={localUrl(routes.projectRaw(projectId), { path: e.path })} alt="" loading="lazy" decoding="async" draggable={false} className="size-full object-cover" />
+							) : (
+								<EntryIcon entry={e} className="size-9" />
+							)}
+						</span>
+					);
 					return (
-						<li key={e.path} className="[content-visibility:auto] [contain-intrinsic-size:auto_9rem]">
-							<button
-								type="button"
-								onClick={() => onActivate(e)}
-								title={e.name}
-								className="group flex w-full flex-col overflow-hidden rounded-xl bg-surface-1 text-left shadow-[inset_0_0_0_1px_var(--border)] outline-none transition-[transform,box-shadow] duration-150 hover:-translate-y-px hover:shadow-[inset_0_0_0_1px_var(--border-strong)] focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]"
-							>
-								<span className="relative grid aspect-[4/3] w-full place-items-center overflow-hidden bg-surface-2">
-									{thumb ? (
-										<img src={localUrl(routes.projectRaw(projectId), { path: e.path })} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
-									) : (
-										<EntryIcon entry={e} className="size-9" />
+						<li
+							key={e.path}
+							data-path={e.path}
+							data-kind={e.kind}
+							data-drop-dir={e.kind === "dir" ? e.path : undefined}
+							draggable={c.touch === null && c.renaming !== e.path}
+							className={cn("relative [content-visibility:auto] [contain-intrinsic-size:auto_9rem]", c.moving === e.path && "opacity-50")}
+						>
+							{c.renaming === e.path ? (
+								<div className="flex w-full flex-col rounded-xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--accent)]">
+									<span className="overflow-hidden rounded-t-xl">{preview}</span>
+									<div className="px-2 py-1.5">{c.renameBox(e, false)}</div>
+								</div>
+							) : (
+								<button
+									type="button"
+									onClick={() => onActivate(e)}
+									title={e.name}
+									className={cn(
+										"group flex w-full flex-col overflow-hidden rounded-xl bg-surface-1 text-left shadow-[inset_0_0_0_1px_var(--border)] outline-none transition-[transform,box-shadow] duration-150 hover:-translate-y-px hover:shadow-[inset_0_0_0_1px_var(--border-strong)] focus-visible:shadow-[inset_0_0_0_2px_var(--accent)]",
+										(c.dropDir === e.path || c.menuPath === e.path) && "shadow-[inset_0_0_0_2px_var(--accent)] hover:shadow-[inset_0_0_0_2px_var(--accent)]",
+										c.dropDir === e.path && "bg-accent-soft",
 									)}
-								</span>
-								<span className="flex min-w-0 flex-col gap-0.5 px-2.5 py-2">
-									<span className="truncate text-[13px] font-medium">{e.name}</span>
-									<span className="truncate text-2xs text-subtle">{e.kind === "dir" ? t("Folder") : e.size === null ? typeLabel(e) : `${typeLabel(e)} · ${formatBytes(e.size)}`}</span>
-								</span>
-							</button>
+								>
+									{preview}
+									<span className="flex min-w-0 flex-col gap-0.5 px-2.5 py-2">
+										<span className="truncate text-[13px] font-medium">{e.name}</span>
+										<span className="truncate text-2xs text-subtle">{e.kind === "dir" ? t("Folder") : e.size === null ? typeLabel(e) : `${typeLabel(e)} · ${formatBytes(e.size)}`}</span>
+									</span>
+								</button>
+							)}
+							{c.renaming === e.path ? null : <RowControl entry={e} c={c} className="absolute right-1 top-1 bg-overlay/85 shadow-[inset_0_0_0_1px_var(--border)] backdrop-blur" />}
 						</li>
 					);
 				})}

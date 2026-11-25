@@ -45,7 +45,7 @@ export default function GlobalDialogs() {
 		case "create-project":
 			return <ProjectDialog workspaceId={dialog.workspaceId} initialMode={dialog.mode} onClose={close} />;
 		case "create-session":
-			return <SessionDialog projectId={dialog.projectId} onClose={close} />;
+			return <SessionDialog projectId={dialog.projectId} prompt={dialog.prompt} onClose={close} />;
 		case "new-chat":
 			return (
 				<Suspense fallback={null}>
@@ -323,14 +323,14 @@ function ProjectDialog({ workspaceId: initialWs, initialMode, onClose }: { works
 
 const DEFAULT_MODEL = "__default__";
 
-function SessionDialog({ projectId: initialProject, onClose }: { projectId?: string; onClose: () => void }) {
+function SessionDialog({ projectId: initialProject, prompt: initialPrompt = "", onClose }: { projectId?: string; prompt?: string; onClose: () => void }) {
 	const qc = useQueryClient();
 	const navigate = useNavigate();
 	const projects = useProjects();
 	const [projectId, setProjectId] = useState(initialProject ?? "");
 	const [title, setTitle] = useState("");
 	const [model, setModel] = useState(DEFAULT_MODEL);
-	const [prompt, setPrompt] = useState("");
+	const [prompt, setPrompt] = useState(initialPrompt);
 	const models = useQuery({ queryKey: qk.ompModels, queryFn: ({ signal }) => api.get<ModelInfo[]>(routes.ompModels, undefined, { signal }), staleTime: 5 * 60_000 });
 	useEffect(() => {
 		if (!projectId && projects.data?.[0]) setProjectId(projects.data[0].id);
@@ -406,7 +406,17 @@ function SessionDialog({ projectId: initialProject, onClose }: { projectId?: str
 						)}
 					</Field>
 					<Field label={t("First prompt")} hint={t("Optional — sent as soon as the runtime is ready")}>
-						{(id) => <Textarea id={id} value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} />}
+						{(id) => (
+							<Textarea
+								id={id}
+								value={prompt}
+								onChange={(e) => setPrompt(e.target.value)}
+								rows={3}
+								// biome-ignore lint/a11y/noAutofocus: opened from a file's "Add to a new chat": the person goes on with the question
+								autoFocus={initialPrompt !== ""}
+								onFocus={(e) => e.currentTarget.setSelectionRange(e.currentTarget.value.length, e.currentTarget.value.length)}
+							/>
+						)}
 					</Field>
 					<DialogFooter>
 						<Button variant="ghost" onClick={onClose}>
