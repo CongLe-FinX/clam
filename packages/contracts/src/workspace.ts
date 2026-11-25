@@ -87,6 +87,14 @@ export const FileContent = z.object({
 });
 export type FileContent = z.infer<typeof FileContent>;
 
+/** `POST /projects/:id/folder`: create a folder (parents too). */
+export const CreateFolderBody = z.object({ path: z.string().min(1) });
+export type CreateFolderBody = z.infer<typeof CreateFolderBody>;
+
+/** `POST /projects/:id/move`: move or rename a file or folder inside the project (never over an existing entry). */
+export const MoveEntryBody = z.object({ from: z.string().min(1), to: z.string().min(1) });
+export type MoveEntryBody = z.infer<typeof MoveEntryBody>;
+
 /** Directory suggestions when picking a project path. */
 export const DirSuggestion = z.object({ path: z.string(), isGitRepo: z.boolean() });
 export type DirSuggestion = z.infer<typeof DirSuggestion>;

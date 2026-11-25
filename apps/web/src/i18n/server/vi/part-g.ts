@@ -14,5 +14,7 @@ const vi: Catalog = {
 	"No account {account} is available for this session's provider.": "Không có tài khoản {account} cho nhà cung cấp của phiên này.",
 	"\"{rel}\" was changed since you opened it": "\"{rel}\" đã thay đổi kể từ khi bạn mở",
 	"\"{rel}\" was deleted since you opened it": "\"{rel}\" đã bị xóa kể từ khi bạn mở",
+	"\"{rel}\" already exists": "\"{rel}\" đã tồn tại",
+	"A folder cannot be moved into itself": "Không thể chuyển thư mục vào chính nó",
 };
 export default vi;

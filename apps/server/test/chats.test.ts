@@ -281,6 +281,38 @@ describe("projectUpload", () => {
 		expect(readdirSync(project.path).filter((n) => n.endsWith(".tmp"))).toEqual([]);
 	});
 
+	it("creates folders and moves files and folders without replacing anything, never into themselves or out of the project", async () => {
+		const folder = await api(node).post<FileEntry>(`/projects/${project.id}/folder`, { path: "docs/drafts" });
+		expect(folder.status).toBe(201);
+		expect(folder.body).toMatchObject({ path: "docs/drafts", kind: "dir" });
+		expect((await api(node).post(`/projects/${project.id}/folder`, { path: "docs" })).status).toBe(409);
+
+		expect((await upload(project, "a.md", "A")).status).toBe(201);
+		expect((await upload(project, "docs/a.md", "taken")).status).toBe(201);
+		const move = (from: string, to: string) => api(node).post<FileEntry>(`/projects/${project.id}/move`, { from, to });
+
+		// a move onto an existing entry is refused and both files stay as they were
+		expect((await move("a.md", "docs/a.md")).status).toBe(409);
+		expect(readFileSync(path.join(project.path, "a.md"), "utf8")).toBe("A");
+		expect(readFileSync(path.join(project.path, "docs/a.md"), "utf8")).toBe("taken");
+
+		const moved = await move("a.md", "docs/drafts/a.md");
+		expect(moved.status).toBe(200);
+		expect(moved.body).toMatchObject({ path: "docs/drafts/a.md", kind: "file", size: 1 });
+		expect(existsSync(path.join(project.path, "a.md"))).toBe(false);
+		expect(readFileSync(path.join(project.path, "docs/drafts/a.md"), "utf8")).toBe("A");
+
+		// a folder moves with its content, into a parent that is created on the way
+		expect((await move("docs/drafts", "archive/2026/drafts")).body).toMatchObject({ path: "archive/2026/drafts", kind: "dir" });
+		expect(readFileSync(path.join(project.path, "archive/2026/drafts/a.md"), "utf8")).toBe("A");
+
+		expect((await move("archive", "archive/2026/inside")).status).toBe(400);
+		expect((await move("archive", "../out")).status).toBe(400);
+		expect((await move("archive", ".git/x")).status).toBe(403);
+		expect((await move("missing.md", "b.md")).status).toBe(404);
+		expect(existsSync(path.join(project.path, "archive/2026/drafts/a.md"))).toBe(true);
+	});
+
 	it("refuses paths that leave the project, symlinked folders that lead outside, and the .git directory", async () => {
 		const outside = mkdtempSync(path.join(tmpdir(), "clam-outside-"));
 		try {

@@ -130,6 +130,8 @@ export const routes = {
 	projectFile: (id: string) => `/projects/${id}/file`, // GET ?path= → FileContent
 	projectRaw: (id: string) => `/projects/${id}/raw`, // GET ?path=&download=1 → file bytes with its content type (Range supported: video/audio seek, pdf)
 	projectUpload: (id: string) => `/projects/${id}/upload`, // POST raw bytes ?path= (relative, parent dirs created; refuses to overwrite unless &overwrite=1) → FileEntry
+	projectFolder: (id: string) => `/projects/${id}/folder`, // POST CreateFolderBody → 201 FileEntry (parents created; 409 when it exists)
+	projectMove: (id: string) => `/projects/${id}/move`, // POST MoveEntryBody → FileEntry at the new path (409 when the target exists; a folder never moves into itself)
 	dirSuggestions: "/fs/suggest", // GET ?prefix= → DirSuggestion[]
 
 	// agents & sessions

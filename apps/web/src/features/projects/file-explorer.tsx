@@ -8,6 +8,7 @@ import {
 	FilePlus,
 	Folder,
 	FolderOpen,
+	FolderPlus,
 	Link2,
 	RefreshCw,
 	Search,
@@ -16,6 +17,7 @@ import {
 	X,
 } from "lucide-react";
 import { type KeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { t } from "@/i18n";
 import { api, errorText, localUrl } from "@/lib/api";
 import { hasFiles, uploadFile } from "@/lib/upload";
@@ -27,7 +29,7 @@ import { Button } from "@/ui/button";
 import { Tip } from "@/ui/tooltip";
 
 /** Below this panel width the filter collapses into an icon button. */
-const NARROW_PX = 240;
+const NARROW_PX = 270;
 
 export interface FileExplorerProps {
 	projectId: string;
@@ -88,8 +90,10 @@ type Row =
 	| { type: "loading"; key: string; depth: number }
 	| { type: "empty"; key: string; depth: number }
 	| { type: "error"; key: string; depth: number; path: string; message: string }
-	/** The name box of a file being created in `dir` (first row of that folder, like VS Code). */
-	| { type: "create"; key: string; depth: number; dir: string };
+	/** The name box of a file or folder being created in `dir` (first row of that folder, like VS Code). */
+	| { type: "create"; key: string; depth: number; dir: string; kind: NewKind };
+
+type NewKind = "file" | "dir";
 
 const INDENT = 14;
 const BASE_PAD = 8;
@@ -106,7 +110,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 	const qc = useQueryClient();
 	const [expanded, updateExpanded] = useExpanded(projectId);
 	const [filter, setFilter] = useState("");
-	const [creating, setCreating] = useState<{ dir: string } | null>(null);
+	const [creating, setCreating] = useState<{ dir: string; kind: NewKind } | null>(null);
 	const [activeKey, setActiveKey] = useState<string | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const filterRef = useRef<HTMLInputElement>(null);
@@ -167,7 +171,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 		}
 		const out: Row[] = [];
 		const walk = (dir: string, depth: number) => {
-			if (creating?.dir === dir) out.push({ type: "create", key: "create", depth, dir });
+			if (creating?.dir === dir) out.push({ type: "create", key: "create", depth, dir, kind: creating.kind });
 			const st = dirs.get(dir);
 			if (!st || (st.loading && !st.entries)) {
 				out.push({ type: "loading", key: `loading:${dir}`, depth });
@@ -332,27 +336,72 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 	const activeRow = activeIndex >= 0 ? rows[activeIndex] : undefined;
 	const targetDir = activeRow?.type === "entry" ? (activeRow.entry.kind === "dir" ? activeRow.entry.path : parentOf(activeRow.entry.path)) : "";
 
-	/** New file in the selected folder (or the selected file's folder): its folder opens and a name box appears at the top of it. */
-	const startCreate = () => {
+	/** New file or folder in the selected folder (or the selected file's folder): its folder opens and a name box appears at the top of it. */
+	const startCreate = (kind: NewKind) => {
 		setFilter("");
 		setFilterOpen(false);
 		if (targetDir) toggleDir(targetDir, true);
-		setCreating({ dir: targetDir });
+		setCreating({ dir: targetDir, kind });
 	};
-	/** Creates the empty file (a name with `/` creates its folders too) and opens it in the editor. Returns an error to show, if any. */
-	const createFile = async (dir: string, name: string): Promise<string | null> => {
+	/**
+	 * Creates the empty file (and opens it in the editor) or the folder (and selects it); a name with `/` creates its folders too.
+	 * Returns an error to show, if any.
+	 */
+	const create = async (kind: NewKind, dir: string, name: string): Promise<string | null> => {
 		const path = dir ? `${dir}/${name}` : name;
 		try {
-			await uploadFile<FileEntry>(localUrl(routes.projectUpload(projectId), { path }), new File([""], name.split("/").at(-1) ?? name)).promise;
+			if (kind === "dir") await api.post<FileEntry>(routes.projectFolder(projectId), { path });
+			else await uploadFile<FileEntry>(localUrl(routes.projectUpload(projectId), { path }), new File([""], name.split("/").at(-1) ?? name)).promise;
 		} catch (e) {
 			return errorText(e);
 		}
 		setCreating(null);
-		updateExpanded((prev) => new Set([...prev, ...ancestorsOf(path)]));
+		updateExpanded((prev) => new Set([...prev, ...ancestorsOf(path), ...(kind === "dir" ? [path] : [])]));
 		refresh();
 		setActiveKey(path);
-		onOpenFile(path);
+		if (kind === "dir") onSelectDir?.(path);
+		else onOpenFile(path);
 		return null;
+	};
+
+	// Drag a row onto a folder (or a file, meaning its folder; or the empty tree, meaning the project root) to move it there.
+	const [moving, setMoving] = useState<{ path: string; kind: FileEntry["kind"] } | null>(null);
+	const [dropDir, setDropDir] = useState<string | null>(null);
+	const openOnHover = useRef<{ path: string; timer: number } | null>(null);
+	const stopHoverOpen = () => {
+		if (openOnHover.current) window.clearTimeout(openOnHover.current.timer);
+		openOnHover.current = null;
+	};
+	/** The folder the dragged entry would land in under `target`, or null where it cannot go (where it already is, or into itself). */
+	const dropDirAt = (target: EventTarget): string | null => {
+		if (!moving) return null;
+		const row = target instanceof Element ? target.closest<HTMLElement>("[data-path]") : null;
+		const dir = !row ? "" : row.dataset.kind === "dir" ? (row.dataset.path ?? "") : parentOf(row.dataset.path ?? "");
+		if (dir === parentOf(moving.path)) return null;
+		if (moving.kind === "dir" && (dir === moving.path || dir.startsWith(`${moving.path}/`))) return null;
+		return dir;
+	};
+	const endDrag = () => {
+		stopHoverOpen();
+		setMoving(null);
+		setDropDir(null);
+	};
+	const moveEntry = async (from: string, dir: string) => {
+		const name = from.slice(from.lastIndexOf("/") + 1);
+		const to = dir ? `${dir}/${name}` : name;
+		try {
+			await api.post<FileEntry>(routes.projectMove(projectId), { from, to });
+		} catch (e) {
+			toast.error(t("Could not move {name}", { name }), { description: errorText(e) });
+			return;
+		}
+		// The destination opens, and the open folders inside a moved folder stay open at its new place.
+		const renamed = (p: string) => (p === from || p.startsWith(`${from}/`) ? to + p.slice(from.length) : p);
+		updateExpanded((prev) => new Set([...ancestorsOf(to), ...[...prev].map(renamed)]));
+		refresh();
+		setActiveKey(to);
+		// The folder on show beside the tree (Files tab of a project) follows the move; an open file cannot be dragged, Quick Look covers the tree.
+		if (onSelectDir && selectedPath && renamed(selectedPath) !== selectedPath) onSelectDir(renamed(selectedPath));
 	};
 
 	return (
@@ -406,7 +455,10 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 							}}
 							placeholder={t("Filter files")}
 							aria-label={t("Filter loaded files by name")}
-							className="h-7 w-full rounded-md bg-surface-2 pl-7 pr-7 text-base outline-none placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1px_var(--accent)] md:text-xs coarse:h-10"
+							className={cn(
+								"h-7 w-full rounded-md bg-surface-2 pl-7 text-base outline-none placeholder:text-subtle focus-visible:shadow-[inset_0_0_0_1px_var(--accent)] md:text-xs coarse:h-10",
+								filter ? "pr-7" : "pr-2",
+							)}
 						/>
 						{filter ? (
 							<button
@@ -437,8 +489,13 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 							</Button>
 						</Tip>
 						<Tip label={targetDir ? t("New file in /{dir}", { dir: targetDir }) : t("New file")}>
-							<Button variant="ghost" size="icon-sm" aria-label={t("New file")} onClick={startCreate}>
+							<Button variant="ghost" size="icon-sm" aria-label={t("New file")} onClick={() => startCreate("file")}>
 								<FilePlus />
+							</Button>
+						</Tip>
+						<Tip label={targetDir ? t("New folder in /{dir}", { dir: targetDir }) : t("New folder")}>
+							<Button variant="ghost" size="icon-sm" aria-label={t("New folder")} onClick={() => startCreate("dir")}>
+								<FolderPlus />
 							</Button>
 						</Tip>
 						<Tip label={targetDir ? t("Upload to /{dir}", { dir: targetDir }) : t("Upload files")}>
@@ -479,7 +536,49 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 				onFocus={() => {
 					if (activeKey === null && rows[0]?.type === "entry") setActiveKey(rows[0].key);
 				}}
-				className="group/tree scrollbar-thin min-h-0 flex-1 overflow-auto overscroll-contain outline-none"
+				onDragStart={(e) => {
+					const row = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-path]") : null;
+					const path = row?.dataset.path;
+					if (!path) return;
+					e.dataTransfer.effectAllowed = "move";
+					e.dataTransfer.setData("text/plain", path);
+					setMoving({ path, kind: (row.dataset.kind ?? "file") as FileEntry["kind"] });
+				}}
+				onDragOver={(e) => {
+					if (!moving) return;
+					const dir = dropDirAt(e.target);
+					setDropDir(dir);
+					// A closed folder held under the pointer opens, so a deeper folder can be reached.
+					const row = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-path]") : null;
+					const closedDir = row?.dataset.kind === "dir" && row.getAttribute("aria-expanded") === "false" ? row.dataset.path : undefined;
+					if (closedDir !== openOnHover.current?.path) {
+						stopHoverOpen();
+						if (closedDir) openOnHover.current = { path: closedDir, timer: window.setTimeout(() => toggleDir(closedDir, true), 600) };
+					}
+					if (dir === null) return;
+					e.preventDefault();
+					e.dataTransfer.dropEffect = "move";
+				}}
+				onDragLeave={(e) => {
+					if (moving && !(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) {
+						stopHoverOpen();
+						setDropDir(null);
+					}
+				}}
+				onDrop={(e) => {
+					if (!moving) return;
+					const dir = dropDirAt(e.target);
+					const source = moving;
+					endDrag();
+					if (dir === null) return;
+					e.preventDefault();
+					void moveEntry(source.path, dir);
+				}}
+				onDragEnd={endDrag}
+				className={cn(
+					"group/tree scrollbar-thin min-h-0 flex-1 overflow-auto overscroll-contain outline-none transition-[background-color,box-shadow]",
+					dropDir === "" && "bg-accent-soft/50 shadow-[inset_0_0_0_2px_var(--accent)]",
+				)}
 			>
 				{q && rows.length === 0 ? (
 					<p className="px-4 py-6 text-center text-xs text-subtle">{t("No loaded files match “{query}”. Expand folders to load more.", { query: filter.trim() })}</p>
@@ -490,11 +589,12 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 						return (
 							<div key={item.key} className={cn("absolute inset-x-0 top-0", row.type === "create" && "z-10")} style={{ height: rowHeight, transform: `translateY(${item.start}px)` }}>
 								{row.type === "create" ? (
-									<NewFileRow
+									<NewEntryRow
+										kind={row.kind}
 										depth={row.depth}
 										dir={row.dir}
 										taken={new Set((dirs.get(row.dir)?.entries ?? []).map((e) => e.name))}
-										onCreate={createFile}
+										onCreate={create}
 										onCancel={() => setCreating(null)}
 									/>
 								) : (
@@ -503,6 +603,9 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 										row={row}
 										selected={row.type === "entry" && row.key === selectedPath}
 										active={item.index === activeIndex}
+										draggable={!coarse}
+										dragged={row.key === moving?.path}
+										dropTarget={!dropDir ? null : row.key === dropDir ? "folder" : row.key.startsWith(`${dropDir}/`) ? "inside" : null}
 										onActivate={activate}
 										onRetry={refresh}
 										onHoverDir={prefetchDir}
@@ -528,6 +631,9 @@ const TreeRow = memo(function TreeRow({
 	row,
 	selected,
 	active,
+	draggable,
+	dragged,
+	dropTarget,
 	onActivate,
 	onRetry,
 	onHoverDir,
@@ -536,6 +642,12 @@ const TreeRow = memo(function TreeRow({
 	row: Exclude<Row, { type: "create" }>;
 	selected: boolean;
 	active: boolean;
+	/** The row can be dragged onto a folder to move it (the tree handles the drag; touch screens scroll instead). */
+	draggable: boolean;
+	/** This row is being dragged. */
+	dragged: boolean;
+	/** A drag would drop into this folder, or into the folder this row is inside of. */
+	dropTarget: "folder" | "inside" | null;
 	onActivate: (row: Row) => void;
 	onRetry: () => void;
 	onHoverDir: (path: string) => void;
@@ -587,12 +699,18 @@ const TreeRow = memo(function TreeRow({
 			aria-level={row.depth + 1}
 			aria-selected={selected}
 			aria-expanded={isDir ? row.expanded : undefined}
+			data-path={entry.path}
+			data-kind={entry.kind}
+			draggable={draggable}
 			onClick={() => onActivate(row)}
 			onPointerEnter={isDir && !row.expanded ? () => onHoverDir(entry.path) : undefined}
 			className={cn(
 				"relative flex h-full cursor-pointer select-none items-center gap-1.5 pr-3 text-[13px] transition-colors hover:bg-surface-2",
 				selected && "bg-accent-soft text-foreground hover:bg-accent-soft",
 				active && "group-focus-within/tree:shadow-[inset_0_0_0_1px_var(--accent)]",
+				dropTarget && "bg-accent-soft hover:bg-accent-soft",
+				dropTarget === "folder" && "shadow-[inset_0_0_0_1px_var(--accent)]",
+				dragged && "opacity-50",
 			)}
 			style={{ paddingLeft: pad }}
 		>
@@ -618,20 +736,35 @@ const TreeRow = memo(function TreeRow({
 	);
 });
 
-/** Why a name cannot be a new file here, or null. A `/` inside makes folders (`docs/notes.md`); the server confines the path. */
-function nameProblem(name: string, taken: ReadonlySet<string>): string | null {
-	if (!name) return t("Type a name for the file");
-	if (name.startsWith("/") || name.endsWith("/") || name.includes("\\")) return t("Use a file name like notes.md or docs/notes.md");
-	if (name.split("/").some((part) => part === "" || part === "." || part === "..")) return t("Use a file name like notes.md or docs/notes.md");
+/** Why a name cannot be a new file or folder here, or null. A `/` inside makes folders (`docs/notes.md`); the server confines the path. */
+function nameProblem(name: string, taken: ReadonlySet<string>, kind: NewKind): string | null {
+	const shape = kind === "dir" ? t("Use a folder name like assets or docs/assets") : t("Use a file name like notes.md or docs/notes.md");
+	if (!name) return kind === "dir" ? t("Type a name for the folder") : t("Type a name for the file");
+	if (name.startsWith("/") || name.endsWith("/") || name.includes("\\")) return shape;
+	if (name.split("/").some((part) => part === "" || part === "." || part === "..")) return shape;
 	if (taken.has(name.split("/")[0] as string) && !name.includes("/")) return t("{name} already exists here", { name });
 	return null;
 }
 
 /**
- * The name box of a new file, VS Code style: Enter creates the file (and opens it in the editor), Esc cancels, leaving the box with a
- * name creates it too. Problems show right under the box without moving the tree.
+ * The name box of a new file or folder, VS Code style: Enter creates it (a file opens in the editor), Esc cancels, leaving the box with
+ * a name creates it too. Problems show right under the box without moving the tree.
  */
-function NewFileRow({ depth, dir, taken, onCreate, onCancel }: { depth: number; dir: string; taken: ReadonlySet<string>; onCreate: (dir: string, name: string) => Promise<string | null>; onCancel: () => void }) {
+function NewEntryRow({
+	kind,
+	depth,
+	dir,
+	taken,
+	onCreate,
+	onCancel,
+}: {
+	kind: NewKind;
+	depth: number;
+	dir: string;
+	taken: ReadonlySet<string>;
+	onCreate: (kind: NewKind, dir: string, name: string) => Promise<string | null>;
+	onCancel: () => void;
+}) {
 	const [name, setName] = useState("");
 	const [error, setError] = useState<string | null>(null);
 	const busy = useRef(false);
@@ -640,28 +773,37 @@ function NewFileRow({ depth, dir, taken, onCreate, onCancel }: { depth: number; 
 		if (busy.current) return;
 		const value = name.trim();
 		if (!value && fromBlur) return onCancel();
-		const problem = nameProblem(value, taken);
+		const problem = nameProblem(value, taken, kind);
 		if (problem) {
 			if (fromBlur) return onCancel();
 			return setError(problem);
 		}
 		busy.current = true;
-		const failed = await onCreate(dir, value);
+		const failed = await onCreate(kind, dir, value);
 		busy.current = false;
 		if (failed) setError(failed);
 	};
-	const { Icon, tone } = fileIcon(name.trim() || "file");
+	const { Icon, tone } = kind === "dir" ? { Icon: Folder, tone: "text-muted-foreground" } : fileIcon(name.trim() || "file");
+	const label =
+		kind === "dir"
+			? dir
+				? t("Name of the new folder in /{dir}", { dir })
+				: t("Name of the new folder")
+			: dir
+				? t("Name of the new file in /{dir}", { dir })
+				: t("Name of the new file");
 	return (
-		<div className="relative flex h-full items-center gap-1.5 pr-2" style={{ paddingLeft: pad + 20 }}>
+		<div className="relative flex h-full items-center gap-1.5 pr-2" style={{ paddingLeft: pad + (kind === "dir" ? 0 : 20) }}>
+			{kind === "dir" ? <ChevronRight aria-hidden className="size-3.5 shrink-0 text-subtle" /> : null}
 			<Icon aria-hidden className={cn("size-4 shrink-0", tone)} />
 			<input
-				// biome-ignore lint/a11y/noAutofocus: the box exists only because the person just asked for a new file
+				// biome-ignore lint/a11y/noAutofocus: the box exists only because the person just asked for a new file or folder
 				autoFocus
 				value={name}
 				spellCheck={false}
 				autoCapitalize="off"
 				autoCorrect="off"
-				aria-label={dir ? t("Name of the new file in /{dir}", { dir }) : t("Name of the new file")}
+				aria-label={label}
 				aria-invalid={error !== null}
 				onChange={(e) => {
 					setName(e.target.value);
@@ -679,7 +821,7 @@ function NewFileRow({ depth, dir, taken, onCreate, onCancel }: { depth: number; 
 					}
 				}}
 				onBlur={() => void submit(true)}
-				placeholder={t("File name, e.g. notes.md")}
+				placeholder={kind === "dir" ? t("Folder name, e.g. assets") : t("File name, e.g. notes.md")}
 				className={cn(
 					"h-6 min-w-0 flex-1 rounded bg-background px-1.5 font-mono text-base outline-none shadow-[inset_0_0_0_1px_var(--accent)] placeholder:font-sans placeholder:text-subtle md:text-xs coarse:h-8",
 					error && "shadow-[inset_0_0_0_1px_var(--danger)]",

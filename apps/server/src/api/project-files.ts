@@ -1,14 +1,14 @@
 import { randomBytes } from "node:crypto";
-import { lstat, stat } from "node:fs/promises";
+import { lstat, mkdir, rename, stat } from "node:fs/promises";
 import path from "node:path";
-import { ATTACHMENT_MAX_BYTES, routes, type FileEntry, i18nMsg } from "@clam/contracts";
+import { ATTACHMENT_MAX_BYTES, CreateFolderBody, MoveEntryBody, routes, type FileEntry, i18nMsg } from "@clam/contracts";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import type { RoutePluginOptions } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
 import { sendFile } from "../http/file-response.ts";
 import { rawBodyScope } from "../http/raw-body.ts";
-import { resolveInsideRoot } from "../services/files.ts";
+import { normalizeRelativePath, resolveInsideRoot } from "../services/files.ts";
 import { commitNew, receiveToFile, refuseGitDir, resolveWritableTarget } from "../services/file-writes.ts";
 import { checkoutFolder } from "../services/checkouts.ts";
 
@@ -28,8 +28,54 @@ const UploadQuery = z.object({
 	expectedModifiedAt: z.string().optional(),
 });
 
-/** Raw file bytes of a project folder or shared-session worktree (`:id` is a checkout id; preview/download) and raw uploads into it. */
+/** The listing entry of what is at `abs` now (lstat: a symlink is reported as one). */
+async function entryAt(abs: string, rel: string): Promise<FileEntry> {
+	const info = await lstat(abs);
+	const kind = info.isSymbolicLink() ? "symlink" : info.isDirectory() ? "dir" : "file";
+	return { name: path.posix.basename(rel), path: rel, kind, size: kind === "file" ? info.size : null, modifiedAt: info.mtime.toISOString() };
+}
+
+/** Raw file bytes of a project folder or shared-session worktree (`:id` is a checkout id; preview/download), raw uploads into it, new folders and moves. */
 export default async function projectFileRoutes(app: FastifyInstance, { ctx }: RoutePluginOptions): Promise<void> {
+	app.post<{ Params: { id: string } }>(routes.projectFolder(":id"), async (req, reply): Promise<FileEntry> => {
+		const root = await checkoutFolder(ctx, req.params.id);
+		const { rel, abs } = await resolveWritableTarget(root, CreateFolderBody.parse(req.body).path);
+		try {
+			await mkdir(abs);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "EEXIST") throw ApiError.conflict(i18nMsg('"{rel}" already exists', { rel }));
+			throw error;
+		}
+		return reply.status(201).send(await entryAt(abs, rel));
+	});
+
+	/**
+	 * Move or rename one entry inside the project. The entry itself moves (a symlink stays a link); the target's parent folders are created,
+	 * both ends stay inside the project and outside `.git`, an existing target is never replaced, and a folder never moves into itself.
+	 */
+	app.post<{ Params: { id: string } }>(routes.projectMove(":id"), async (req): Promise<FileEntry> => {
+		const root = await checkoutFolder(ctx, req.params.id);
+		const body = MoveEntryBody.parse(req.body);
+		const from = normalizeRelativePath(body.from);
+		const to = normalizeRelativePath(body.to);
+		if (from === "" || to === "") throw ApiError.badRequest(i18nMsg("path must name a file"));
+		refuseGitDir(from);
+		refuseGitDir(to);
+		const slash = from.lastIndexOf("/");
+		const parent = await resolveInsideRoot(root, slash < 0 ? "" : from.slice(0, slash));
+		const source = path.join(parent.abs, from.slice(slash + 1));
+		const info = await lstat(source).catch(() => null);
+		if (!info) throw ApiError.notFound(`Path "${from}"`);
+		if (to === from) return entryAt(source, from);
+		if (info.isDirectory() && to.startsWith(`${from}/`)) throw ApiError.badRequest(i18nMsg("A folder cannot be moved into itself"));
+		const target = await resolveWritableTarget(root, to);
+		const inside = path.relative(source, target.abs);
+		if (info.isDirectory() && !inside.startsWith("..") && !path.isAbsolute(inside)) throw ApiError.badRequest(i18nMsg("A folder cannot be moved into itself"));
+		if (await lstat(target.abs).catch(() => null)) throw ApiError.conflict(i18nMsg('"{rel}" already exists', { rel: target.rel }));
+		await rename(source, target.abs);
+		return entryAt(target.abs, target.rel);
+	});
+
 	app.get<{ Params: { id: string } }>(routes.projectRaw(":id"), { config: { compress: false } }, async (req, reply) => {
 		const root = await checkoutFolder(ctx, req.params.id);
 		const query = RawQuery.parse(req.query);
