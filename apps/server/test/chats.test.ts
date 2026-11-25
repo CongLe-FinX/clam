@@ -311,6 +311,11 @@ describe("projectUpload", () => {
 		expect((await move("archive", ".git/x")).status).toBe(403);
 		expect((await move("missing.md", "b.md")).status).toBe(404);
 		expect(existsSync(path.join(project.path, "archive/2026/drafts/a.md"))).toBe(true);
+
+		// a rename is a move inside the folder; changing only the letter case works on a case-insensitive disk too
+		expect((await move("archive/2026/drafts/a.md", "archive/2026/drafts/Readme.md")).body).toMatchObject({ path: "archive/2026/drafts/Readme.md" });
+		expect((await move("archive/2026/drafts/Readme.md", "archive/2026/drafts/README.md")).status).toBe(200);
+		expect(readdirSync(path.join(project.path, "archive/2026/drafts"))).toEqual(["README.md"]);
 	});
 
 	it("refuses paths that leave the project, symlinked folders that lead outside, and the .git directory", async () => {

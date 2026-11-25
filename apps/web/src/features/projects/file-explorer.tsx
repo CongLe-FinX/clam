@@ -4,12 +4,15 @@ import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	AlertCircle,
+	AtSign,
 	ChevronRight,
+	Copy,
 	FilePlus,
 	Folder,
 	FolderOpen,
 	FolderPlus,
 	Link2,
+	Pencil,
 	RefreshCw,
 	Search,
 	Terminal,
@@ -17,6 +20,7 @@ import {
 	X,
 } from "lucide-react";
 import { type KeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { t } from "@/i18n";
 import { api, errorText, localUrl } from "@/lib/api";
@@ -26,6 +30,8 @@ import { UploadDock, useProjectUploads } from "./uploads.tsx";
 import { qk } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { Button } from "@/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/ui/dropdown-menu";
+import { Kbd } from "@/ui/kbd";
 import { Tip } from "@/ui/tooltip";
 
 /** Below this panel width the filter collapses into an icon button. */
@@ -37,6 +43,8 @@ export interface FileExplorerProps {
 	onOpenFile: (path: string) => void;
 	/** Also called when a folder row is activated (the Files tab shows that folder in its list). */
 	onSelectDir?: (path: string) => void;
+	/** "Add to chat" in a row's right-click menu (absent: no such item): the host puts a mention of the file or folder in its composer. */
+	onReference?: (path: string, dir: boolean) => void;
 	/** Tree only: no toolbar, no upload (the host page provides both). */
 	bare?: boolean;
 	className?: string;
@@ -106,11 +114,16 @@ interface DirState {
 
 // ───────────────────────────── component ─────────────────────────────
 
-export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir, bare, className }: FileExplorerProps) {
+export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir, onReference, bare, className }: FileExplorerProps) {
 	const qc = useQueryClient();
 	const [expanded, updateExpanded] = useExpanded(projectId);
 	const [filter, setFilter] = useState("");
 	const [creating, setCreating] = useState<{ dir: string; kind: NewKind } | null>(null);
+	/** The row whose name is being edited in place (right-click → Rename, or F2). */
+	const [renaming, setRenaming] = useState<string | null>(null);
+	const [menu, setMenu] = useState<{ path: string; dir: boolean; x: number; y: number } | null>(null);
+	/** What a menu item does once the menu has closed: while it is open the menu holds the focus, so a name box or the composer could not take it. */
+	const afterMenu = useRef<(() => void) | null>(null);
 	const [activeKey, setActiveKey] = useState<string | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const filterRef = useRef<HTMLInputElement>(null);
@@ -314,6 +327,12 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 					activate(row);
 				}
 				break;
+			case "F2":
+				if (row?.type === "entry") {
+					e.preventDefault();
+					setRenaming(row.key);
+				}
+				break;
 			default:
 		}
 	};
@@ -386,14 +405,12 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 		setMoving(null);
 		setDropDir(null);
 	};
-	const moveEntry = async (from: string, dir: string) => {
-		const name = from.slice(from.lastIndexOf("/") + 1);
-		const to = dir ? `${dir}/${name}` : name;
+	/** Moves (or renames) one entry; the tree follows it. Returns the error to show, if any. */
+	const moveEntry = async (from: string, to: string): Promise<string | null> => {
 		try {
 			await api.post<FileEntry>(routes.projectMove(projectId), { from, to });
 		} catch (e) {
-			toast.error(t("Could not move {name}", { name }), { description: errorText(e) });
-			return;
+			return errorText(e);
 		}
 		// The destination opens, and the open folders inside a moved folder stay open at its new place.
 		const renamed = (p: string) => (p === from || p.startsWith(`${from}/`) ? to + p.slice(from.length) : p);
@@ -402,6 +419,15 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 		setActiveKey(to);
 		// The folder on show beside the tree (Files tab of a project) follows the move; an open file cannot be dragged, Quick Look covers the tree.
 		if (onSelectDir && selectedPath && renamed(selectedPath) !== selectedPath) onSelectDir(renamed(selectedPath));
+		return null;
+	};
+	const renameEntry = async (path: string, name: string): Promise<string | null> => {
+		const parent = parentOf(path);
+		const failed = await moveEntry(path, parent ? `${parent}/${name}` : name);
+		if (failed) return failed;
+		setRenaming(null);
+		scrollRef.current?.focus();
+		return null;
 	};
 
 	return (
@@ -572,9 +598,23 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 					endDrag();
 					if (dir === null) return;
 					e.preventDefault();
-					void moveEntry(source.path, dir);
+					const name = source.path.slice(source.path.lastIndexOf("/") + 1);
+					void moveEntry(source.path, dir ? `${dir}/${name}` : name).then((error) => {
+						if (error) toast.error(t("Could not move {name}", { name }), { description: error });
+					});
 				}}
 				onDragEnd={endDrag}
+				onContextMenu={(e) => {
+					// A row under the pointer, or (the menu key on the focused tree) the active row.
+					const pointed = e.target instanceof Element ? e.target.closest<HTMLElement>("[data-path]") : null;
+					const el = pointed ?? (e.target === e.currentTarget && activeId ? document.getElementById(activeId) : null);
+					const path = el?.dataset.path;
+					if (!el || !path) return;
+					e.preventDefault();
+					const box = el.getBoundingClientRect();
+					setActiveKey(path);
+					setMenu({ path, dir: el.dataset.kind === "dir", x: pointed ? e.clientX : box.left + 24, y: pointed ? e.clientY : box.bottom });
+				}}
 				className={cn(
 					"group/tree scrollbar-thin min-h-0 flex-1 overflow-auto overscroll-contain outline-none transition-[background-color,box-shadow]",
 					dropDir === "" && "bg-accent-soft/50 shadow-[inset_0_0_0_2px_var(--accent)]",
@@ -587,15 +627,40 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 					{v.getVirtualItems().map((item) => {
 						const row = rows[item.index] as Row;
 						return (
-							<div key={item.key} className={cn("absolute inset-x-0 top-0", row.type === "create" && "z-10")} style={{ height: rowHeight, transform: `translateY(${item.start}px)` }}>
+							<div
+								key={item.key}
+								className={cn("absolute inset-x-0 top-0", (row.type === "create" || row.key === renaming) && "z-10")}
+								style={{ height: rowHeight, transform: `translateY(${item.start}px)` }}
+							>
 								{row.type === "create" ? (
-									<NewEntryRow
+									<NameRow
 										kind={row.kind}
 										depth={row.depth}
-										dir={row.dir}
+										label={
+											row.kind === "dir"
+												? row.dir
+													? t("Name of the new folder in /{dir}", { dir: row.dir })
+													: t("Name of the new folder")
+												: row.dir
+													? t("Name of the new file in /{dir}", { dir: row.dir })
+													: t("Name of the new file")
+										}
 										taken={new Set((dirs.get(row.dir)?.entries ?? []).map((e) => e.name))}
-										onCreate={create}
+										onSubmit={(name) => create(row.kind, row.dir, name)}
 										onCancel={() => setCreating(null)}
+									/>
+								) : row.type === "entry" && row.key === renaming ? (
+									<NameRow
+										kind={row.entry.kind === "dir" ? "dir" : "file"}
+										depth={row.depth}
+										initial={row.entry.name}
+										label={t("New name for {name}", { name: row.entry.name })}
+										taken={new Set((dirs.get(parentOf(row.key))?.entries ?? []).flatMap((e) => (e.path === row.key ? [] : [e.name])))}
+										onSubmit={(name) => renameEntry(row.key, name)}
+										onCancel={() => {
+											setRenaming(null);
+											scrollRef.current?.focus();
+										}}
 									/>
 								) : (
 									<TreeRow
@@ -603,6 +668,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 										row={row}
 										selected={row.type === "entry" && row.key === selectedPath}
 										active={item.index === activeIndex}
+										menuOpen={row.key === menu?.path}
 										draggable={!coarse}
 										dragged={row.key === moving?.path}
 										dropTarget={!dropDir ? null : row.key === dropDir ? "folder" : row.key.startsWith(`${dropDir}/`) ? "inside" : null}
@@ -617,6 +683,56 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 				</div>
 			</div>
 			{bare ? null : <UploadDock uploads={uploads} />}
+			{menu ? (
+				<DropdownMenu
+					open
+					onOpenChange={(open) => {
+						if (!open) setMenu(null);
+					}}
+				>
+					{/* The anchor lives in <body>: a containing ancestor of the panel would otherwise re-base `fixed` and push the menu off screen. */}
+					{createPortal(
+						<DropdownMenuTrigger asChild>
+							<span aria-hidden className="pointer-events-none fixed size-0" style={{ left: menu.x, top: menu.y }} />
+						</DropdownMenuTrigger>,
+						document.body,
+					)}
+					{/* No focus return on close: Rename's name box and the composer take the focus. */}
+					<DropdownMenuContent
+						align="start"
+						sideOffset={2}
+						onCloseAutoFocus={(e) => {
+							e.preventDefault();
+							afterMenu.current?.();
+							afterMenu.current = null;
+						}}
+						className="min-w-48"
+					>
+						{onReference ? (
+							<>
+								<DropdownMenuItem onSelect={() => (afterMenu.current = () => onReference(menu.path, menu.dir))}>
+									<AtSign /> {t("Add to chat")}
+								</DropdownMenuItem>
+								<DropdownMenuSeparator />
+							</>
+						) : null}
+						<DropdownMenuItem onSelect={() => (afterMenu.current = () => setRenaming(menu.path))}>
+							<Pencil /> {t("Rename")}
+							<Kbd className="ml-auto">F2</Kbd>
+						</DropdownMenuItem>
+						<DropdownMenuItem
+							onSelect={() => {
+								void navigator.clipboard.writeText(menu.path).then(
+									() => toast.success(t("Path copied")),
+									(e: unknown) => toast.error(errorText(e)),
+								);
+							}}
+						>
+							<Copy /> {t("Copy path")}
+						</DropdownMenuItem>
+					</DropdownMenuContent>
+				</DropdownMenu>
+			) : null}
 			{dragging ? (
 				<div aria-hidden className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl bg-accent-soft text-xs font-medium text-accent shadow-[inset_0_0_0_2px_var(--accent)]">
 					{targetDir ? t("Drop to upload into /{dir}", { dir: targetDir }) : t("Drop to upload into the project folder")}
@@ -631,6 +747,7 @@ const TreeRow = memo(function TreeRow({
 	row,
 	selected,
 	active,
+	menuOpen,
 	draggable,
 	dragged,
 	dropTarget,
@@ -642,6 +759,8 @@ const TreeRow = memo(function TreeRow({
 	row: Exclude<Row, { type: "create" }>;
 	selected: boolean;
 	active: boolean;
+	/** Its right-click menu is open. */
+	menuOpen: boolean;
 	/** The row can be dragged onto a folder to move it (the tree handles the drag; touch screens scroll instead). */
 	draggable: boolean;
 	/** This row is being dragged. */
@@ -708,6 +827,7 @@ const TreeRow = memo(function TreeRow({
 				"relative flex h-full cursor-pointer select-none items-center gap-1.5 pr-3 text-[13px] transition-colors hover:bg-surface-2",
 				selected && "bg-accent-soft text-foreground hover:bg-accent-soft",
 				active && "group-focus-within/tree:shadow-[inset_0_0_0_1px_var(--accent)]",
+				menuOpen && "shadow-[inset_0_0_0_1px_var(--accent)]",
 				dropTarget && "bg-accent-soft hover:bg-accent-soft",
 				dropTarget === "folder" && "shadow-[inset_0_0_0_1px_var(--accent)]",
 				dragged && "opacity-50",
@@ -747,57 +867,61 @@ function nameProblem(name: string, taken: ReadonlySet<string>, kind: NewKind): s
 }
 
 /**
- * The name box of a new file or folder, VS Code style: Enter creates it (a file opens in the editor), Esc cancels, leaving the box with
- * a name creates it too. Problems show right under the box without moving the tree.
+ * The name box of a new file or folder, or of one being renamed, VS Code style: Enter saves (a new file opens in the editor), Esc
+ * cancels, leaving the box with a valid name saves too; a rename starts with the name selected up to its extension. Problems show
+ * right under the box without moving the tree.
  */
-function NewEntryRow({
+function NameRow({
 	kind,
 	depth,
-	dir,
+	initial = "",
+	label,
 	taken,
-	onCreate,
+	onSubmit,
 	onCancel,
 }: {
 	kind: NewKind;
 	depth: number;
-	dir: string;
+	/** The current name, when renaming. */
+	initial?: string;
+	label: string;
+	/** Names already used in the folder (the entry's own name excluded). */
 	taken: ReadonlySet<string>;
-	onCreate: (kind: NewKind, dir: string, name: string) => Promise<string | null>;
+	onSubmit: (name: string) => Promise<string | null>;
 	onCancel: () => void;
 }) {
-	const [name, setName] = useState("");
+	const [name, setName] = useState(initial);
 	const [error, setError] = useState<string | null>(null);
 	const busy = useRef(false);
+	const input = useRef<HTMLInputElement>(null);
 	const pad = BASE_PAD + depth * INDENT;
+	// biome-ignore lint/correctness/useExhaustiveDependencies: select once, when the box opens
+	useEffect(() => {
+		const dot = initial.lastIndexOf(".");
+		input.current?.setSelectionRange(0, kind === "file" && dot > 0 ? dot : initial.length);
+	}, []);
 	const submit = async (fromBlur: boolean) => {
 		if (busy.current) return;
 		const value = name.trim();
-		if (!value && fromBlur) return onCancel();
+		if ((!value && fromBlur) || (initial && value === initial)) return onCancel();
 		const problem = nameProblem(value, taken, kind);
 		if (problem) {
 			if (fromBlur) return onCancel();
 			return setError(problem);
 		}
 		busy.current = true;
-		const failed = await onCreate(kind, dir, value);
+		const failed = await onSubmit(value);
 		busy.current = false;
 		if (failed) setError(failed);
 	};
 	const { Icon, tone } = kind === "dir" ? { Icon: Folder, tone: "text-muted-foreground" } : fileIcon(name.trim() || "file");
-	const label =
-		kind === "dir"
-			? dir
-				? t("Name of the new folder in /{dir}", { dir })
-				: t("Name of the new folder")
-			: dir
-				? t("Name of the new file in /{dir}", { dir })
-				: t("Name of the new file");
 	return (
 		<div className="relative flex h-full items-center gap-1.5 pr-2" style={{ paddingLeft: pad + (kind === "dir" ? 0 : 20) }}>
 			{kind === "dir" ? <ChevronRight aria-hidden className="size-3.5 shrink-0 text-subtle" /> : null}
 			<Icon aria-hidden className={cn("size-4 shrink-0", tone)} />
 			<input
-				// biome-ignore lint/a11y/noAutofocus: the box exists only because the person just asked for a new file or folder
+				ref={input}
+				// biome-ignore lint/a11y/noAutofocus: the box exists only because the person just asked to name a file or folder
 				autoFocus
 				value={name}
 				spellCheck={false}

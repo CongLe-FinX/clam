@@ -178,5 +178,8 @@ const vi: Catalog = {
 	"Subagent": "Subagent",
 	"Subagent report": "Báo cáo subagent",
 	"The beginning of the report; the agent kept the rest.": "Phần đầu của báo cáo; agent giữ phần còn lại.",
+	"Read into the agent's context": "Đã đưa vào ngữ cảnh của agent",
+	"Not read: {reason}": "Không đọc: {reason}",
+	"{path} · {count} lines": "{path} · {count} dòng",
 };
 export default vi;

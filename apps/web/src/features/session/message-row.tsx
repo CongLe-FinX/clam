@@ -1,5 +1,5 @@
 import type { UiBlock, UiMessage } from "@clam/contracts";
-import { AlertTriangle, BookMarked, Bot, Brain, ChevronRight, Sparkle } from "lucide-react";
+import { AlertTriangle, AtSign, BookMarked, Bot, Brain, ChevronRight, Folder, Sparkle } from "lucide-react";
 import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { CollapsibleText } from "@/components/collapsible-text";
 import { CopyButton } from "@/components/code-block";
@@ -12,8 +12,10 @@ import { RichImage } from "@/components/rich/rich-image";
 import { t } from "@/i18n";
 import { MeshMessageBubble, parseMeshMessage } from "@/features/tasks/mesh-message";
 import { cn, formatCompact, formatCost, formatDate, formatNumber, formatTime } from "@/lib/utils";
+import { fileIcon } from "@/features/projects/file-utils.ts";
 import { type AttachedFileRef, splitAttachmentNote } from "./attachment-note.ts";
 import { AsyncResultCard } from "./async-result.tsx";
+import { parseMentionNotice } from "./file-mention.ts";
 import { useSessionEnv } from "./session-env.ts";
 import { type SessionStream, useMsgRec, useMsgRole, useMsgSlice, useRowOutputs } from "./stream-store.ts";
 import { ToolCard } from "./tool-card.tsx";
@@ -329,10 +331,45 @@ function UserRow({ stream, rowKey }: { stream: SessionStream; rowKey: string }) 
 	);
 }
 
+/** What OMP read into the agent's context for the `@path` mentions of the message above it: one chip per file (opens in Quick Look) or folder. */
+function MentionedFilesRow({ text }: { text: string }) {
+	const env = useSessionEnv();
+	const files = parseMentionNotice(text);
+	return (
+		<div className="ml-auto flex max-w-3xl flex-wrap items-center justify-end gap-1 text-2xs text-subtle">
+			<AtSign aria-hidden className="size-3" />
+			<span className="mr-0.5">{t("Read into the agent's context")}</span>
+			{files.map((f) => {
+				const dir = f.path.endsWith("/");
+				const name = dir ? f.path : f.path.slice(f.path.lastIndexOf("/") + 1);
+				const { Icon, tone } = dir ? { Icon: Folder, tone: "text-muted-foreground" } : fileIcon(name);
+				const title = f.skipped ? t("Not read: {reason}", { reason: f.skipped }) : f.lines !== null ? t("{path} · {count} lines", { path: f.path, count: f.lines }) : f.path;
+				const body = (
+					<>
+						<Icon aria-hidden className={cn("size-3.5 shrink-0", tone)} />
+						<span className={cn("min-w-0 truncate", f.skipped && "line-through")}>{name}</span>
+					</>
+				);
+				const chip = "inline-flex h-6 max-w-64 items-center gap-1 rounded-md bg-surface-1 px-1.5 font-mono text-muted-foreground shadow-[inset_0_0_0_1px_var(--border)]";
+				return dir || f.skipped ? (
+					<span key={f.path} title={title} className={chip}>
+						{body}
+					</span>
+				) : (
+					<button key={f.path} type="button" title={title} onClick={() => env.openFile(f.path)} className={cn(chip, "transition-colors hover:bg-surface-2 hover:text-foreground coarse:h-9")}>
+						{body}
+					</button>
+				);
+			})}
+		</div>
+	);
+}
+
 function CustomRow({ stream, rowKey }: { stream: SessionStream; rowKey: string }) {
 	const rec = useMsgRec(stream, rowKey);
 	if (!rec) return null;
 	if (rec.msg.customType === "async-result") return <AsyncResultCard stream={stream} rowKey={rowKey} text={rec.copyText} />;
+	if (rec.msg.customType === "fileMention") return <MentionedFilesRow text={rec.copyText} />;
 	// Other notices arrive wrapped in a tag (`<system-notice>…</system-notice>`): the tag is framing, not content.
 	const text = rec.copyText.replace(/^\s*<([a-z-]+)>\s*([\s\S]*?)\s*<\/\1>\s*$/i, "$2");
 	return (

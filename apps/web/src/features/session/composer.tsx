@@ -73,12 +73,15 @@ function useBlockedReason(stream: SessionStream): { reason: string | null; resta
 export function Composer({
 	stream,
 	fill,
+	insert,
 	keyboardOpen,
 	className,
 }: {
 	stream: SessionStream;
 	/** Replaces the draft when `nonce` changes (starter prompts). */
 	fill: { text: string; nonce: number } | null;
+	/** Goes into the draft at the cursor when `nonce` changes (a file mention from the Files tab). */
+	insert?: { text: string; nonce: number } | null;
 	keyboardOpen: boolean;
 	className?: string;
 }) {
@@ -126,6 +129,20 @@ export function Composer({
 			ref.current?.focus();
 		}
 	}, [fill]);
+
+	// The inserted text replaces what is selected (else goes in at the cursor), a space apart from the words around it.
+	useEffect(() => {
+		const el = ref.current;
+		if (!insert || !el) return;
+		const before = el.value.slice(0, el.selectionStart);
+		const after = el.value.slice(el.selectionEnd);
+		const head = `${before}${before && !/\s$/.test(before) ? " " : ""}${insert.text}${/^\s/.test(after) ? "" : " "}`;
+		setValue(head + after);
+		requestAnimationFrame(() => {
+			el.focus();
+			el.setSelectionRange(head.length, head.length);
+		});
+	}, [insert]);
 
 	// Auto-grow (fallback for browsers without `field-sizing`): one scrollHeight read per change, plus a single width observer
 	// because wrapping (and so the height) depends on the width.

@@ -33,6 +33,7 @@ import { SubagentsPanel } from "./omp/subagents-panel.tsx";
 import { Composer } from "./composer.tsx";
 import { ContextPanel } from "./context-panel.tsx";
 import { Conversation } from "./conversation.tsx";
+import { fileMention } from "./file-mention.ts";
 import { RuntimeLog } from "./runtime-log.tsx";
 import { SessionHeader } from "./session-header.tsx";
 import { type SessionEnv, SessionEnvContext } from "./session-env.ts";
@@ -316,6 +317,7 @@ function Workspace({ session }: { session: AgentSession }) {
 	qlRef.current = ql;
 	const [sheets, setSheets] = useState({ left: false, right: false, log: false });
 	const [fill, setFill] = useState<{ text: string; nonce: number } | null>(null);
+	const [insert, setInsert] = useState<{ text: string; nonce: number } | null>(null);
 	const [rightTab, setRightTab] = useState<RightTabId>("context");
 	const [addAgent, setAddAgent] = useState(false);
 	const [bottomTab, setBottomTab] = useState<"log" | "git">("log");
@@ -356,6 +358,15 @@ function Workspace({ session }: { session: AgentSession }) {
 
 	/** Stable (the conversation rows are memoized on it): always reads the latest Quick Look state. */
 	const openFile = useCallback((path: string) => qlRef.current.open(path), []);
+	/**
+	 * "Add to chat" in the Files tab: an `@path` mention at the composer's cursor; OMP puts the file (a folder's listing) into the agent's
+	 * context when the message goes. The composer comes into view: the agent's own view of a shared session, the phone's sheet closes.
+	 */
+	const referenceInChat = useCallback((path: string, dir: boolean) => {
+		setView("workspace");
+		setSheets((s) => (s.right ? { ...s, right: false } : s));
+		setInsert({ text: fileMention(path, dir), nonce: Date.now() });
+	}, []);
 	const rightShown = desktop ? !right.collapsed : sheets.right;
 	/** `f` / the Files button: show the Files tab, or hide the panel when it already shows it. */
 	const toggleFiles = useCallback(() => {
@@ -414,7 +425,7 @@ function Workspace({ session }: { session: AgentSession }) {
 			onTab={(t) => (t === "team" ? openTeam() : setRightTab(t))}
 			context={<ContextPanel stream={stream} session={session} project={project} />}
 			memory={<MemoryPanel session={session} />}
-			files={<FileExplorer projectId={session.checkoutId} selectedPath={ql.file ?? null} onOpenFile={openFile} className="h-full" />}
+			files={<FileExplorer projectId={session.checkoutId} selectedPath={ql.file ?? null} onOpenFile={openFile} onReference={readOnly ? undefined : referenceInChat} className="h-full" />}
 			team={<TeamPanel session={session} onAddAgent={() => setAddAgent(true)} />}
 			teamUnread={detail?.shared.unreadMessages ?? 0}
 			agents={<SubagentsPanel store={omp} />}
@@ -476,7 +487,7 @@ function Workspace({ session }: { session: AgentSession }) {
 				</div>
 				<AskDock store={omp} />
 				{readOnly ? null : <PlanChip stream={stream} className="mx-auto w-full max-w-[60rem] shrink-0 px-3 pb-1.5 sm:px-4" />}
-				{session.kind === "mirror" || session.movedTo ? <GroupBar detail={detail} onOpenChat={() => setView("group")} /> : <Composer stream={stream} fill={fill} keyboardOpen={kbInset > 0} />}
+				{session.kind === "mirror" || session.movedTo ? <GroupBar detail={detail} onOpenChat={() => setView("group")} /> : <Composer stream={stream} fill={fill} insert={insert} keyboardOpen={kbInset > 0} />}
 			</div>
 		</div>
 	);

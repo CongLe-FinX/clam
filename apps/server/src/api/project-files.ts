@@ -71,7 +71,9 @@ export default async function projectFileRoutes(app: FastifyInstance, { ctx }: R
 		const target = await resolveWritableTarget(root, to);
 		const inside = path.relative(source, target.abs);
 		if (info.isDirectory() && !inside.startsWith("..") && !path.isAbsolute(inside)) throw ApiError.badRequest(i18nMsg("A folder cannot be moved into itself"));
-		if (await lstat(target.abs).catch(() => null)) throw ApiError.conflict(i18nMsg('"{rel}" already exists', { rel: target.rel }));
+		// On a case-insensitive disk `Readme.md` → `README.md` finds the entry itself at the target: a rename, not a clash.
+		const existing = await lstat(target.abs).catch(() => null);
+		if (existing && !(existing.ino === info.ino && existing.dev === info.dev)) throw ApiError.conflict(i18nMsg('"{rel}" already exists', { rel: target.rel }));
 		await rename(source, target.abs);
 		return entryAt(target.abs, target.rel);
 	});
