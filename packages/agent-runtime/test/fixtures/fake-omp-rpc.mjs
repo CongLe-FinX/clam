@@ -398,6 +398,7 @@ export async function runRpc(argv, env) {
 
 	// --- prompt runs -----------------------------------------------------------------------------------------
 	let run;
+	let pinnedAccount = 0;
 	const queue = [];
 	let aborted = false;
 	let closing = false;
@@ -1400,6 +1401,29 @@ export async function runRpc(argv, env) {
 					return;
 				}
 				if (text === "__noack__") return;
+				if (text.startsWith("/session pin")) {
+					// Builtin slash command: text goes out as command_output frames, then a local-only ack (no agent events).
+					const say = (output) => emit({ type: "command_output", text: output });
+					const selector = text.slice("/session pin".length).trim();
+					const accounts = ["a@example.com", "b@example.com (Org B)"];
+					if (run !== undefined) say("Cannot pin an account while the session is streaming.");
+					else if (selector === "") {
+						say(`OAuth accounts for Fake:\n${accounts.map((a, i) => `${i + 1}. ${a}${i === pinnedAccount ? " (active)" : ""}`).join("\n")}\n\nPin one with \`/session pin <number|email|account id>\`.`);
+					} else {
+						const lower = selector.toLowerCase();
+						const hits = /^\d+$/.test(selector)
+							? [Number(selector) - 1].filter((i) => i >= 0 && i < accounts.length)
+							: accounts.flatMap((a, i) => (a.toLowerCase() === lower || a.split(" ")[0].toLowerCase() === lower ? [i] : []));
+						if (hits.length === 0) say(`No Fake account matches "${selector}".`);
+						else if (hits.length > 1) say(`"${selector}" matches multiple Fake accounts: ${hits.map((i) => accounts[i]).join(", ")}. Use the account number.`);
+						else {
+							pinnedAccount = hits[0];
+							say(`Pinned ${accounts[pinnedAccount]} to this session for Fake.`);
+						}
+					}
+					ok(id, type, { agentInvoked: false });
+					return;
+				}
 				if (run !== undefined) {
 					if (command.streamingBehavior !== "steer" && command.streamingBehavior !== "followUp") {
 						fail(id, type, "Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");

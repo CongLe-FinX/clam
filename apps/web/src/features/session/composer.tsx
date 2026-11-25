@@ -425,7 +425,7 @@ export function Composer({
 								</span>
 							)}
 						</div>
-						<QuotaMeter className="hidden md:inline-flex" />
+						<QuotaMeter className="hidden md:inline-flex" sessionId={sessionId} />
 						{busy ? (
 							<Tip label={aborting ? t("Stopping…") : t("Stop the agent")} shortcut="Esc">
 								{/* Stop sits inside a turning arc: the button itself says the agent is working. */}

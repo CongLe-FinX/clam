@@ -125,6 +125,8 @@ export class OmpSessionRuntime implements RuntimeSession {
 	private background = false;
 	private backgroundTimer: NodeJS.Timeout | null = null;
 	private readonly inflight = new Map<string, string>();
+	/** Collects `command_output` text while a slash command run by `slashCommand` is in flight. */
+	private commandOutput: string[] | null = null;
 	private readonly waiters = new Set<Waiter>();
 	private refreshTimer: NodeJS.Timeout | null = null;
 	private refreshing: Promise<void> | null = null;
@@ -439,6 +441,10 @@ export class OmpSessionRuntime implements RuntimeSession {
 	private onFrame(transport: OmpTransport, frame: OmpFrame | OmpResponseFrame): void {
 		if (transport !== this.transport) return;
 		this.touch();
+		if (frame.type === "command_output") {
+			if (this.commandOutput && typeof frame.text === "string") this.commandOutput.push(frame.text);
+			return;
+		}
 		if (this.hostCalls?.handleFrame(frame as OmpFrame)) return;
 		if (this.roster.handle(frame as OmpFrame)) return;
 		if (frame.type === "response") {
@@ -810,6 +816,49 @@ export class OmpSessionRuntime implements RuntimeSession {
 		await transport.request("compact", customInstructions === undefined ? {} : { customInstructions }, { timeoutMs: HANDOFF_TIMEOUT_MS });
 		this.touch();
 		await this.getState();
+	}
+
+	/** Run a builtin slash command over RPC and return the `command_output` text it printed (nothing reaches the conversation). */
+	private async slashCommand(message: string): Promise<string> {
+		const transport = await this.connected();
+		if (this.agentRunning || !this.settled || this.inflight.size > 0) {
+			throw new AgentRuntimeError("invalid_state", "Cannot change the account while a response is in progress; let the agent settle or abort it first", { state: this.stateName });
+		}
+		if (this.commandOutput) throw new AgentRuntimeError("invalid_state", "Another slash command is still running", { state: this.stateName });
+		const lines: string[] = [];
+		this.commandOutput = lines;
+		try {
+			await transport.request("prompt", { message });
+		} finally {
+			this.commandOutput = null;
+		}
+		this.touch();
+		const text = lines.join("\n").trim();
+		if (text === "Cannot pin an account while the session is streaming.") throw new AgentRuntimeError("invalid_state", text, { state: this.stateName });
+		return text;
+	}
+
+	async oauthAccounts(): Promise<{ provider: string; accounts: Array<{ label: string; active: boolean }> } | null> {
+		const text = await this.slashCommand("/session pin");
+		const header = /^OAuth accounts for (.+):$/m.exec(text);
+		if (!header) return null;
+		const accounts: Array<{ label: string; active: boolean }> = [];
+		for (const line of text.split("\n")) {
+			const row = /^(\d+)\. (.+?)( \(active\))?$/.exec(line.trim());
+			if (row) accounts.push({ label: row[2] as string, active: row[3] !== undefined });
+		}
+		return { provider: header[1] as string, accounts };
+	}
+
+	async pinOauthAccount(label: string): Promise<void> {
+		let text = await this.slashCommand(`/session pin ${label}`);
+		if (/ matches multiple .* accounts/.test(text)) {
+			// An ambiguous label: pin by its 1-based position in a fresh list.
+			const index = (await this.oauthAccounts())?.accounts.findIndex((a) => a.label === label) ?? -1;
+			if (index < 0) throw new AgentRuntimeError("invalid_argument", text, { label });
+			text = await this.slashCommand(`/session pin ${index + 1}`);
+		}
+		if (!/^Pinned .+ to this session for .+\.$/m.test(text)) throw new AgentRuntimeError("invalid_argument", text || `Could not pin ${label}`, { label });
 	}
 
 	async handoffSummary(customInstructions?: string): Promise<{ text: string | null; savedPath: string | null }> {

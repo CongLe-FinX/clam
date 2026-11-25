@@ -11,5 +11,8 @@ const vi: Catalog = {
 	"Folder sizes cannot be measured on this platform": "Không thể đo dung lượng thư mục trên nền tảng này",
 	"OMP is already being updated": "OMP đang được cập nhật",
 	"The checkpoint could not be pushed: {branch} has commits another participant pushed. The lead was asked to pull them in; the next checkpoint pushes.": "Checkpoint chưa push được: {branch} có commit do thành viên khác đã push. Trưởng nhóm đã được nhờ kéo về; checkpoint tiếp theo sẽ push.",
+	"No account {account} is available for this session's provider.": "Không có tài khoản {account} cho nhà cung cấp của phiên này.",
+	"\"{rel}\" was changed since you opened it": "\"{rel}\" đã thay đổi kể từ khi bạn mở",
+	"\"{rel}\" was deleted since you opened it": "\"{rel}\" đã bị xóa kể từ khi bạn mở",
 };
 export default vi;

@@ -3,7 +3,8 @@ import * as D from "@radix-ui/react-dialog";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, Terminal } from "lucide-react";
-import { type KeyboardEvent, useMemo } from "react";
+import { type KeyboardEvent, useCallback, useMemo, useRef, useState } from "react";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { t } from "@/i18n";
 import { api } from "@/lib/api";
 import { qk } from "@/lib/queries";
@@ -47,12 +48,22 @@ export default function QuickLook({ projectId, path, onNavigate, onClose }: Quic
 	const next = index >= 0 ? siblings[index + 1] : undefined;
 	const name = path.split("/").at(-1) ?? path;
 
+	// Closing or switching files while the editor holds unsaved changes asks first.
+	const dirty = useRef(false);
+	const onDirtyChange = useCallback((value: boolean) => {
+		dirty.current = value;
+	}, []);
+	const [pending, setPending] = useState<(() => void) | null>(null);
+	const guarded = (action: () => void) => (dirty.current ? setPending(() => action) : action());
+	const close = () => guarded(onClose);
+	const navigate = (to: string) => guarded(() => onNavigate(to));
+
 	const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
 		if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || ownsArrows(e.target)) return;
 		const to = e.key === "ArrowLeft" ? prev : e.key === "ArrowRight" ? next : undefined;
 		if (!to) return;
 		e.preventDefault();
-		onNavigate(to.path);
+		navigate(to.path);
 	};
 
 	const actions = (
@@ -63,12 +74,12 @@ export default function QuickLook({ projectId, path, onNavigate, onClose }: Quic
 				</span>
 			) : null}
 			<Tip label={t("Previous file")} shortcut="←">
-				<Button variant="ghost" size="icon-sm" aria-label={t("Previous file")} disabled={!prev} onClick={() => prev && onNavigate(prev.path)}>
+				<Button variant="ghost" size="icon-sm" aria-label={t("Previous file")} disabled={!prev} onClick={() => prev && navigate(prev.path)}>
 					<ChevronLeft />
 				</Button>
 			</Tip>
 			<Tip label={t("Next file")} shortcut="→">
-				<Button variant="ghost" size="icon-sm" aria-label={t("Next file")} disabled={!next} onClick={() => next && onNavigate(next.path)}>
+				<Button variant="ghost" size="icon-sm" aria-label={t("Next file")} disabled={!next} onClick={() => next && navigate(next.path)}>
 					<ChevronRight />
 				</Button>
 			</Tip>
@@ -83,12 +94,16 @@ export default function QuickLook({ projectId, path, onNavigate, onClose }: Quic
 	);
 
 	return (
-		<D.Root open onOpenChange={(o) => !o && onClose()}>
+		<D.Root open onOpenChange={(o) => !o && close()}>
 			<D.Portal>
 				<DialogOverlay className="bg-[var(--scrim)] backdrop-blur-[3px]" />
 				<D.Content
 					aria-describedby={undefined}
 					onKeyDown={onKeyDown}
+					// Esc inside the editor belongs to the editor (closing its search panel, dropping extra cursors), never to the sheet.
+					onEscapeKeyDown={(e) => {
+						if (e.target instanceof Element && e.target.closest(".cm-editor")) e.preventDefault();
+					}}
 					// Focus the sheet itself so ← / → work at once and no toolbar tooltip pops open.
 					onOpenAutoFocus={(e) => {
 						e.preventDefault();
@@ -101,10 +116,24 @@ export default function QuickLook({ projectId, path, onNavigate, onClose }: Quic
 					)}
 				>
 					<D.Title className="sr-only">{name}</D.Title>
-					<GrabHandle onClose={onClose} className="mt-0 h-6 sm:hidden" />
-					<FileViewer key={path} projectId={projectId} path={path} onClose={onClose} onOpenFile={onNavigate} actions={actions} className="min-h-0 flex-1" />
+					<GrabHandle onClose={close} className="mt-0 h-6 sm:hidden" />
+					<FileViewer key={path} projectId={projectId} path={path} onClose={close} onOpenFile={navigate} onDirtyChange={onDirtyChange} actions={actions} className="min-h-0 flex-1" />
 				</D.Content>
 			</D.Portal>
+			<ConfirmDialog
+				open={pending !== null}
+				onOpenChange={(open) => !open && setPending(null)}
+				title={t("Discard unsaved changes?")}
+				description={t("Your changes to {name} are not saved.", { name })}
+				confirmLabel={t("Discard")}
+				danger
+				onConfirm={() => {
+					const action = pending;
+					setPending(null);
+					dirty.current = false;
+					action?.();
+				}}
+			/>
 		</D.Root>
 	);
 }

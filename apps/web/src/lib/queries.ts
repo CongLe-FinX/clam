@@ -67,6 +67,7 @@ export const qk = {
 	sessions: (filter: SessionFilter = {}) => ["local", "sessions", { projectId: filter.projectId ?? null, archived: filter.archived ?? false }] as const,
 	session: (id: string) => ["local", "session", id] as const,
 	sessionState: (id: string) => ["local", "session", id, "state"] as const,
+	sessionAccounts: (id: string) => ["local", "session", id, "accounts"] as const,
 	sessionMessages: (id: string) => ["local", "session", id, "messages"] as const,
 	runtime: ["local", "runtime"] as const,
 	tasks: ["local", "tasks"] as const,

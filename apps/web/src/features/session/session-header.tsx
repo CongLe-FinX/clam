@@ -266,7 +266,7 @@ export function SessionHeader({
 				</Tip>
 			) : null}
 
-			{compact ? <QuotaMeter compact /> : null}
+			{compact ? <QuotaMeter compact sessionId={readOnly ? undefined : session.id} /> : null}
 			{compact ? (
 				<PanelToggle label={t("Threads")} pressed={panels.showLeft} onClick={panels.onToggleLeft}>
 					<MessagesSquare />

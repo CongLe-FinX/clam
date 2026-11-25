@@ -82,6 +82,8 @@ export const FileContent = z.object({
 	truncated: z.boolean(),
 	binary: z.boolean(),
 	language: z.string().nullable(),
+	/** The file's modification time as read: an editor saves with it (`expectedModifiedAt`) so a change made meanwhile is not overwritten. */
+	modifiedAt: z.string(),
 });
 export type FileContent = z.infer<typeof FileContent>;
 

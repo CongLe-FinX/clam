@@ -1,5 +1,6 @@
 import {
 	CompactBody,
+	PinAccountBody,
 	CreateSessionBody,
 	PromptBody,
 	SetModelBody,
@@ -154,6 +155,16 @@ export default async function sessionRoutes(app: FastifyInstance, { ctx }: Route
 	app.post(routes.sessionCompact(":id"), async (req) => {
 		const { id } = IdParams.parse(req.params);
 		return sessions.compact(id, CompactBody.parse(req.body ?? {}));
+	});
+
+	app.get(routes.sessionAccounts(":id"), async (req) => {
+		const { id } = IdParams.parse(req.params);
+		return sessions.accounts(id);
+	});
+
+	app.put(routes.sessionAccount(":id"), async (req) => {
+		const { id } = IdParams.parse(req.params);
+		return sessions.pinAccount(id, PinAccountBody.parse(req.body).account);
 	});
 
 	app.post(routes.sessionUiResponse(":id"), async (req, reply) => {

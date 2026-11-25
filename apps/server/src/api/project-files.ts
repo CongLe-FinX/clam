@@ -21,6 +21,11 @@ const RawQuery = z.object({
 const UploadQuery = z.object({
 	path: z.string().min(1, "path is required"),
 	overwrite: z.enum(["1", "0", "true", "false"]).optional(),
+	/**
+	 * Save from an editor: the file's `modifiedAt` when it was read. Replacing is refused (409 `file_changed`) when the file has changed
+	 * or gone since, so an edit made meanwhile (by an agent, a teammate) is never overwritten unseen. Implies `overwrite`.
+	 */
+	expectedModifiedAt: z.string().optional(),
 });
 
 /** Raw file bytes of a project folder or shared-session worktree (`:id` is a checkout id; preview/download) and raw uploads into it. */
@@ -42,10 +47,16 @@ export default async function projectFileRoutes(app: FastifyInstance, { ctx }: R
 		upload.post<{ Params: { id: string } }>(routes.projectUpload(":id"), { bodyLimit: ATTACHMENT_MAX_BYTES }, async (req, reply): Promise<FileEntry> => {
 			const root = await checkoutFolder(ctx, req.params.id);
 			const query = UploadQuery.parse(req.query);
-			const overwrite = query.overwrite === "1" || query.overwrite === "true";
+			const overwrite = query.overwrite === "1" || query.overwrite === "true" || query.expectedModifiedAt !== undefined;
 			const { rel, abs } = await resolveWritableTarget(root, query.path);
 			const existing = await lstat(abs).catch(() => null);
 			if (existing?.isDirectory()) throw ApiError.conflict(i18nMsg('"{rel}" is a folder', { rel }));
+			if (query.expectedModifiedAt !== undefined && existing?.mtime.toISOString() !== query.expectedModifiedAt) {
+				const changed = existing
+					? i18nMsg('"{rel}" was changed since you opened it', { rel })
+					: i18nMsg('"{rel}" was deleted since you opened it', { rel });
+				throw new ApiError(409, "file_changed", changed, { modifiedAt: existing?.mtime.toISOString() ?? null });
+			}
 			if (existing && !overwrite) throw ApiError.conflict(i18nMsg('"{rel}" already exists; send overwrite=1 to replace it', { rel }));
 			const tmp = path.join(path.dirname(abs), `.clam-upload-${randomBytes(6).toString("hex")}.tmp`);
 			const size = await receiveToFile(req.body, tmp, ATTACHMENT_MAX_BYTES, req.headers["content-length"]);

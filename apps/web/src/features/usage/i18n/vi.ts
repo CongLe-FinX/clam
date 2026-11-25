@@ -90,5 +90,11 @@ const vi: Catalog = {
 	"Could not check the quota: {error}": "Không kiểm tra được quota: {error}",
 	"LLM quota: {summary}. Show every account": "Quota LLM: {summary}. Xem từng tài khoản",
 	"LLM quota of every account combined": "Quota LLM gộp tất cả tài khoản",
+	"In use": "Đang dùng",
+	"Use this account for this session": "Dùng tài khoản này cho phiên này",
+	"Stop pinning": "Bỏ ghim",
+	"This session uses {account}": "Phiên này dùng {account}",
+	"This session now uses {account}": "Phiên này giờ dùng {account}",
+	"No longer pinning {account}": "Đã bỏ ghim {account}",
 };
 export default vi;

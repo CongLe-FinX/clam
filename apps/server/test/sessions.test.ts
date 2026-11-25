@@ -242,6 +242,34 @@ describe("sessions", () => {
 		await http.post(`/sessions/${session.id}/abort`);
 	});
 
+	it("pins an OMP account to the session: lists accounts, pins, keeps prompting, and unpins", async () => {
+		const session = await createSession();
+		const listed = await http.get<any>(`/sessions/${session.id}/accounts`);
+		expect(listed.status, JSON.stringify(listed.body)).toBe(200);
+		expect(listed.body).toEqual({
+			provider: "Fake",
+			accounts: [
+				{ label: "a@example.com", active: true },
+				{ label: "b@example.com (Org B)", active: false },
+			],
+			pinned: null,
+		});
+		expect((await http.put<any>(`/sessions/${session.id}/account`, { account: "nobody@example.com" })).status).toBe(400);
+		const pinned = await http.put<any>(`/sessions/${session.id}/account`, { account: "b@example.com (Org B)" });
+		expect(pinned.status, JSON.stringify(pinned.body)).toBe(200);
+		expect(pinned.body.pinned).toBe("b@example.com (Org B)");
+		expect(pinned.body.accounts.map((a: any) => a.active)).toEqual([false, true]);
+
+		const ws = await subscribe(`session:${session.id}`);
+		await http.post(`/sessions/${session.id}/prompt`, { message: "still works", clientId: "after-pin" });
+		await ws.waitFor((f) => f.event?.type === "settled", "settled");
+		expect((await http.get<any>(`/sessions/${session.id}/accounts`)).body.pinned).toBe("b@example.com (Org B)");
+
+		const cleared = await http.put<any>(`/sessions/${session.id}/account`, { account: null });
+		expect(cleared.status).toBe(200);
+		expect(cleared.body.pinned).toBeNull();
+	});
+
 	it("sends the optional first prompt of a new session once the runtime is ready", async () => {
 		const ws = await subscribe("sessions");
 		const session = await createSession({ prompt: "hello from create" });

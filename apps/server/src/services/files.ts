@@ -176,7 +176,7 @@ export async function readProjectFile(root: string, relInput: string): Promise<F
 	if (!info.isFile()) throw ApiError.badRequest(i18nMsg('"{rel}" is not a regular file', { rel }));
 	const language = languageFor(rel);
 	if (info.size > MAX_FILE_BYTES) {
-		return { path: rel, size: info.size, content: null, truncated: true, binary: false, language };
+		return { path: rel, size: info.size, content: null, truncated: true, binary: false, language, modifiedAt: info.mtime.toISOString() };
 	}
 	const handle = await open(abs, "r");
 	let bytes: Buffer;
@@ -200,6 +200,7 @@ export async function readProjectFile(root: string, relInput: string): Promise<F
 		truncated: false,
 		binary: text === null,
 		language,
+		modifiedAt: info.mtime.toISOString(),
 	};
 }
 

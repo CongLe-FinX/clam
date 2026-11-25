@@ -205,6 +205,17 @@ export interface RuntimeSession {
 	 */
 	compact(customInstructions?: string): Promise<void>;
 	/**
+	 * OMP `/session pin` without a selector: the stored OAuth accounts of the current model's provider (`provider` is OMP's display
+	 * name) and the one serving this session (`active`). Null when there is no model or no stored OAuth account. Rejects with
+	 * `invalid_state` while a turn is in progress.
+	 */
+	oauthAccounts(): Promise<{ provider: string; accounts: Array<{ label: string; active: boolean }> } | null>;
+	/**
+	 * OMP `/session pin <label>`: prefer that OAuth account for this session. Rejects with `invalid_state` while a turn is in
+	 * progress and with `invalid_argument` when no account (or more than one) matches.
+	 */
+	pinOauthAccount(label: string): Promise<void>;
+	/**
 	 * Transcript page, newest page first. `messages` inside a page are chronological; `nextCursor`
 	 * points at the older page. Served from an in-memory transcript that includes the in-flight message.
 	 */

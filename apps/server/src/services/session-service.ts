@@ -1,6 +1,6 @@
 import { mkdir, open, realpath, rename, rm } from "node:fs/promises";
 import path from "node:path";
-import type { ApprovalMode, RuntimeSession } from "@clam/agent-runtime";
+import { AgentRuntimeError, type ApprovalMode, type RuntimeSession } from "@clam/agent-runtime";
 import { placeSessionFile, readSubagentRoster, readSubagentTranscript, standardizeProjectDir } from "@clam/agent-runtime/omp";
 import {
 	type AgentSession,
@@ -14,6 +14,7 @@ import {
 	type SetModelBody,
 	type SetThinkingBody,
 	type CompactBody,
+	type SessionAccounts,
 	type UpdateSessionBody,
 	type CancelSubagentResult,
 	type SubagentMessagesPage,
@@ -24,7 +25,7 @@ import {
 	i18nMsg,
 } from "@clam/contracts";
 import type { z } from "zod";
-import { agentSessions, agents, nodeEvents, projects, providerUsage, sharedSessions } from "@clam/database";
+import { agentSessions, agents, nodeEvents, projects, providerUsage, settings, sharedSessions } from "@clam/database";
 import { and, desc, eq, sql } from "drizzle-orm";
 import type { ServerContext } from "../context.ts";
 import { ApiError } from "../http/errors.ts";
@@ -40,6 +41,7 @@ const DEFAULT_TITLE = "New session";
 const MAX_TITLE = 60;
 const IDEMPOTENCY_WINDOW = 256;
 const COST_EPSILON = 1e-9;
+const PINNED_ACCOUNT_KEY = (sessionId: string) => `session.pinnedAccount.${sessionId}`;
 
 /** Per-session runtime settings applied whenever the session's process is (re)spawned: set by the task engine for executing sessions. */
 export interface SpawnOverrides {
@@ -506,6 +508,7 @@ export class SessionService {
 		await this.ctx.runtime.stop(id);
 		await this.drainUsageFor(id);
 		this.ctx.db.delete(agentSessions).where(eq(agentSessions.id, id)).run();
+		this.ctx.db.delete(settings).where(eq(settings.key, PINNED_ACCOUNT_KEY(id))).run();
 		this.promptsByClientId.delete(id);
 		const dir = path.resolve(row.sessionDir);
 		const rel = path.relative(this.sessionsRoot, dir);
@@ -676,6 +679,7 @@ export class SessionService {
 
 	private async sendPrompt(row: SessionRow, input: PromptInput): Promise<{ promptId: string }> {
 		const rt = await this.runtime(row.id);
+		await this.reapplyPinnedAccount(row.id, rt);
 		// M6 project memory: the first prompt of a brand-new session carries the project's memory section (`ContextService.promptWithMemory`).
 		const message = await this.ctx.contexts.promptWithMemory(row, rt, input.message);
 		const accepted = await rt.prompt({ message, clientId: input.clientId, streamingBehavior: input.streamingBehavior, ...(input.images?.length ? { images: input.images } : {}) });
@@ -707,6 +711,66 @@ export class SessionService {
 		const state = await rt.getState();
 		this.persistFromState(id, state);
 		return state;
+	}
+
+	/** OAuth accounts OMP holds for the current model's provider. Empty (provider null) while a turn runs: OMP only answers when idle. */
+	async accounts(id: string): Promise<SessionAccounts> {
+		const row = this.get(id);
+		if (this.isViewed(row)) throw this.readOnlyError(row);
+		const pinned = this.readPinnedAccount(id);
+		const rt = await this.runtime(id);
+		const listed = await rt.oauthAccounts().catch((error: unknown) => {
+			if (error instanceof AgentRuntimeError && error.code === "invalid_state") return null;
+			throw error;
+		});
+		if (!listed) return { provider: null, accounts: [], pinned: pinned?.label ?? null };
+		return { provider: listed.provider, accounts: listed.accounts, pinned: pinned && pinned.provider === listed.provider ? pinned.label : null };
+	}
+
+	/** Pin an OMP account to the session (null stops pinning). The pin is kept and re-applied before prompts so OMP's warm window cannot lapse. */
+	async pinAccount(id: string, account: string | null): Promise<SessionAccounts> {
+		const row = this.get(id);
+		if (this.isViewed(row)) throw this.readOnlyError(row);
+		if (account === null) {
+			this.ctx.db.delete(settings).where(eq(settings.key, PINNED_ACCOUNT_KEY(id))).run();
+			return this.accounts(id);
+		}
+		const rt = await this.runtime(id);
+		const listed = await rt.oauthAccounts();
+		const match = listed?.accounts.find((a) => a.label === account);
+		if (!listed || !match) throw ApiError.badRequest(i18nMsg("No account {account} is available for this session's provider.", { account }));
+		await rt.pinOauthAccount(match.label);
+		const value = JSON.stringify({ provider: listed.provider, label: match.label });
+		const updatedAt = new Date().toISOString();
+		this.ctx.db.insert(settings).values({ key: PINNED_ACCOUNT_KEY(id), value, updatedAt }).onConflictDoUpdate({ target: settings.key, set: { value, updatedAt } }).run();
+		return this.accounts(id);
+	}
+
+	private readPinnedAccount(id: string): { provider: string; label: string } | null {
+		const stored = this.ctx.db.select().from(settings).where(eq(settings.key, PINNED_ACCOUNT_KEY(id))).get();
+		if (!stored) return null;
+		try {
+			const value: unknown = JSON.parse(stored.value);
+			if (value && typeof value === "object" && "provider" in value && "label" in value && typeof value.provider === "string" && typeof value.label === "string") {
+				return { provider: value.provider, label: value.label };
+			}
+		} catch {
+			// fall through: an unreadable pin is no pin
+		}
+		return null;
+	}
+
+	/** Best effort, before a user prompt on an idle session: keep the stored pin fresh for the current model's provider. Never throws. */
+	private async reapplyPinnedAccount(id: string, rt: RuntimeSession): Promise<void> {
+		const pinned = this.readPinnedAccount(id);
+		if (!pinned || rt.status().state !== "ready") return;
+		try {
+			const listed = await rt.oauthAccounts();
+			if (!listed || listed.provider !== pinned.provider || !listed.accounts.some((a) => a.label === pinned.label)) return;
+			await rt.pinOauthAccount(pinned.label);
+		} catch (error) {
+			this.ctx.log.warn({ err: error instanceof Error ? error.message : String(error), sessionId: id }, "could not re-apply the pinned account");
+		}
 	}
 
 	/**

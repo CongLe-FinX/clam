@@ -339,6 +339,16 @@
 .hl-tok { color: var(--shiki-light); }
 .dark .hl-tok { color: var(--shiki-dark); }
 
+/* The file editor (components/code-editor.tsx): GitHub-like token colours that follow the theme. */
+:root {
+	--syn-keyword: #cf222e; --syn-string: #0a3069; --syn-number: #0550ae; --syn-comment: #6e7781; --syn-function: #8250df;
+	--syn-type: #953800; --syn-property: #0550ae; --syn-tag: #116329; --syn-heading: #0550ae; --syn-link: #0969da;
+}
+.dark {
+	--syn-keyword: #ff7b72; --syn-string: #a5d6ff; --syn-number: #79c0ff; --syn-comment: #8b949e; --syn-function: #d2a8ff;
+	--syn-type: #ffa657; --syn-property: #79c0ff; --syn-tag: #7ee787; --syn-heading: #79c0ff; --syn-link: #58a6ff;
+}
+
 /* ───────── Rich chat content: charts, diagrams, lightbox (components/rich/*) ───────── */
 :root {
 	--chart-1: #5240e0; --chart-2: #0a7550; --chart-3: #c77700; --chart-4: #1e66c4;

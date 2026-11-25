@@ -5,6 +5,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	AlertCircle,
 	ChevronRight,
+	FilePlus,
 	Folder,
 	FolderOpen,
 	Link2,
@@ -16,8 +17,8 @@ import {
 } from "lucide-react";
 import { type KeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { t } from "@/i18n";
-import { api, errorText } from "@/lib/api";
-import { hasFiles } from "@/lib/upload";
+import { api, errorText, localUrl } from "@/lib/api";
+import { hasFiles, uploadFile } from "@/lib/upload";
 import { ancestorsOf, byKindThenName, fileIcon, parentOf } from "./file-utils.ts";
 import { UploadDock, useProjectUploads } from "./uploads.tsx";
 import { qk } from "@/lib/queries";
@@ -86,7 +87,9 @@ type Row =
 	| { type: "entry"; key: string; entry: FileEntry; depth: number; expanded: boolean; hint?: string }
 	| { type: "loading"; key: string; depth: number }
 	| { type: "empty"; key: string; depth: number }
-	| { type: "error"; key: string; depth: number; path: string; message: string };
+	| { type: "error"; key: string; depth: number; path: string; message: string }
+	/** The name box of a file being created in `dir` (first row of that folder, like VS Code). */
+	| { type: "create"; key: string; depth: number; dir: string };
 
 const INDENT = 14;
 const BASE_PAD = 8;
@@ -103,6 +106,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 	const qc = useQueryClient();
 	const [expanded, updateExpanded] = useExpanded(projectId);
 	const [filter, setFilter] = useState("");
+	const [creating, setCreating] = useState<{ dir: string } | null>(null);
 	const [activeKey, setActiveKey] = useState<string | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const filterRef = useRef<HTMLInputElement>(null);
@@ -163,6 +167,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 		}
 		const out: Row[] = [];
 		const walk = (dir: string, depth: number) => {
+			if (creating?.dir === dir) out.push({ type: "create", key: "create", depth, dir });
 			const st = dirs.get(dir);
 			if (!st || (st.loading && !st.entries)) {
 				out.push({ type: "loading", key: `loading:${dir}`, depth });
@@ -173,7 +178,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 				return;
 			}
 			if (!st.entries?.length) {
-				out.push({ type: "empty", key: `empty:${dir}`, depth });
+				if (creating?.dir !== dir) out.push({ type: "empty", key: `empty:${dir}`, depth });
 				return;
 			}
 			for (const e of st.entries) {
@@ -184,7 +189,7 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 		};
 		walk("", 0);
 		return out;
-	}, [dirs, expanded, q]);
+	}, [dirs, expanded, q, creating]);
 
 	const v = useVirtualizer({
 		count: rows.length,
@@ -209,6 +214,13 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 			v.scrollToIndex(idx, { align: "auto" });
 		}
 	}, [rows, selectedPath, v]);
+
+	// Bring the new-file box into view when it opens.
+	useEffect(() => {
+		if (!creating) return;
+		const idx = rows.findIndex((r) => r.type === "create");
+		if (idx >= 0) v.scrollToIndex(idx, { align: "auto" });
+	}, [creating, rows, v]);
 
 	const toggleDir = useCallback(
 		(path: string, force?: boolean) => {
@@ -320,6 +332,29 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 	const activeRow = activeIndex >= 0 ? rows[activeIndex] : undefined;
 	const targetDir = activeRow?.type === "entry" ? (activeRow.entry.kind === "dir" ? activeRow.entry.path : parentOf(activeRow.entry.path)) : "";
 
+	/** New file in the selected folder (or the selected file's folder): its folder opens and a name box appears at the top of it. */
+	const startCreate = () => {
+		setFilter("");
+		setFilterOpen(false);
+		if (targetDir) toggleDir(targetDir, true);
+		setCreating({ dir: targetDir });
+	};
+	/** Creates the empty file (a name with `/` creates its folders too) and opens it in the editor. Returns an error to show, if any. */
+	const createFile = async (dir: string, name: string): Promise<string | null> => {
+		const path = dir ? `${dir}/${name}` : name;
+		try {
+			await uploadFile<FileEntry>(localUrl(routes.projectUpload(projectId), { path }), new File([""], name.split("/").at(-1) ?? name)).promise;
+		} catch (e) {
+			return errorText(e);
+		}
+		setCreating(null);
+		updateExpanded((prev) => new Set([...prev, ...ancestorsOf(path)]));
+		refresh();
+		setActiveKey(path);
+		onOpenFile(path);
+		return null;
+	};
+
 	return (
 		<div
 			className={cn("relative flex h-full min-h-0 flex-col bg-surface-1", className)}
@@ -401,6 +436,11 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 								<RefreshCw className={cn(refreshing && "animate-spin")} />
 							</Button>
 						</Tip>
+						<Tip label={targetDir ? t("New file in /{dir}", { dir: targetDir }) : t("New file")}>
+							<Button variant="ghost" size="icon-sm" aria-label={t("New file")} onClick={startCreate}>
+								<FilePlus />
+							</Button>
+						</Tip>
 						<Tip label={targetDir ? t("Upload to /{dir}", { dir: targetDir }) : t("Upload files")}>
 							<Button variant="ghost" size="icon-sm" aria-label={t("Upload files")} onClick={() => fileInput.current?.click()}>
 								<Upload />
@@ -448,16 +488,26 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 					{v.getVirtualItems().map((item) => {
 						const row = rows[item.index] as Row;
 						return (
-							<div key={item.key} className="absolute inset-x-0 top-0" style={{ height: rowHeight, transform: `translateY(${item.start}px)` }}>
-								<TreeRow
-									id={`${treeId}-${item.index}`}
-									row={row}
-									selected={row.type === "entry" && row.key === selectedPath}
-									active={item.index === activeIndex}
-									onActivate={activate}
-									onRetry={refresh}
-									onHoverDir={prefetchDir}
-								/>
+							<div key={item.key} className={cn("absolute inset-x-0 top-0", row.type === "create" && "z-10")} style={{ height: rowHeight, transform: `translateY(${item.start}px)` }}>
+								{row.type === "create" ? (
+									<NewFileRow
+										depth={row.depth}
+										dir={row.dir}
+										taken={new Set((dirs.get(row.dir)?.entries ?? []).map((e) => e.name))}
+										onCreate={createFile}
+										onCancel={() => setCreating(null)}
+									/>
+								) : (
+									<TreeRow
+										id={`${treeId}-${item.index}`}
+										row={row}
+										selected={row.type === "entry" && row.key === selectedPath}
+										active={item.index === activeIndex}
+										onActivate={activate}
+										onRetry={refresh}
+										onHoverDir={prefetchDir}
+									/>
+								)}
 							</div>
 						);
 					})}
@@ -483,7 +533,7 @@ const TreeRow = memo(function TreeRow({
 	onHoverDir,
 }: {
 	id: string;
-	row: Row;
+	row: Exclude<Row, { type: "create" }>;
 	selected: boolean;
 	active: boolean;
 	onActivate: (row: Row) => void;
@@ -567,3 +617,79 @@ const TreeRow = memo(function TreeRow({
 		</div>
 	);
 });
+
+/** Why a name cannot be a new file here, or null. A `/` inside makes folders (`docs/notes.md`); the server confines the path. */
+function nameProblem(name: string, taken: ReadonlySet<string>): string | null {
+	if (!name) return t("Type a name for the file");
+	if (name.startsWith("/") || name.endsWith("/") || name.includes("\\")) return t("Use a file name like notes.md or docs/notes.md");
+	if (name.split("/").some((part) => part === "" || part === "." || part === "..")) return t("Use a file name like notes.md or docs/notes.md");
+	if (taken.has(name.split("/")[0] as string) && !name.includes("/")) return t("{name} already exists here", { name });
+	return null;
+}
+
+/**
+ * The name box of a new file, VS Code style: Enter creates the file (and opens it in the editor), Esc cancels, leaving the box with a
+ * name creates it too. Problems show right under the box without moving the tree.
+ */
+function NewFileRow({ depth, dir, taken, onCreate, onCancel }: { depth: number; dir: string; taken: ReadonlySet<string>; onCreate: (dir: string, name: string) => Promise<string | null>; onCancel: () => void }) {
+	const [name, setName] = useState("");
+	const [error, setError] = useState<string | null>(null);
+	const busy = useRef(false);
+	const pad = BASE_PAD + depth * INDENT;
+	const submit = async (fromBlur: boolean) => {
+		if (busy.current) return;
+		const value = name.trim();
+		if (!value && fromBlur) return onCancel();
+		const problem = nameProblem(value, taken);
+		if (problem) {
+			if (fromBlur) return onCancel();
+			return setError(problem);
+		}
+		busy.current = true;
+		const failed = await onCreate(dir, value);
+		busy.current = false;
+		if (failed) setError(failed);
+	};
+	const { Icon, tone } = fileIcon(name.trim() || "file");
+	return (
+		<div className="relative flex h-full items-center gap-1.5 pr-2" style={{ paddingLeft: pad + 20 }}>
+			<Icon aria-hidden className={cn("size-4 shrink-0", tone)} />
+			<input
+				// biome-ignore lint/a11y/noAutofocus: the box exists only because the person just asked for a new file
+				autoFocus
+				value={name}
+				spellCheck={false}
+				autoCapitalize="off"
+				autoCorrect="off"
+				aria-label={dir ? t("Name of the new file in /{dir}", { dir }) : t("Name of the new file")}
+				aria-invalid={error !== null}
+				onChange={(e) => {
+					setName(e.target.value);
+					setError(null);
+				}}
+				onKeyDown={(e) => {
+					// Every key belongs to the box: the tree's own arrow / Enter handling must not see them.
+					e.stopPropagation();
+					if (e.key === "Enter") {
+						e.preventDefault();
+						void submit(false);
+					} else if (e.key === "Escape") {
+						e.preventDefault();
+						onCancel();
+					}
+				}}
+				onBlur={() => void submit(true)}
+				placeholder={t("File name, e.g. notes.md")}
+				className={cn(
+					"h-6 min-w-0 flex-1 rounded bg-background px-1.5 font-mono text-base outline-none shadow-[inset_0_0_0_1px_var(--accent)] placeholder:font-sans placeholder:text-subtle md:text-xs coarse:h-8",
+					error && "shadow-[inset_0_0_0_1px_var(--danger)]",
+				)}
+			/>
+			{error ? (
+				<div role="alert" className="absolute right-2 top-full z-10 animate-fade-in rounded-md bg-danger px-2 py-1 text-2xs font-medium text-white shadow-pop" style={{ left: pad + 40 }}>
+					{error}
+				</div>
+			) : null}
+		</div>
+	);
+}

@@ -1,16 +1,19 @@
-import { type FileContent, routes } from "@clam/contracts";
-import { useQuery } from "@tanstack/react-query";
+import { type FileContent, type FileEntry, routes } from "@clam/contracts";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { AlertTriangle, ChevronRight, Download, ExternalLink, FileQuestion, FileX, RefreshCw, WrapText, X } from "lucide-react";
-import { Fragment, lazy, type ReactNode, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, Check, ChevronRight, Download, ExternalLink, FileQuestion, FileX, Pencil, RefreshCw, Save, WrapText, X } from "lucide-react";
+import { Fragment, type KeyboardEvent, lazy, type ReactNode, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { CopyButton, HlLineView } from "@/components/code-block";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LazyMarkdown } from "@/components/lazy-markdown";
 import { projectAssets } from "@/components/rich/assets";
 import { t } from "@/i18n";
-import { api, errorText, localUrl } from "@/lib/api";
+import { api, ApiError, errorText, localUrl } from "@/lib/api";
 import { isMediaKind, previewKind } from "@/lib/file-kind";
 import { type HlLine, highlightLines, langFromPath } from "@/lib/highlight";
 import { qk } from "@/lib/queries";
+import { uploadFile } from "@/lib/upload";
 import { cn, formatBytes, formatNumber } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
@@ -27,7 +30,18 @@ export interface FileViewerProps {
 	actions?: ReactNode;
 	/** Open another file of the project in this viewer (a document's links: `[License](LICENSE)`, `docs/guide.md`). */
 	onOpenFile?: (path: string) => void;
+	/** The editor holds changes that are not saved (the host asks before closing or leaving the file). */
+	onDirtyChange?: (dirty: boolean) => void;
 }
+
+/** The text being edited and the version of the file it started from (`seq` remounts the editor with fresh text). */
+interface EditSession {
+	content: string;
+	modifiedAt: string;
+	seq: number;
+}
+
+const CodeEditor = lazy(() => import("@/components/code-editor.tsx"));
 
 const LINE_HEIGHT = 20;
 const WRAP_KEY = "clam.viewer.wrap";
@@ -53,7 +67,8 @@ function useWrapPref() {
 
 const FilePreview = lazy(() => import("@/components/file-preview.tsx"));
 
-export function FileViewer({ projectId, path, className, onClose, actions, onOpenFile }: FileViewerProps) {
+export function FileViewer({ projectId, path, className, onClose, actions, onOpenFile, onDirtyChange }: FileViewerProps) {
+	const qc = useQueryClient();
 	const kind = previewKind(path);
 	const media = isMediaKind(kind);
 	const rawUrl = localUrl(routes.projectRaw(projectId), { path });
@@ -74,13 +89,99 @@ export function FileViewer({ projectId, path, className, onClose, actions, onOpe
 	const data = q.data;
 	const lang = data?.language ?? langFromPath(path);
 	const segments = path.split("/");
+	const name = segments.at(-1) ?? path;
+
+	// ── editing ── the editor starts from the version read (`edit`); `draft` is what is typed. A save sends that version's modifiedAt, so
+	// a change written meanwhile (an agent, a teammate) is reported as a conflict instead of being overwritten.
+	const editable = !media && data != null && data.content !== null && !data.binary && !data.truncated;
+	const [edit, setEdit] = useState<EditSession | null>(null);
+	const [draft, setDraft] = useState<string | null>(null);
+	const [saving, setSaving] = useState(false);
+	const [conflict, setConflict] = useState<{ deleted: boolean } | null>(null);
+	const [confirmDiscard, setConfirmDiscard] = useState(false);
+	const dirty = edit !== null && draft !== null && draft !== edit.content;
+
+	const startEditing = (from: FileContent) => {
+		setEdit((prev) => ({ content: from.content ?? "", modifiedAt: from.modifiedAt, seq: (prev?.seq ?? 0) + 1 }));
+		setDraft(null);
+		setConflict(null);
+	};
+	const stopEditing = () => {
+		setEdit(null);
+		setDraft(null);
+		setConflict(null);
+	};
+
+	// A new (empty) text file opens straight in the editor.
+	const opened = useRef(false);
+	useEffect(() => {
+		if (opened.current || !data || !editable) return;
+		opened.current = true;
+		if (data.size === 0) startEditing(data);
+		// biome-ignore lint/correctness/useExhaustiveDependencies: once per file (the viewer is keyed by path)
+	}, [data, editable]);
+
+	// The file changed on disk while it is open in the editor: without local changes the editor follows it (like VS Code); with
+	// changes it stays, and a banner offers to load the new version.
+	const changedOnDisk = edit !== null && data != null && data.content !== null && data.modifiedAt !== edit.modifiedAt;
+	useEffect(() => {
+		if (changedOnDisk && !dirty && data) startEditing(data);
+		// biome-ignore lint/correctness/useExhaustiveDependencies: reacts to the file's version only
+	}, [changedOnDisk, dirty]);
+
+	useEffect(() => onDirtyChange?.(dirty), [dirty, onDirtyChange]);
+	useEffect(() => {
+		if (!dirty) return;
+		const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+		window.addEventListener("beforeunload", warn);
+		return () => window.removeEventListener("beforeunload", warn);
+	}, [dirty]);
+
+	const save = async (force = false) => {
+		if (!edit || saving) return;
+		const text = draft ?? edit.content;
+		setSaving(true);
+		try {
+			const url = localUrl(routes.projectUpload(projectId), force ? { path, overwrite: 1 } : { path, expectedModifiedAt: edit.modifiedAt });
+			const file = new File([text], name, { type: "text/plain" });
+			const entry = await uploadFile<FileEntry>(url, file).promise;
+			// The upload answers with the written file's stat; these fallbacks only keep the types whole.
+			const modifiedAt = entry.modifiedAt ?? edit.modifiedAt;
+			setEdit({ content: text, modifiedAt, seq: edit.seq });
+			setConflict(null);
+			qc.setQueryData<FileContent>(qk.projectFile(projectId, path), (prev) => (prev ? { ...prev, content: text, size: entry.size ?? file.size, modifiedAt } : prev));
+			void qc.invalidateQueries({ queryKey: ["local", "project", projectId, "files"] });
+			toast.success(t("Saved {name}", { name }));
+		} catch (e) {
+			if (e instanceof ApiError && e.code === "file_changed") {
+				const details = e.details;
+				setConflict({ deleted: typeof details === "object" && details !== null && "modifiedAt" in details && details.modifiedAt === null });
+			} else toast.error(t("Could not save {name}: {error}", { name, error: errorText(e) }));
+		} finally {
+			setSaving(false);
+		}
+	};
+
+	/** Drop the local changes and edit the file as it is on disk now. */
+	const loadFromDisk = async () => {
+		const fresh = await q.refetch();
+		if (fresh.data && fresh.data.content !== null) startEditing(fresh.data);
+		else stopEditing();
+	};
+
+	const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+		// The editor handles Cmd/Ctrl+S itself; this catches it from the toolbar and anywhere else in the viewer.
+		if (!edit || e.defaultPrevented || e.key.toLowerCase() !== "s" || !(e.metaKey || e.ctrlKey)) return;
+		e.preventDefault();
+		void save();
+	};
 
 	// Reset to the rendered preview whenever another markdown file opens.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: intentionally keyed on path
 	useEffect(() => setMode("preview"), [path]);
 
 	return (
-		<div className={cn("flex h-full min-h-0 flex-col bg-background", className)}>
+		<div className={cn("flex h-full min-h-0 flex-col bg-background", className)} onKeyDown={onKeyDown}>
 			<div className="flex h-10 shrink-0 items-center gap-1 border-b px-2 coarse:h-12">
 				<nav aria-label={t("File path")} className="scrollbar-none flex min-w-0 flex-1 items-center overflow-x-auto font-mono text-xs">
 					{segments.map((seg, i) => (
@@ -89,6 +190,9 @@ export function FileViewer({ projectId, path, className, onClose, actions, onOpe
 							<span className={cn("shrink-0 whitespace-nowrap", i === segments.length - 1 ? "font-medium text-foreground" : "text-subtle")}>{seg}</span>
 						</Fragment>
 					))}
+					{dirty ? (
+						<span role="status" aria-label={t("Unsaved changes")} title={t("Unsaved changes")} className="ml-1.5 size-2 shrink-0 animate-pop-in rounded-full bg-accent" />
+					) : null}
 				</nav>
 				{data ? <span className="hidden shrink-0 font-mono text-2xs text-subtle tabular sm:inline">{formatBytes(data.size)}</span> : null}
 				{lang ? (
@@ -96,7 +200,27 @@ export function FileViewer({ projectId, path, className, onClose, actions, onOpe
 						{lang}
 					</Badge>
 				) : null}
-				{previewable && data?.content != null ? (
+				{edit ? (
+					<>
+						<Tip label={t("Save")} shortcut="⌘S">
+							<Button size="sm" variant={dirty ? "primary" : "secondary"} loading={saving} disabled={!dirty && !conflict} onClick={() => void save()} className="shrink-0">
+								<Save /> <span className="hidden sm:inline">{t("Save")}</span>
+							</Button>
+						</Tip>
+						<Tip label={t("Stop editing")}>
+							<Button size="sm" variant="ghost" onClick={() => (dirty ? setConfirmDiscard(true) : stopEditing())} className="shrink-0" aria-label={t("Stop editing")}>
+								<Check /> <span className="hidden sm:inline">{t("Done")}</span>
+							</Button>
+						</Tip>
+					</>
+				) : editable ? (
+					<Tip label={t("Edit this file")}>
+						<Button size="sm" variant="ghost" onClick={() => data && startEditing(data)} className="shrink-0" aria-label={t("Edit this file")}>
+							<Pencil /> <span className="hidden sm:inline">{t("Edit")}</span>
+						</Button>
+					</Tip>
+				) : null}
+				{previewable && data?.content != null && !edit ? (
 					<div role="group" aria-label={isHtml ? t("Page view") : t("Markdown view")} className="flex shrink-0 rounded-md bg-surface-2 p-0.5 text-2xs font-medium">
 						{(["preview", "source"] as const).map((m) => (
 							<button
@@ -111,7 +235,7 @@ export function FileViewer({ projectId, path, className, onClose, actions, onOpe
 						))}
 					</div>
 				) : null}
-				{data?.content != null && !(previewable && mode === "preview") ? (
+				{data?.content != null && (edit || !(previewable && mode === "preview")) ? (
 					<Tip label={wrap ? t("Disable line wrap") : t("Wrap lines")}>
 						<Button variant="ghost" size="icon-sm" aria-label={t("Toggle line wrap")} aria-pressed={wrap} onClick={() => setWrap(!wrap)} className={cn(wrap && "bg-surface-3 text-foreground")}>
 							<WrapText />
@@ -136,7 +260,7 @@ export function FileViewer({ projectId, path, className, onClose, actions, onOpe
 						</a>
 					</Button>
 				</Tip>
-				{data?.content != null ? <CopyButton text={data.content} label={t("Copy contents")} /> : null}
+				{data?.content != null && !edit ? <CopyButton text={data.content} label={t("Copy contents")} /> : null}
 				{onClose ? (
 					<Tip label={t("Close file")}>
 						<Button variant="ghost" size="icon-sm" aria-label={t("Close file")} onClick={onClose}>
@@ -153,8 +277,35 @@ export function FileViewer({ projectId, path, className, onClose, actions, onOpe
 				</div>
 			) : null}
 
+			{edit && (conflict || (changedOnDisk && dirty)) ? (
+				<div role="alert" className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-b bg-warning/10 px-3 py-1.5 text-xs text-warning">
+					<AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+					<span className="min-w-0 flex-1">
+						{conflict?.deleted
+							? t("{name} was deleted after you opened it. Save to create it again with your text.", { name })
+							: t("{name} changed on disk after you opened it (an agent or someone else wrote it).", { name })}
+					</span>
+					<span className="flex shrink-0 items-center gap-1.5">
+						{conflict ? (
+							<Button size="sm" variant="outline" loading={saving} onClick={() => void save(true)}>
+								{conflict.deleted ? t("Save mine") : t("Overwrite with mine")}
+							</Button>
+						) : null}
+						{conflict?.deleted ? null : (
+							<Button size="sm" variant="ghost" onClick={() => void loadFromDisk()}>
+								<RefreshCw /> {t("Load theirs")}
+							</Button>
+						)}
+					</span>
+				</div>
+			) : null}
+
 			<div className="min-h-0 flex-1">
-				{media ? (
+				{edit ? (
+					<Suspense fallback={<ViewerSkeleton />}>
+						<CodeEditor key={`${path}:${edit.seq}`} initial={edit.content} path={path} onChange={setDraft} onSave={() => void save()} wrap={wrap} autoFocus />
+					</Suspense>
+				) : media ? (
 					<Suspense fallback={<ViewerSkeleton />}>
 						<FilePreview key={path} kind={kind} src={rawUrl} name={segments.at(-1) ?? path} />
 					</Suspense>
@@ -196,6 +347,18 @@ export function FileViewer({ projectId, path, className, onClose, actions, onOpe
 					<CodeView content={data.content} lang={lang} wrap={wrap} />
 				)}
 			</div>
+			<ConfirmDialog
+				open={confirmDiscard}
+				onOpenChange={setConfirmDiscard}
+				title={t("Discard unsaved changes?")}
+				description={t("Your changes to {name} are not saved.", { name })}
+				confirmLabel={t("Discard")}
+				danger
+				onConfirm={() => {
+					setConfirmDiscard(false);
+					stopEditing();
+				}}
+			/>
 		</div>
 	);
 }

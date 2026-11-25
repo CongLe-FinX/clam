@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import type { AgentSession, FileEntry, Project, Workspace } from "@clam/contracts";
+import type { AgentSession, FileContent, FileEntry, Project, Workspace } from "@clam/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { api, createFullHarness, type FullHarness } from "./full-harness.ts";
 import { promptAndWait } from "./shared-fixtures.ts";
@@ -253,6 +253,32 @@ describe("projectUpload", () => {
 		expect((await upload(project, "media/inner.txt", "x")).status).toBe(409);
 		mkdirSync(path.join(project.path, "folder"));
 		expect((await upload(project, "folder", "x", { overwrite: true })).status).toBe(409);
+	});
+
+	it("saves from an editor only over the version it read: a change or deletion since then is 409 file_changed and keeps the file", async () => {
+		expect((await upload(project, "draft.md", "v1")).status).toBe(201);
+		const read = (await api(node).get<FileContent>(`/projects/${project.id}/file?path=draft.md`)).body;
+		const save = (text: string, expected: string) =>
+			fetch(`${node.url}/api/local/projects/${project.id}/upload?path=draft.md&expectedModifiedAt=${encodeURIComponent(expected)}`, { method: "POST", headers: { "content-type": "text/plain" }, body: text });
+
+		const saved = await save("v2 from the editor", read.modifiedAt);
+		expect(saved.status).toBe(201);
+		const entry = (await saved.json()) as FileEntry;
+		expect(readFileSync(path.join(project.path, "draft.md"), "utf8")).toBe("v2 from the editor");
+		// what the next read reports is what a following save must send
+		expect((await api(node).get<FileContent>(`/projects/${project.id}/file?path=draft.md`)).body.modifiedAt).toBe(entry.modifiedAt);
+
+		// someone else wrote the file after the editor read it: the stale save is refused and the file keeps their text
+		const stale = await save("v3 from a stale editor", read.modifiedAt);
+		expect(stale.status).toBe(409);
+		expect(await stale.json()).toMatchObject({ error: { code: "file_changed", details: { modifiedAt: entry.modifiedAt } } });
+		expect(readFileSync(path.join(project.path, "draft.md"), "utf8")).toBe("v2 from the editor");
+
+		// deleted meanwhile: refused too, nothing is recreated
+		rmSync(path.join(project.path, "draft.md"));
+		expect((await save("v4", read.modifiedAt)).status).toBe(409);
+		expect(existsSync(path.join(project.path, "draft.md"))).toBe(false);
+		expect(readdirSync(project.path).filter((n) => n.endsWith(".tmp"))).toEqual([]);
 	});
 
 	it("refuses paths that leave the project, symlinked folders that lead outside, and the .git directory", async () => {

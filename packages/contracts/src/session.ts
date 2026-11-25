@@ -161,6 +161,17 @@ export const SetThinkingBody = z.object({ level: z.string().min(1) });
 export const CompactBody = z.object({ instructions: z.string().trim().max(2000).optional() });
 export type CompactBody = z.infer<typeof CompactBody>;
 
+/** OAuth accounts OMP holds for the provider of the session's current model; `pinned` is the account CLAM keeps for this session (null: none). */
+export const SessionAccounts = z.object({
+	provider: z.string().nullable(),
+	accounts: z.array(z.object({ label: z.string(), active: z.boolean() })),
+	pinned: z.string().nullable(),
+});
+export type SessionAccounts = z.infer<typeof SessionAccounts>;
+/** Pin an OMP account label to the session; null stops pinning. */
+export const PinAccountBody = z.object({ account: z.string().trim().min(1).max(500).nullable() });
+export type PinAccountBody = z.infer<typeof PinAccountBody>;
+
 // ---------------------------------------------------------------- messages
 
 export const UiBlock = z.discriminatedUnion("type", [
