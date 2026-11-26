@@ -1,7 +1,8 @@
 import { type FileEntry, routes } from "@clam/contracts";
-import { AtSign, Copy, Folder, GripVertical, MoreHorizontal, Pencil } from "lucide-react";
+import { AtSign, Copy, Folder, GripVertical, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import {
 	type DragEvent as ReactDragEvent,
+	type KeyboardEvent as ReactKeyboardEvent,
 	type MouseEvent as ReactMouseEvent,
 	type PointerEvent as ReactPointerEvent,
 	type ReactNode,
@@ -13,6 +14,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { t } from "@/i18n";
 import { api, errorText, localUrl } from "@/lib/api";
 import { uploadFile } from "@/lib/upload";
@@ -22,9 +24,9 @@ import { Kbd } from "@/ui/kbd";
 import { fileIcon, parentOf } from "./file-utils.ts";
 
 /**
- * What the Files views (the folder tree, the folder list of a project's Files tab) do to the project's files: create, rename and move
- * entries, the right-click menu, and dragging an entry onto a folder — with a mouse (HTML drag and drop), or on a touch screen by the
- * grip a row shows while "drag to move" is on.
+ * What the Files views (the folder tree, the folder list of a project's Files tab) do to the project's files: create, rename, move and
+ * delete entries, the right-click menu, and dragging an entry onto a folder — with a mouse (HTML drag and drop), or on a touch screen by
+ * the grip a row shows while "drag to move" is on.
  */
 
 export type NewKind = "file" | "dir";
@@ -48,6 +50,54 @@ export async function moveEntry(projectId: string, from: string, to: string): Pr
 	} catch (e) {
 		return errorText(e);
 	}
+}
+
+const MAC = typeof navigator !== "undefined" && /mac|iphone|ipad/i.test(navigator.platform);
+/** Shown beside "Delete" in the menu. */
+const DELETE_KEY_LABEL = MAC ? "⌘⌫" : "Del";
+
+/** The key that deletes the focused row: Delete, or ⌘⌫ on a Mac (whose keyboards often have no Delete key), as in Finder and VS Code. */
+export function isDeleteKey(e: ReactKeyboardEvent): boolean {
+	return e.key === "Delete" || (MAC && e.key === "Backspace" && e.metaKey);
+}
+
+/**
+ * Deleting an entry: `ask` opens a confirmation (nothing goes to a trash, so it cannot be undone), confirming deletes it on the server
+ * and then runs `onDeleted`, for the view to drop what pointed into it (open folders, the selection). Render `dialog`.
+ */
+export function useEntryDelete(projectId: string, onDeleted: (path: string) => void) {
+	const [target, setTarget] = useState<{ path: string; dir: boolean } | null>(null);
+	const [busy, setBusy] = useState(false);
+	const name = target ? target.path.slice(target.path.lastIndexOf("/") + 1) : "";
+	const confirm = async () => {
+		if (!target) return;
+		setBusy(true);
+		try {
+			await api.delete(routes.projectFiles(projectId), { path: target.path });
+			toast.success(t("Deleted {name}", { name }));
+			setTarget(null);
+			onDeleted(target.path);
+		} catch (e) {
+			toast.error(t("Could not delete {name}", { name }), { description: errorText(e) });
+		} finally {
+			setBusy(false);
+		}
+	};
+	const dialog = (
+		<ConfirmDialog
+			open={target !== null}
+			onOpenChange={(open) => {
+				if (!open && !busy) setTarget(null);
+			}}
+			title={target?.dir ? t("Delete the folder {name}?", { name }) : t("Delete {name}?", { name })}
+			description={target?.dir ? t("The folder and everything in it are deleted from the project folder. This cannot be undone.") : t("The file is deleted from the project folder. This cannot be undone.")}
+			confirmLabel={t("Delete")}
+			danger
+			loading={busy}
+			onConfirm={() => void confirm()}
+		/>
+	);
+	return { ask: setTarget, dialog };
 }
 
 /** Why a name cannot be a new file or folder here, or null. A `/` inside makes folders (`docs/notes.md`); the server confines the path. */
@@ -91,6 +141,11 @@ export function NameInput({
 	const [name, setName] = useState(initial);
 	const [error, setError] = useState<string | null>(null);
 	const busy = useRef(false);
+	/**
+	 * Set once the box is done (Esc, or saved). The host may move the focus away while closing it (back to the tree), and the blur that
+	 * follows must not save what Esc dropped, or save the same name a second time.
+	 */
+	const closed = useRef(false);
 	const input = useRef<HTMLInputElement>(null);
 	// biome-ignore lint/correctness/useExhaustiveDependencies: select once, when the box opens
 	useEffect(() => {
@@ -98,7 +153,7 @@ export function NameInput({
 		input.current?.setSelectionRange(0, kind === "file" && dot > 0 ? dot : initial.length);
 	}, []);
 	const submit = async (fromBlur: boolean) => {
-		if (busy.current) return;
+		if (busy.current || closed.current) return;
 		const value = name.trim();
 		if ((!value && fromBlur) || (initial && value === initial)) return onCancel();
 		const problem = nameProblem(value, taken, kind);
@@ -110,6 +165,7 @@ export function NameInput({
 		const failed = await onSubmit(value);
 		busy.current = false;
 		if (failed) setError(failed);
+		else closed.current = true;
 	};
 	const { Icon, tone } = kind === "dir" ? { Icon: Folder, tone: "text-muted-foreground" } : fileIcon(name.trim() || "file");
 	return (
@@ -138,6 +194,7 @@ export function NameInput({
 						void submit(false);
 					} else if (e.key === "Escape") {
 						e.preventDefault();
+						closed.current = true;
 						onCancel();
 					}
 				}}
@@ -201,8 +258,20 @@ export function MenuButton({ path, dir, name, onOpen, className }: { path: strin
 	);
 }
 
-/** The menu of a file or folder: Add to chat (when the host offers it), Rename, Copy path. Mount it while `target` is set. */
-export function EntryMenu({ target, reference, onRename, onClose }: { target: MenuTarget; reference?: EntryReference; onRename: (path: string) => void; onClose: () => void }) {
+/** The menu of a file or folder: Add to chat (when the host offers it), Rename, Copy path, Delete. Mount it while `target` is set. */
+export function EntryMenu({
+	target,
+	reference,
+	onRename,
+	onDelete,
+	onClose,
+}: {
+	target: MenuTarget;
+	reference?: EntryReference;
+	onRename: (path: string) => void;
+	onDelete: (entry: { path: string; dir: boolean }) => void;
+	onClose: () => void;
+}) {
 	// What an item does once the menu has closed: while it is open the menu holds the focus, so a name box or a composer could not take it.
 	const after = useRef<(() => void) | null>(null);
 	return (
@@ -250,6 +319,11 @@ export function EntryMenu({ target, reference, onRename, onClose }: { target: Me
 					}}
 				>
 					<Copy /> {t("Copy path")}
+				</DropdownMenuItem>
+				<DropdownMenuSeparator />
+				<DropdownMenuItem danger onSelect={() => (after.current = () => onDelete({ path: target.path, dir: target.dir }))}>
+					<Trash2 /> {t("Delete")}
+					<Kbd className="ml-auto coarse:hidden">{DELETE_KEY_LABEL}</Kbd>
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>

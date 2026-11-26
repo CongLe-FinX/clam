@@ -39,7 +39,22 @@ import { Button } from "@/ui/button";
 import { EmptyState } from "@/ui/empty-state";
 import { Skeleton } from "@/ui/skeleton";
 import { Tip } from "@/ui/tooltip";
-import { coarsePointer, createEntry, DragGrip, EntryMenu, type EntryReference, MenuButton, type MenuTarget, menuTargetOf, moveEntry, NameInput, type NewKind, useEntryDrag } from "./entry-ops.tsx";
+import {
+	coarsePointer,
+	createEntry,
+	DragGrip,
+	EntryMenu,
+	type EntryReference,
+	isDeleteKey,
+	MenuButton,
+	type MenuTarget,
+	menuTargetOf,
+	moveEntry,
+	NameInput,
+	type NewKind,
+	useEntryDelete,
+	useEntryDrag,
+} from "./entry-ops.tsx";
 import { FileExplorer } from "./file-explorer.tsx";
 import { byKindThenName, fileIcon, parentOf } from "./file-utils.ts";
 import { UploadDock, useProjectUploads } from "./uploads.tsx";
@@ -246,6 +261,7 @@ function FolderPane({
 			});
 		},
 	});
+	const removal = useEntryDelete(projectId, refresh);
 	const controls: RowControls = {
 		touch: coarsePointer ? (touchMove ? "drag" : "menu") : null,
 		moving: drag.moving,
@@ -434,9 +450,15 @@ function FolderPane({
 				}}
 				onKeyDown={(e) => {
 					const row = document.activeElement instanceof HTMLElement ? document.activeElement.closest<HTMLElement>("[data-path]") : null;
-					if (e.key !== "F2" || !row?.dataset.path) return;
-					e.preventDefault();
-					setRenaming(row.dataset.path);
+					const path = row?.dataset.path;
+					if (!row || !path) return;
+					if (e.key === "F2") {
+						e.preventDefault();
+						setRenaming(path);
+					} else if (isDeleteKey(e)) {
+						e.preventDefault();
+						removal.ask({ path, dir: row.dataset.kind === "dir" });
+					}
 				}}
 				className={cn("flex min-h-0 flex-1 flex-col transition-[background-color,box-shadow]", drag.dropDir === dir && "bg-accent-soft/50 shadow-[inset_0_0_0_2px_var(--accent)]")}
 			>
@@ -484,7 +506,8 @@ function FolderPane({
 				</div>
 			</div>
 			<UploadDock uploads={uploads} />
-			{menu ? <EntryMenu target={menu} reference={reference} onRename={setRenaming} onClose={() => setMenu(null)} /> : null}
+			{menu ? <EntryMenu target={menu} reference={reference} onRename={setRenaming} onDelete={removal.ask} onClose={() => setMenu(null)} /> : null}
+			{removal.dialog}
 			{drag.ghost}
 			{dragging ? (
 				<div aria-hidden className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl bg-accent-soft text-xs font-medium text-accent shadow-[inset_0_0_0_2px_var(--accent)]">

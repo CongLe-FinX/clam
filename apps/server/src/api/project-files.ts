@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, rename, stat } from "node:fs/promises";
+import { lstat, mkdir, rename, rm, stat } from "node:fs/promises";
+import type { Stats } from "node:fs";
 import path from "node:path";
 import { ATTACHMENT_MAX_BYTES, CreateFolderBody, MoveEntryBody, routes, type FileEntry, i18nMsg } from "@clam/contracts";
 import type { FastifyInstance } from "fastify";
@@ -27,6 +28,7 @@ const UploadQuery = z.object({
 	 */
 	expectedModifiedAt: z.string().optional(),
 });
+const DeleteQuery = z.object({ path: z.string().min(1, "path is required") });
 
 /** The listing entry of what is at `abs` now (lstat: a symlink is reported as one). */
 async function entryAt(abs: string, rel: string): Promise<FileEntry> {
@@ -35,7 +37,23 @@ async function entryAt(abs: string, rel: string): Promise<FileEntry> {
 	return { name: path.posix.basename(rel), path: rel, kind, size: kind === "file" ? info.size : null, modifiedAt: info.mtime.toISOString() };
 }
 
-/** Raw file bytes of a project folder or shared-session worktree (`:id` is a checkout id; preview/download), raw uploads into it, new folders and moves. */
+/**
+ * An existing entry of the project by its relative path, never the root and never inside `.git`. Its folder is resolved inside the
+ * project (a symlinked folder leading out is refused); the entry itself is not followed, so a symlink is the link.
+ */
+async function existingEntry(root: string, input: string): Promise<{ rel: string; abs: string; info: Stats }> {
+	const rel = normalizeRelativePath(input);
+	if (rel === "") throw ApiError.badRequest(i18nMsg("path must name a file"));
+	refuseGitDir(rel);
+	const slash = rel.lastIndexOf("/");
+	const parent = await resolveInsideRoot(root, slash < 0 ? "" : rel.slice(0, slash));
+	const abs = path.join(parent.abs, rel.slice(slash + 1));
+	const info = await lstat(abs).catch(() => null);
+	if (!info) throw ApiError.notFound(`Path "${rel}"`);
+	return { rel, abs, info };
+}
+
+/** Raw file bytes of a project folder or shared-session worktree (`:id` is a checkout id; preview/download), raw uploads into it, new folders, moves and deletes. */
 export default async function projectFileRoutes(app: FastifyInstance, { ctx }: RoutePluginOptions): Promise<void> {
 	app.post<{ Params: { id: string } }>(routes.projectFolder(":id"), async (req, reply): Promise<FileEntry> => {
 		const root = await checkoutFolder(ctx, req.params.id);
@@ -56,16 +74,10 @@ export default async function projectFileRoutes(app: FastifyInstance, { ctx }: R
 	app.post<{ Params: { id: string } }>(routes.projectMove(":id"), async (req): Promise<FileEntry> => {
 		const root = await checkoutFolder(ctx, req.params.id);
 		const body = MoveEntryBody.parse(req.body);
-		const from = normalizeRelativePath(body.from);
+		const { rel: from, abs: source, info } = await existingEntry(root, body.from);
 		const to = normalizeRelativePath(body.to);
-		if (from === "" || to === "") throw ApiError.badRequest(i18nMsg("path must name a file"));
-		refuseGitDir(from);
+		if (to === "") throw ApiError.badRequest(i18nMsg("path must name a file"));
 		refuseGitDir(to);
-		const slash = from.lastIndexOf("/");
-		const parent = await resolveInsideRoot(root, slash < 0 ? "" : from.slice(0, slash));
-		const source = path.join(parent.abs, from.slice(slash + 1));
-		const info = await lstat(source).catch(() => null);
-		if (!info) throw ApiError.notFound(`Path "${from}"`);
 		if (to === from) return entryAt(source, from);
 		if (info.isDirectory() && to.startsWith(`${from}/`)) throw ApiError.badRequest(i18nMsg("A folder cannot be moved into itself"));
 		const target = await resolveWritableTarget(root, to);
@@ -76,6 +88,14 @@ export default async function projectFileRoutes(app: FastifyInstance, { ctx }: R
 		if (existing && !(existing.ino === info.ino && existing.dev === info.dev)) throw ApiError.conflict(i18nMsg('"{rel}" already exists', { rel: target.rel }));
 		await rename(source, target.abs);
 		return entryAt(target.abs, target.rel);
+	});
+
+	/** Delete one entry: a file, a symlink (the link, never what it points to) or a folder with everything in it. No trash: it is gone. */
+	app.delete<{ Params: { id: string } }>(routes.projectFiles(":id"), async (req, reply) => {
+		const root = await checkoutFolder(ctx, req.params.id);
+		const { abs, info } = await existingEntry(root, DeleteQuery.parse(req.query).path);
+		await rm(abs, { recursive: info.isDirectory() });
+		return reply.status(204).send();
 	});
 
 	app.get<{ Params: { id: string } }>(routes.projectRaw(":id"), { config: { compress: false } }, async (req, reply) => {

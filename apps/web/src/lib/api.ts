@@ -76,7 +76,7 @@ export const api = {
 	post: <T = void>(path: string, body?: unknown, opts?: RequestOpts) => request<T>("POST", path, undefined, body ?? undefined, opts),
 	put: <T>(path: string, body?: unknown, opts?: RequestOpts) => request<T>("PUT", path, undefined, body ?? undefined, opts),
 	patch: <T>(path: string, body?: unknown, opts?: RequestOpts) => request<T>("PATCH", path, undefined, body ?? undefined, opts),
-	delete: <T = void>(path: string, opts?: RequestOpts) => request<T>("DELETE", path, undefined, undefined, opts),
+	delete: <T = void>(path: string, query?: Query, opts?: RequestOpts) => request<T>("DELETE", path, query, undefined, opts),
 };
 
 export function errorMessage(e: unknown): string {

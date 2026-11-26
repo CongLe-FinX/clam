@@ -318,6 +318,36 @@ describe("projectUpload", () => {
 		expect(readdirSync(path.join(project.path, "archive/2026/drafts"))).toEqual(["README.md"]);
 	});
 
+	it("deletes a file, a folder with its content and a symlink (never what it points to); never the root, .git or outside the project", async () => {
+		const outside = mkdtempSync(path.join(tmpdir(), "clam-outside-"));
+		try {
+			writeFileSync(path.join(outside, "keep.txt"), "keep");
+			symlinkSync(outside, path.join(project.path, "linked-dir"));
+			expect((await upload(project, "docs/drafts/a.md", "A")).status).toBe(201);
+			expect((await upload(project, "notes.md", "N")).status).toBe(201);
+			const del = (p: string) => fetch(`${node.url}/api/local/projects/${project.id}/files?path=${encodeURIComponent(p)}`, { method: "DELETE" });
+
+			expect((await del("notes.md")).status).toBe(204);
+			expect(existsSync(path.join(project.path, "notes.md"))).toBe(false);
+			expect((await del("docs")).status).toBe(204);
+			expect(existsSync(path.join(project.path, "docs"))).toBe(false);
+
+			// through the link is outside the project; the link itself goes, and what it points to stays whole
+			expect((await del("linked-dir/keep.txt")).status).toBe(403);
+			expect((await del("linked-dir")).status).toBe(204);
+			expect(existsSync(path.join(project.path, "linked-dir"))).toBe(false);
+			expect(readFileSync(path.join(outside, "keep.txt"), "utf8")).toBe("keep");
+
+			expect((await del("")).status).toBe(400);
+			expect((await del(".")).status).toBe(400);
+			expect((await del("../x")).status).toBe(400);
+			expect((await del(".git")).status).toBe(403);
+			expect((await del("missing.md")).status).toBe(404);
+		} finally {
+			rmSync(outside, { recursive: true, force: true });
+		}
+	});
+
 	it("refuses paths that leave the project, symlinked folders that lead outside, and the .git directory", async () => {
 		const outside = mkdtempSync(path.join(tmpdir(), "clam-outside-"));
 		try {

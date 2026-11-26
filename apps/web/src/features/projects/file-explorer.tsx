@@ -8,7 +8,22 @@ import { toast } from "sonner";
 import { t } from "@/i18n";
 import { api, errorText } from "@/lib/api";
 import { hasFiles } from "@/lib/upload";
-import { coarsePointer, createEntry, DragGrip, EntryMenu, type EntryReference, MenuButton, type MenuTarget, menuTargetOf, moveEntry, NameInput, type NewKind, useEntryDrag } from "./entry-ops.tsx";
+import {
+	coarsePointer,
+	createEntry,
+	DragGrip,
+	EntryMenu,
+	type EntryReference,
+	isDeleteKey,
+	MenuButton,
+	type MenuTarget,
+	menuTargetOf,
+	moveEntry,
+	NameInput,
+	type NewKind,
+	useEntryDelete,
+	useEntryDrag,
+} from "./entry-ops.tsx";
 import { ancestorsOf, byKindThenName, fileIcon, parentOf } from "./file-utils.ts";
 import { UploadDock, useProjectUploads } from "./uploads.tsx";
 import { qk } from "@/lib/queries";
@@ -312,6 +327,10 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 				}
 				break;
 			default:
+				if (row?.type === "entry" && isDeleteKey(e)) {
+					e.preventDefault();
+					removal.ask({ path: row.key, dir: row.entry.kind === "dir" });
+				}
 		}
 	};
 
@@ -389,6 +408,14 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 			const path = row.dataset.path;
 			if (path && row.dataset.kind === "dir" && row.getAttribute("aria-expanded") === "false") toggleDir(path, true);
 		},
+	});
+	// A deleted entry takes with it the open folders inside it; the active row and the folder on show fall back to its folder.
+	const removal = useEntryDelete(projectId, (path) => {
+		updateExpanded((prev) => new Set([...prev].filter((p) => p !== path && !p.startsWith(`${path}/`))));
+		refresh();
+		setActiveKey(parentOf(path) || null);
+		if (onSelectDir && selectedPath && (selectedPath === path || selectedPath.startsWith(`${path}/`))) onSelectDir(parentOf(path));
+		scrollRef.current?.focus();
 	});
 
 	return (
@@ -611,7 +638,8 @@ export function FileExplorer({ projectId, selectedPath, onOpenFile, onSelectDir,
 				</div>
 			</div>
 			{bare ? null : <UploadDock uploads={uploads} />}
-			{menu ? <EntryMenu target={menu} reference={reference} onRename={setRenaming} onClose={() => setMenu(null)} /> : null}
+			{menu ? <EntryMenu target={menu} reference={reference} onRename={setRenaming} onDelete={removal.ask} onClose={() => setMenu(null)} /> : null}
+			{removal.dialog}
 			{drag.ghost}
 			{dragging ? (
 				<div aria-hidden className="pointer-events-none absolute inset-1 z-10 grid place-items-center rounded-xl bg-accent-soft text-xs font-medium text-accent shadow-[inset_0_0_0_2px_var(--accent)]">

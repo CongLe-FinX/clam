@@ -126,7 +126,7 @@ export const routes = {
 	workspace: (id: string) => `/workspaces/${id}`, // GET · PATCH UpdateWorkspaceBody · DELETE
 	projects: "/projects", // GET ?workspaceId → Project[] · POST CreateProjectBody → Project
 	project: (id: string) => `/projects/${id}`, // GET · PATCH UpdateProjectBody · DELETE
-	projectFiles: (id: string) => `/projects/${id}/files`, // GET ?path= → FileEntry[] (one directory level)
+	projectFiles: (id: string) => `/projects/${id}/files`, // GET ?path= → FileEntry[] (one directory level) · DELETE ?path= → 204 (a file, a symlink itself, or a folder with its content; never the root or .git)
 	projectFile: (id: string) => `/projects/${id}/file`, // GET ?path= → FileContent
 	projectRaw: (id: string) => `/projects/${id}/raw`, // GET ?path=&download=1 → file bytes with its content type (Range supported: video/audio seek, pdf)
 	projectUpload: (id: string) => `/projects/${id}/upload`, // POST raw bytes ?path= (relative, parent dirs created; refuses to overwrite unless &overwrite=1) → FileEntry
