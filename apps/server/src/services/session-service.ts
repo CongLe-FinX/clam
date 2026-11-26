@@ -43,6 +43,15 @@ const IDEMPOTENCY_WINDOW = 256;
 const COST_EPSILON = 1e-9;
 const PINNED_ACCOUNT_KEY = (sessionId: string) => `session.pinnedAccount.${sessionId}`;
 
+type AccountList = { provider: string; accounts: Array<{ label: string; active: boolean }> };
+
+/** An OMP account label (`share.app8@x.com (Galaxy FinX)`) is the account `wanted` names: the same label, or its email alone; any case. */
+function sameAccount(label: string, wanted: string): boolean {
+	const l = label.toLowerCase();
+	const w = wanted.toLowerCase();
+	return l === w || l.startsWith(`${w} (`);
+}
+
 /** Per-session runtime settings applied whenever the session's process is (re)spawned: set by the task engine for executing sessions. */
 export interface SpawnOverrides {
 	approvalMode?: ApprovalMode;
@@ -120,6 +129,8 @@ export class SessionService {
 	private readonly spawnOverrides = new Map<string, SpawnOverrides>();
 	/** Conversations being moved to a new folder (`relocateConversation`): concurrent openers wait for the one move. */
 	private readonly relocating = new Map<string, Promise<void>>();
+	/** The account list OMP gave last per session: OMP answers only between turns, and a running agent must still be pinnable. */
+	private readonly accountLists = new Map<string, AccountList>();
 	private started = false;
 	private views: SessionViews | null = null;
 	private removeGuard: SessionRemoveGuard | null = null;
@@ -187,6 +198,9 @@ export class SessionService {
 		if (event.type === "settled") {
 			this.touch(sessionId);
 			this.queueUsageFlush(sessionId);
+			// A pin chosen mid-turn (or one whose warm window lapsed during a long turn) takes effect now, before any queued work.
+			const rt = this.ctx.runtime.get(sessionId);
+			if (rt && this.readPinnedAccount(sessionId)) void this.reapplyPinnedAccount(sessionId, rt);
 		} else if (event.type === "state") {
 			this.persistFromState(sessionId, event.state);
 		} else if (event.type === "ui_request" || event.type === "ui_request_resolved") {
@@ -510,6 +524,7 @@ export class SessionService {
 		this.ctx.db.delete(agentSessions).where(eq(agentSessions.id, id)).run();
 		this.ctx.db.delete(settings).where(eq(settings.key, PINNED_ACCOUNT_KEY(id))).run();
 		this.promptsByClientId.delete(id);
+		this.accountLists.delete(id);
 		const dir = path.resolve(row.sessionDir);
 		const rel = path.relative(this.sessionsRoot, dir);
 		if (rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel)) await rm(dir, { recursive: true, force: true });
@@ -713,21 +728,41 @@ export class SessionService {
 		return state;
 	}
 
-	/** OAuth accounts OMP holds for the current model's provider. Empty (provider null) while a turn runs: OMP only answers when idle. */
+	/** The account list from OMP now, remembered for later; null while a turn runs (OMP only answers between turns). */
+	private async listAccounts(id: string, rt: RuntimeSession): Promise<AccountList | null | "busy"> {
+		if (this.isBusy(id)) return "busy";
+		try {
+			const listed = await rt.oauthAccounts();
+			if (listed) this.accountLists.set(id, listed);
+			return listed;
+		} catch (error) {
+			if (error instanceof AgentRuntimeError && error.code === "invalid_state") return "busy";
+			throw error;
+		}
+	}
+
+	/**
+	 * OAuth accounts OMP holds for the current model's provider. While a turn runs OMP does not answer: the list it gave last is
+	 * returned instead, flagged `busy` (a pin chosen now applies when the turn ends).
+	 */
 	async accounts(id: string): Promise<SessionAccounts> {
 		const row = this.get(id);
 		if (this.isViewed(row)) throw this.readOnlyError(row);
 		const pinned = this.readPinnedAccount(id);
-		const rt = await this.runtime(id);
-		const listed = await rt.oauthAccounts().catch((error: unknown) => {
-			if (error instanceof AgentRuntimeError && error.code === "invalid_state") return null;
-			throw error;
-		});
-		if (!listed) return { provider: null, accounts: [], pinned: pinned?.label ?? null };
-		return { provider: listed.provider, accounts: listed.accounts, pinned: pinned && pinned.provider === listed.provider ? pinned.label : null };
+		const listed = await this.listAccounts(id, await this.runtime(id));
+		const busy = listed === "busy";
+		const list = busy ? (this.accountLists.get(id) ?? null) : listed;
+		if (!list) return { provider: null, accounts: [], pinned: pinned?.label ?? null, busy };
+		// A pin chosen before OMP listed the accounts (no provider yet) counts here only when it names one of them.
+		const pinnedHere = !pinned ? null : pinned.provider === list.provider ? pinned.label : pinned.provider === null ? (list.accounts.find((a) => sameAccount(a.label, pinned.label))?.label ?? null) : null;
+		return { provider: list.provider, accounts: list.accounts, pinned: pinnedHere, busy };
 	}
 
-	/** Pin an OMP account to the session (null stops pinning). The pin is kept and re-applied before prompts so OMP's warm window cannot lapse. */
+	/**
+	 * Pin an OMP account (its label or its email) to the session; null stops pinning. The pin is kept and applied again before each prompt
+	 * and at the end of each turn, so OMP's warm window cannot lapse. Mid-turn OMP refuses to pin: the pin is stored and applied when the
+	 * turn ends (checked against the last list OMP gave, when there is one).
+	 */
 	async pinAccount(id: string, account: string | null): Promise<SessionAccounts> {
 		const row = this.get(id);
 		if (this.isViewed(row)) throw this.readOnlyError(row);
@@ -736,22 +771,28 @@ export class SessionService {
 			return this.accounts(id);
 		}
 		const rt = await this.runtime(id);
-		const listed = await rt.oauthAccounts();
-		const match = listed?.accounts.find((a) => a.label === account);
-		if (!listed || !match) throw ApiError.badRequest(i18nMsg("No account {account} is available for this session's provider.", { account }));
-		await rt.pinOauthAccount(match.label);
-		const value = JSON.stringify({ provider: listed.provider, label: match.label });
-		const updatedAt = new Date().toISOString();
-		this.ctx.db.insert(settings).values({ key: PINNED_ACCOUNT_KEY(id), value, updatedAt }).onConflictDoUpdate({ target: settings.key, set: { value, updatedAt } }).run();
+		const listed = await this.listAccounts(id, rt);
+		const list = listed === "busy" ? (this.accountLists.get(id) ?? null) : listed;
+		const match = list?.accounts.find((a) => sameAccount(a.label, account));
+		if ((listed !== "busy" || list) && !match) throw ApiError.badRequest(i18nMsg("No account {account} is available for this session's provider.", { account }));
+		if (listed !== "busy" && match) await rt.pinOauthAccount(match.label);
+		this.writePinnedAccount(id, { provider: list?.provider ?? null, label: match?.label ?? account });
 		return this.accounts(id);
 	}
 
-	private readPinnedAccount(id: string): { provider: string; label: string } | null {
+	private writePinnedAccount(id: string, pin: { provider: string | null; label: string }): void {
+		const value = JSON.stringify(pin);
+		const updatedAt = new Date().toISOString();
+		this.ctx.db.insert(settings).values({ key: PINNED_ACCOUNT_KEY(id), value, updatedAt }).onConflictDoUpdate({ target: settings.key, set: { value, updatedAt } }).run();
+	}
+
+	/** The stored pin; `provider` is null for one chosen mid-turn before OMP ever listed this session's accounts. */
+	private readPinnedAccount(id: string): { provider: string | null; label: string } | null {
 		const stored = this.ctx.db.select().from(settings).where(eq(settings.key, PINNED_ACCOUNT_KEY(id))).get();
 		if (!stored) return null;
 		try {
 			const value: unknown = JSON.parse(stored.value);
-			if (value && typeof value === "object" && "provider" in value && "label" in value && typeof value.provider === "string" && typeof value.label === "string") {
+			if (value && typeof value === "object" && "provider" in value && "label" in value && (typeof value.provider === "string" || value.provider === null) && typeof value.label === "string") {
 				return { provider: value.provider, label: value.label };
 			}
 		} catch {
@@ -760,15 +801,24 @@ export class SessionService {
 		return null;
 	}
 
-	/** Best effort, before a user prompt on an idle session: keep the stored pin fresh for the current model's provider. Never throws. */
+	/**
+	 * Best effort, between turns (before a user prompt, at the end of a turn): apply the stored pin for the current model's provider, so a
+	 * pin chosen mid-turn takes effect and OMP's warm window stays fresh. A pin chosen before OMP ever listed the accounts (an email) is
+	 * completed with the provider and exact label here. Never throws.
+	 */
 	private async reapplyPinnedAccount(id: string, rt: RuntimeSession): Promise<void> {
 		const pinned = this.readPinnedAccount(id);
 		if (!pinned || rt.status().state !== "ready") return;
 		try {
-			const listed = await rt.oauthAccounts();
-			if (!listed || listed.provider !== pinned.provider || !listed.accounts.some((a) => a.label === pinned.label)) return;
-			await rt.pinOauthAccount(pinned.label);
+			const listed = await this.listAccounts(id, rt);
+			if (listed === "busy" || !listed || (pinned.provider !== null && listed.provider !== pinned.provider)) return;
+			const match = listed.accounts.find((a) => sameAccount(a.label, pinned.label));
+			if (!match) return;
+			if (pinned.provider === null || match.label !== pinned.label) this.writePinnedAccount(id, { provider: listed.provider, label: match.label });
+			await rt.pinOauthAccount(match.label);
+			if (!match.active) await this.listAccounts(id, rt);
 		} catch (error) {
+			if (error instanceof AgentRuntimeError && error.code === "invalid_state") return; // a turn started meanwhile: the next turn's end applies it
 			this.ctx.log.warn({ err: error instanceof Error ? error.message : String(error), sessionId: id }, "could not re-apply the pinned account");
 		}
 	}

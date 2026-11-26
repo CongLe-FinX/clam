@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentSession, MeshUsage, MessagesPage, Project, RuntimeStatus, SessionLiveState, Workspace } from "@clam/contracts";
+import type { AgentSession, MeshUsage, MessagesPage, Project, RuntimeStatus, SessionAccounts, SessionLiveState, Workspace } from "@clam/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CHAT_RENDERING_GUIDANCE } from "../src/services/agent-guidance.ts";
 import { api, connectWs, createFullHarness, type FullHarness, type WsClient } from "./full-harness.ts";
@@ -244,7 +244,9 @@ describe("sessions", () => {
 
 	it("pins an OMP account to the session: lists accounts, pins, keeps prompting, and unpins", async () => {
 		const session = await createSession();
-		const listed = await http.get<any>(`/sessions/${session.id}/accounts`);
+		const accountsOf = async () => (await http.get<SessionAccounts>(`/sessions/${session.id}/accounts`)).body;
+		const pinTo = (account: string | null) => http.put<SessionAccounts>(`/sessions/${session.id}/account`, { account });
+		const listed = await http.get<SessionAccounts>(`/sessions/${session.id}/accounts`);
 		expect(listed.status, JSON.stringify(listed.body)).toBe(200);
 		expect(listed.body).toEqual({
 			provider: "Fake",
@@ -253,21 +255,37 @@ describe("sessions", () => {
 				{ label: "b@example.com (Org B)", active: false },
 			],
 			pinned: null,
+			busy: false,
 		});
-		expect((await http.put<any>(`/sessions/${session.id}/account`, { account: "nobody@example.com" })).status).toBe(400);
-		const pinned = await http.put<any>(`/sessions/${session.id}/account`, { account: "b@example.com (Org B)" });
+		expect((await pinTo("nobody@example.com")).status).toBe(400);
+		const pinned = await pinTo("b@example.com (Org B)");
 		expect(pinned.status, JSON.stringify(pinned.body)).toBe(200);
 		expect(pinned.body.pinned).toBe("b@example.com (Org B)");
-		expect(pinned.body.accounts.map((a: any) => a.active)).toEqual([false, true]);
+		expect(pinned.body.accounts.map((a) => a.active)).toEqual([false, true]);
 
 		const ws = await subscribe(`session:${session.id}`);
 		await http.post(`/sessions/${session.id}/prompt`, { message: "still works", clientId: "after-pin" });
 		await ws.waitFor((f) => f.event?.type === "settled", "settled");
-		expect((await http.get<any>(`/sessions/${session.id}/accounts`)).body.pinned).toBe("b@example.com (Org B)");
+		expect((await accountsOf()).pinned).toBe("b@example.com (Org B)");
 
-		const cleared = await http.put<any>(`/sessions/${session.id}/account`, { account: null });
+		const cleared = await pinTo(null);
 		expect(cleared.status).toBe(200);
 		expect(cleared.body.pinned).toBeNull();
+
+		// mid-turn OMP neither lists nor pins: the last list is shown, a pin (by email) is kept and takes effect when the turn ends
+		await http.post(`/sessions/${session.id}/prompt`, { message: "__slow__", clientId: "slow-pin" });
+		await ws.waitFor((f) => f.event?.type === "message_delta", "streaming");
+		expect(await accountsOf()).toMatchObject({ provider: "Fake", busy: true, accounts: [{ label: "a@example.com" }, { label: "b@example.com (Org B)" }] });
+		expect((await pinTo("nobody@example.com")).status).toBe(400);
+		const queued = await pinTo("A@example.com");
+		expect(queued.status, JSON.stringify(queued.body)).toBe(200);
+		expect(queued.body).toMatchObject({ pinned: "a@example.com", busy: true });
+		expect(queued.body.accounts.map((a) => a.active)).toEqual([false, true]);
+
+		await http.post(`/sessions/${session.id}/abort`);
+		await ws.waitFor((f) => f.event?.type === "settled", "turn ended");
+		await expect.poll(async () => (await accountsOf()).accounts.map((a) => a.active)).toEqual([true, false]);
+		expect(await accountsOf()).toMatchObject({ pinned: "a@example.com", busy: false });
 	});
 
 	it("sends the optional first prompt of a new session once the runtime is ready", async () => {

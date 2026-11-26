@@ -96,5 +96,7 @@ const vi: Catalog = {
 	"This session uses {account}": "Phiên này dùng {account}",
 	"This session now uses {account}": "Phiên này giờ dùng {account}",
 	"No longer pinning {account}": "Đã bỏ ghim {account}",
+	"This session uses {account} once the agent finishes its current turn": "Phiên này sẽ dùng {account} khi agent xong lượt hiện tại",
+	"The agent is working: an account you pin now is used from the end of this turn.": "Agent đang chạy: tài khoản bạn ghim bây giờ sẽ được dùng từ khi lượt này kết thúc.",
 };
 export default vi;

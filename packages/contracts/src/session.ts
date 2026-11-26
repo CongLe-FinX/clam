@@ -166,9 +166,14 @@ export const SessionAccounts = z.object({
 	provider: z.string().nullable(),
 	accounts: z.array(z.object({ label: z.string(), active: z.boolean() })),
 	pinned: z.string().nullable(),
+	/**
+	 * The agent is mid-turn: OMP only lists and pins accounts between turns, so `accounts` is the list it gave last (empty when it never
+	 * did since the server started), and a pin chosen now applies when the turn ends.
+	 */
+	busy: z.boolean(),
 });
 export type SessionAccounts = z.infer<typeof SessionAccounts>;
-/** Pin an OMP account label to the session; null stops pinning. */
+/** Pin an OMP account to the session (its label, or its email); null stops pinning. */
 export const PinAccountBody = z.object({ account: z.string().trim().min(1).max(500).nullable() });
 export type PinAccountBody = z.infer<typeof PinAccountBody>;
 

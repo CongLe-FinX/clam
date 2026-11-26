@@ -90,21 +90,31 @@ function headline(pools: Pool[]): Pool[] {
 function QuotaDetails({ report, pools, onRefresh, refreshing, sessionId }: { report: QuotaReport; pools: Pool[]; onRefresh: () => void; refreshing: boolean; sessionId?: string }) {
 	const now = useNow(15_000);
 	const qc = useQueryClient();
-	// Only while the details are open (this component is mounted by the popover/sheet), and only for a session.
+	// Only while the details are open (this component is mounted by the popover/sheet), and only for a session. Mid-turn OMP gives no
+	// fresh list: poll, so the pin chosen meanwhile shows as in use once the turn ends.
 	const accounts = useQuery({
 		queryKey: qk.sessionAccounts(sessionId ?? ""),
 		queryFn: ({ signal }) => api.get<SessionAccounts>(routes.sessionAccounts(sessionId ?? ""), undefined, { signal }),
 		enabled: sessionId !== undefined,
 		staleTime: 0,
+		refetchInterval: (q) => (q.state.data?.busy ? 4000 : false),
 	});
 	const pin = useMutation({
 		mutationFn: (v: { account: string | null; label: string }) => api.put<SessionAccounts>(routes.sessionAccount(sessionId ?? ""), { account: v.account }),
 		onSuccess: (data, v) => {
 			qc.setQueryData(qk.sessionAccounts(sessionId ?? ""), data);
-			toast.success(v.account === null ? t("No longer pinning {account}", { account: v.label }) : t("This session now uses {account}", { account: v.label }));
+			toast.success(
+				v.account === null
+					? t("No longer pinning {account}", { account: v.label })
+					: data.busy
+						? t("This session uses {account} once the agent finishes its current turn", { account: v.label })
+						: t("This session now uses {account}", { account: v.label }),
+			);
 		},
 		onError: (e) => toast.error(errorText(e)),
 	});
+	const listing = accounts.data;
+	const pinnedActive = listing?.pinned ? listing.accounts.some((a) => a.active && a.label === listing.pinned) : false;
 	const reporting = report.providers.filter((p) => p.availability === "available" && p.limits.length > 0).length;
 	const providers = new Set(report.providers.map((p) => p.provider)).size;
 	return (
@@ -152,14 +162,23 @@ function QuotaDetails({ report, pools, onRefresh, refreshing, sessionId }: { rep
 
 			<div className="flex flex-col gap-1.5 border-t pt-3">
 				<div className="text-2xs font-semibold uppercase tracking-wider text-subtle">{t("Accounts")}</div>
-				{accounts.data?.pinned ? <div className="text-2xs text-subtle">{t("This session uses {account}", { account: accounts.data.pinned })}</div> : null}
+				{listing?.pinned ? (
+					<div className="text-2xs text-subtle">
+						{listing.busy && !pinnedActive ? t("This session uses {account} once the agent finishes its current turn", { account: listing.pinned }) : t("This session uses {account}", { account: listing.pinned })}
+					</div>
+				) : listing?.busy ? (
+					<div className="text-2xs text-subtle">{t("The agent is working: an account you pin now is used from the end of this turn.")}</div>
+				) : null}
 				<ul className="scrollbar-thin -mx-1 flex max-h-[min(40dvh,20rem)] flex-col gap-1 overflow-y-auto px-1">
 					{report.providers.map((p, i) => {
 						const limits = p.availability === "available" ? p.limits : [];
 						const worst = Math.max(0, ...limits.map((l) => usedFraction(l) ?? 0));
 						const email = p.account?.toLowerCase();
-						const omp = email ? accounts.data?.accounts.find((a) => a.label.toLowerCase() === email || a.label.toLowerCase().startsWith(`${email} (`)) : undefined;
-						const pinned = omp !== undefined && accounts.data?.pinned === omp.label;
+						const omp = email ? listing?.accounts.find((a) => a.label.toLowerCase() === email || a.label.toLowerCase().startsWith(`${email} (`)) : undefined;
+						// Mid-turn with no list from OMP yet: an account is pinned by its email, and checked when the turn ends.
+						const target = omp?.label ?? (listing?.busy && listing.accounts.length === 0 ? (p.account ?? undefined) : undefined);
+						const pinnedLabel = listing?.pinned?.toLowerCase();
+						const pinned = target !== undefined && pinnedLabel !== undefined && (pinnedLabel === target.toLowerCase() || (email !== undefined && pinnedLabel.startsWith(`${email} (`)));
 						return (
 							// biome-ignore lint/suspicious/noArrayIndexKey: one provider can report the same account label twice
 							<li key={`${p.provider}:${p.account ?? ""}:${i}`} className={cn("rounded-lg bg-surface-2/70 px-2.5 py-2", limits.length === 0 && "opacity-70")}>
@@ -170,20 +189,7 @@ function QuotaDetails({ report, pools, onRefresh, refreshing, sessionId }: { rep
 									{providers > 1 ? <span className="shrink-0 text-2xs text-subtle">{p.provider}</span> : null}
 									{omp?.active ? <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-px text-[10px] font-medium text-accent">{t("In use")}</span> : null}
 									{worst >= 0.9 ? <AlertTriangle aria-label={t("Near the limit")} className="size-3 shrink-0 text-danger" /> : null}
-									{omp && sessionId ? (
-										<Tip label={pinned ? t("Stop pinning") : t("Use this account for this session")}>
-											<button
-												type="button"
-												aria-label={pinned ? t("Stop pinning") : t("Use this account for this session")}
-												aria-pressed={pinned}
-												disabled={pin.isPending}
-												onClick={() => pin.mutate({ account: pinned ? null : omp.label, label: omp.label })}
-												className={cn("grid size-6 shrink-0 place-items-center rounded-md outline-none transition-colors hover:bg-surface-3 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 coarse:size-9", pinned ? "text-accent" : "text-subtle hover:text-foreground")}
-											>
-												{pinned ? <PinOff className="size-3.5" aria-hidden /> : <Pin className="size-3.5" aria-hidden />}
-											</button>
-										</Tip>
-									) : null}
+									{target !== undefined && sessionId ? <PinToggle pinned={pinned} disabled={pin.isPending} onToggle={() => pin.mutate({ account: pinned ? null : target, label: target })} /> : null}
 								</div>
 								{limits.length > 0 ? (
 									<div className="mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-x-3 gap-y-1.5">
@@ -206,6 +212,24 @@ function QuotaDetails({ report, pools, onRefresh, refreshing, sessionId }: { rep
 							</li>
 						);
 					})}
+					{/* Accounts OMP can use for this session that report no quota: pinnable all the same. */}
+					{listing?.accounts
+						.filter((a) => !report.providers.some((p) => p.account && (a.label.toLowerCase() === p.account.toLowerCase() || a.label.toLowerCase().startsWith(`${p.account.toLowerCase()} (`))))
+						.map((a) => {
+							const pinned = listing.pinned === a.label;
+							return (
+								<li key={`omp:${a.label}`} className="rounded-lg bg-surface-2/70 px-2.5 py-2">
+									<div className="flex items-center gap-1.5">
+										<span className="min-w-0 flex-1 truncate font-mono text-[11px]" title={a.label}>
+											{a.label}
+										</span>
+										{a.active ? <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-px text-[10px] font-medium text-accent">{t("In use")}</span> : null}
+										<PinToggle pinned={pinned} disabled={pin.isPending} onToggle={() => pin.mutate({ account: pinned ? null : a.label, label: a.label })} />
+									</div>
+									<div className="mt-0.5 text-2xs text-subtle">{t("No quota reported for this account")}</div>
+								</li>
+							);
+						})}
 				</ul>
 			</div>
 
@@ -213,6 +237,24 @@ function QuotaDetails({ report, pools, onRefresh, refreshing, sessionId }: { rep
 				{t("Usage details")} <ArrowUpRight className="size-3.5" aria-hidden />
 			</Link>
 		</div>
+	);
+}
+
+function PinToggle({ pinned, disabled, onToggle }: { pinned: boolean; disabled: boolean; onToggle: () => void }) {
+	const label = pinned ? t("Stop pinning") : t("Use this account for this session");
+	return (
+		<Tip label={label}>
+			<button
+				type="button"
+				aria-label={label}
+				aria-pressed={pinned}
+				disabled={disabled}
+				onClick={onToggle}
+				className={cn("grid size-6 shrink-0 place-items-center rounded-md outline-none transition-colors hover:bg-surface-3 focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 coarse:size-9", pinned ? "text-accent" : "text-subtle hover:text-foreground")}
+			>
+				{pinned ? <PinOff className="size-3.5" aria-hidden /> : <Pin className="size-3.5" aria-hidden />}
+			</button>
+		</Tip>
 	);
 }
 
