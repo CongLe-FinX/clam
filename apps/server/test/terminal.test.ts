@@ -342,6 +342,15 @@ describe("Terminal through the domain (public listener)", () => {
 		expect(audit.some((r) => r.type === "terminal.attach" && JSON.parse(r.payload).via === "remote")).toBe(true);
 	});
 
+	it("quitting an app of the System page through the domain needs the step-up too", async () => {
+		const cookie = await signIn();
+		const early = await post("/api/local/system/processes/quit", { name: "clam-no-such-app" }, cookie);
+		expect(early.status, early.text).toBe(403);
+		expect(early.json?.error?.code).toBe("step_up_required");
+		await stepUp(cookie);
+		expect((await post("/api/local/system/processes/quit", { name: "clam-no-such-app" }, cookie)).status).toBe(404);
+	});
+
 	it("switching the Terminal off closes its live remote sockets immediately", async () => {
 		const cookie = await signIn();
 		await stepUp(cookie);

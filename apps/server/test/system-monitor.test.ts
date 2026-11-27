@@ -1,4 +1,8 @@
-import type { SystemProcesses, SystemStatus } from "@clam/contracts";
+import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import type { QuitAppResult, SystemProcesses, SystemStatus } from "@clam/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import systemRoutes from "../src/api/system.ts";
 import {
@@ -11,6 +15,7 @@ import {
 	parsePressureLevel,
 	parsePmsetBatt,
 	parsePsLine,
+	quitPlan,
 	parseSwapUsage,
 	parseVmStat,
 } from "../src/services/system-metrics.ts";
@@ -91,19 +96,52 @@ describe("process grouping", () => {
 	});
 
 	it("parses ps lines, sums per app, sorts and excludes ps itself", () => {
-		expect(parsePsLine("  42  3.5  2048 /bin/zsh -l")).toEqual({ pid: 42, cpu: 3.5, rss: 2048, args: "/bin/zsh -l" });
+		expect(parsePsLine("  42     1   501  3.5  2048 /bin/zsh -l")).toEqual({ pid: 42, ppid: 1, uid: 501, cpu: 3.5, rss: 2048, args: "/bin/zsh -l" });
 		expect(parsePsLine("nonsense")).toBeNull();
 		const out = [
-			"  1 10.0 1000 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-			"  2 20.5 3000 /Applications/Google Chrome.app/Contents/Frameworks/X.framework/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper --secret=1",
-			"  3  1.0 5000 /usr/bin/node /srv/run.js --token=abc",
-			"  4  0.0  100 ps -Ao pid=,pcpu=,rss=,args=",
+			"  11  1 501 10.0 1000 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			"  12 11 501 20.5 3000 /Applications/Google Chrome.app/Contents/Frameworks/X.framework/Helpers/Google Chrome Helper.app/Contents/MacOS/Google Chrome Helper --secret=1",
+			"  13  1 501  1.0 5000 /usr/bin/node /srv/run.js --token=abc",
+			"  14 13 501  0.0  100 ps -Ao pid=,ppid=,uid=,pcpu=,rss=,args=",
 		].join("\n");
-		const apps = groupProcesses(out);
+		const apps = groupProcesses(out, { uid: 501, pid: 999 });
 		expect(apps.map((a) => a.name).sort()).toEqual(["Google Chrome", "node"]);
 		const chrome = apps.find((a) => a.name === "Google Chrome")!;
-		expect(chrome).toMatchObject({ processes: 2, cpu: 30.5, memBytes: 4000 * 1024, pids: [2, 1] });
+		expect(chrome).toMatchObject({ processes: 2, cpu: 30.5, memBytes: 4000 * 1024, pids: [12, 11], quittable: true, clamProcesses: 0 });
 		expect(JSON.stringify(apps)).not.toMatch(/secret|token|abc/);
+	});
+
+	it("quits only the user's own processes: never this server or what started it, never a system app; counts what the server started", () => {
+		// 1 launchd (root) → 100 Terminal → 101 zsh → 200 node (this server) → 300 omp (agent) ; 400 another user's node; 500 the user's node
+		const out = [
+			"    1    0   0 0.1  10 /sbin/launchd",
+			"  100    1 501 0.1  10 /System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+			"  101  100 501 0.1  10 -zsh",
+			"  200  101 501 5.0  10 /usr/local/bin/node /srv/clam/main.js",
+			"  300  200 501 9.0  10 /Users/me/.bun/bin/omp --mode rpc",
+			"  301  300 501 1.0  10 /Users/me/.bun/bin/omp --child",
+			"  400    1  88 1.0  10 /usr/local/bin/node /other/user.js",
+			"  500    1 501 1.0  10 /usr/local/bin/node /dev/server.js",
+			"  600    1 501 1.0  10 /System/Library/CoreServices/loginwindow.app/Contents/MacOS/loginwindow",
+		].join("\n");
+		const owner = { uid: 501, pid: 200 };
+		expect(quitPlan(out, "node", owner)).toEqual({ found: 3, targets: [500], denied: 1, guarded: 1 });
+		expect(quitPlan(out, "zsh", owner)).toEqual({ found: 1, targets: [], denied: 0, guarded: 1 });
+		expect(quitPlan(out, "Terminal", owner)).toMatchObject({ targets: [], guarded: 1 });
+		expect(quitPlan(out, "launchd", owner)).toMatchObject({ targets: [], guarded: 1 });
+		expect(quitPlan(out, "loginwindow", owner)).toMatchObject({ targets: [], denied: 1 });
+		expect(quitPlan(out, "omp", owner)).toEqual({ found: 2, targets: [300, 301], denied: 0, guarded: 0 });
+		expect(quitPlan(out, "nothing", owner).found).toBe(0);
+		// root may signal anyone's processes, still never itself or its parents
+		expect(quitPlan(out, "node", { uid: 0, pid: 200 }).targets.sort()).toEqual([400, 500]);
+
+		const apps = groupProcesses(out, owner);
+		const byName = (n: string) => apps.find((a) => a.name === n)!;
+		expect(byName("node")).toMatchObject({ quittable: true, clamProcesses: 0 });
+		expect(byName("omp")).toMatchObject({ quittable: true, clamProcesses: 2 });
+		expect(byName("zsh").quittable).toBe(false);
+		expect(byName("loginwindow").quittable).toBe(false);
+		expect(byName("launchd").quittable).toBe(false);
 	});
 });
 
@@ -169,5 +207,29 @@ describe("GET /api/local/system", () => {
 		}
 		const cached = await harness.app.inject({ method: "GET", url: "/api/local/system/disk-usage", headers: { host: "localhost" } });
 		expect(cached.statusCode).toBe(404);
+	});
+
+	it("quits an app by its listed name: its process ends, an unknown name is 404", async () => {
+		if (process.platform !== "darwin" && process.platform !== "linux") return;
+		harness = await createTestHarness({ plugins: [systemRoutes] });
+		// `sleep` under a name no other process has (a link: macOS kills a copied system binary), so nothing else on the machine is touched.
+		const dir = mkdtempSync(path.join(tmpdir(), "clam-quit-"));
+		const name = `clam-quit-test-${process.pid}`;
+		symlinkSync("/bin/sleep", path.join(dir, name));
+		const child = spawn(path.join(dir, name), ["300"], { stdio: "ignore" });
+		const exited = Promise.withResolvers<NodeJS.Signals | null>();
+		child.once("exit", (_code, signal) => exited.resolve(signal));
+		try {
+			const quit = await harness.app.inject({ method: "POST", url: "/api/local/system/processes/quit", headers: { host: "localhost" }, payload: { name } });
+			expect(quit.statusCode, quit.body).toBe(200);
+			expect(quit.json() as QuitAppResult).toEqual({ name, stopped: 1, running: 0, denied: 0, guarded: 0 });
+			expect(await exited.promise).toBe("SIGTERM");
+
+			const missing = await harness.app.inject({ method: "POST", url: "/api/local/system/processes/quit", headers: { host: "localhost" }, payload: { name } });
+			expect(missing.statusCode).toBe(404);
+		} finally {
+			child.kill("SIGKILL");
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });

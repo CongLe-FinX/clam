@@ -1,8 +1,9 @@
 import { execFile, spawn } from "node:child_process";
 import { lstat, readdir, readFile, statfs } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { cpus, freemem, homedir, hostname, loadavg, platform, totalmem, uptime } from "node:os";
 import path from "node:path";
-import { type DiskUsageReport, type SystemBattery, type SystemDisk, type SystemMemory, type SystemProcesses, type SystemStatus, i18nMsg } from "@clam/contracts";
+import { type DiskUsageReport, type QuitAppResult, type SystemBattery, type SystemDisk, type SystemMemory, type SystemProcesses, type SystemStatus, i18nMsg } from "@clam/contracts";
 import { ApiError } from "../http/errors.ts";
 import {
 	type CpuTimes,
@@ -11,6 +12,9 @@ import {
 	cpuPercent,
 	diskFromStatfs,
 	groupProcesses,
+	PS_FORMAT,
+	type ProcessOwner,
+	quitPlan,
 	parseMeminfo,
 	parsePmsetBatt,
 	parsePressureLevel,
@@ -34,6 +38,21 @@ const COMMAND_TIMEOUT_MS = 2_500;
 const DISK_SCAN_TIMEOUT_MS = 60_000;
 const DISK_CACHE_MS = 10 * 60_000;
 const DISK_TOP = 15;
+/** How long a quit waits for the app's processes to end before reporting the ones still running. */
+const QUIT_WAIT_MS = 3_000;
+
+/** This server, as the one that signals processes: its user and its own pid. */
+const PROCESS_OWNER: ProcessOwner = { uid: typeof process.getuid === "function" ? process.getuid() : null, pid: process.pid };
+
+/** The process still exists (signal 0 checks without sending anything; EPERM: it exists but is not ours). */
+function isRunning(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
 
 function run(file: string, args: string[], timeout = COMMAND_TIMEOUT_MS): Promise<string | null> {
 	const { promise, resolve } = Promise.withResolvers<string | null>();
@@ -41,10 +60,10 @@ function run(file: string, args: string[], timeout = COMMAND_TIMEOUT_MS): Promis
 	return promise;
 }
 
-/** Memoizes an async producer for `ttl` ms; concurrent callers share one in-flight run. */
-function cached<T>(ttl: number, produce: () => Promise<T>): () => Promise<T> {
+/** Memoizes an async producer for `ttl` ms; concurrent callers share one in-flight run. `reset()` drops the value (it changed). */
+function cached<T>(ttl: number, produce: () => Promise<T>): (() => Promise<T>) & { reset(): void } {
 	let value: { at: number; promise: Promise<T> } | null = null;
-	return () => {
+	const get = () => {
 		const now = Date.now();
 		if (!value || now - value.at >= ttl) {
 			const promise = produce();
@@ -55,6 +74,11 @@ function cached<T>(ttl: number, produce: () => Promise<T>): () => Promise<T> {
 		}
 		return value.promise;
 	};
+	return Object.assign(get, {
+		reset: () => {
+			value = null;
+		},
+	});
 }
 
 /** Host CPU / memory / disk readings, top apps and the home-folder scan. One instance per server. */
@@ -170,13 +194,53 @@ export class SystemMonitor {
 		const sampledAt = new Date().toISOString();
 		const os = platform();
 		if (os !== "darwin" && os !== "linux") return { supported: false, byCpu: [], byMemory: [], sampledAt };
-		const output = await run("ps", ["-Ao", "pid=,pcpu=,rss=,args="], 8_000);
+		const output = await run("ps", ["-Ao", PS_FORMAT], 8_000);
 		if (output === null) return { supported: false, byCpu: [], byMemory: [], sampledAt };
-		return { supported: true, ...topApps(groupProcesses(output)), sampledAt };
+		return { supported: true, ...topApps(groupProcesses(output, PROCESS_OWNER)), sampledAt };
 	});
 
 	processes(): Promise<SystemProcesses> {
 		return this.apps();
+	}
+
+	/**
+	 * Stop every process of the app `name` (a display name of the list) from a fresh sample: SIGTERM (the app may clean up), or SIGKILL
+	 * with `force`. Only this user's processes; never this server or the processes that started it, never a system app. Waits a few
+	 * seconds for them to go and reports the ones still running.
+	 */
+	async quitApp(name: string, force: boolean): Promise<QuitAppResult> {
+		const os = platform();
+		if (os !== "darwin" && os !== "linux") throw new ApiError(501, "not_supported", i18nMsg("Apps can only be quit on macOS and Linux"));
+		const output = await run("ps", ["-Ao", PS_FORMAT], 8_000);
+		if (output === null) throw new ApiError(503, "ps_failed", i18nMsg("Could not read the list of running apps"));
+		const plan = quitPlan(output, name, PROCESS_OWNER);
+		if (plan.found === 0) throw new ApiError(404, "not_found", i18nMsg("No app named {name} is running", { name }));
+		if (plan.targets.length === 0) {
+			throw new ApiError(
+				403,
+				"not_quittable",
+				plan.guarded > 0 ? i18nMsg("{name} runs CL Agent Mesh itself and is not quit from here", { name }) : i18nMsg("{name} belongs to the system or another user and is not quit from here", { name }),
+			);
+		}
+		let denied = plan.denied;
+		let signalled: number[] = [];
+		for (const pid of plan.targets) {
+			try {
+				process.kill(pid, force ? "SIGKILL" : "SIGTERM");
+				signalled.push(pid);
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				if (code === "EPERM") denied++;
+				else if (code !== "ESRCH") throw error; // ESRCH: it ended on its own meanwhile
+			}
+		}
+		const deadline = Date.now() + (force ? 1_500 : QUIT_WAIT_MS);
+		while (signalled.length > 0 && Date.now() < deadline) {
+			await delay(150);
+			signalled = signalled.filter(isRunning);
+		}
+		this.apps.reset();
+		return { name, stopped: plan.targets.length - signalled.length - (denied - plan.denied), running: signalled.length, denied, guarded: plan.guarded };
 	}
 
 	/** The cached home-folder report (≤10 min old), or null. */

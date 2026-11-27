@@ -10,6 +10,7 @@ import { loadOrCreateIdentity } from "@clam/node-identity";
 import fastify, { type FastifyInstance, type FastifyPluginAsync } from "fastify";
 import { createEventBus } from "../src/bus.ts";
 import type { ServerContext } from "../src/context.ts";
+import { installLoopbackGate } from "../src/auth/gate.ts";
 import { installErrorHandler } from "../src/http/error-handler.ts";
 import { installHostGuard } from "../src/http/host-guard.ts";
 import { createNetwork } from "../src/network/index.ts";
@@ -149,6 +150,8 @@ export async function createTestHarness(options: {
 	ctx.contexts ??= new ContextService(ctx);
 	ctx.network.attachContexts(ctx.contexts);
 
+	// As on the real loopback listener: routes read `request.access` (always set by a gate in `buildApp`).
+	installLoopbackGate(app);
 	for (const plugin of options.plugins) await app.register(plugin, { prefix: LOCAL_API_PREFIX, ctx });
 	await app.ready();
 

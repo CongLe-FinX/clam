@@ -93,6 +93,10 @@ export const AppUsage = z.object({
 	memBytes: z.number(),
 	/** At most 5 process ids. */
 	pids: z.array(z.number().int()).optional(),
+	/** It can be quit from here: some of its processes run as this node's user, and it is not part of the system or this server. */
+	quittable: z.boolean(),
+	/** How many of its processes this server started (agent runtimes, terminals, the machine Browser): quitting them stops that work. */
+	clamProcesses: z.number().int(),
 });
 export type AppUsage = z.infer<typeof AppUsage>;
 
@@ -103,6 +107,23 @@ export const SystemProcesses = z.object({
 	sampledAt: IsoDate,
 });
 export type SystemProcesses = z.infer<typeof SystemProcesses>;
+
+/** `POST /system/processes/quit`: stop every process of the app named `name` (as listed). `force` kills (SIGKILL) instead of asking (SIGTERM). */
+export const QuitAppBody = z.object({ name: z.string().min(1).max(300), force: z.boolean().optional() });
+export type QuitAppBody = z.infer<typeof QuitAppBody>;
+
+export const QuitAppResult = z.object({
+	name: z.string(),
+	/** Processes that are gone. */
+	stopped: z.number().int(),
+	/** Signalled but still running a few seconds later (quit again with `force`). */
+	running: z.number().int(),
+	/** Left alone: they run as another user or the system. */
+	denied: z.number().int(),
+	/** Left alone: this server itself and the processes that started it. */
+	guarded: z.number().int(),
+});
+export type QuitAppResult = z.infer<typeof QuitAppResult>;
 
 export const DiskUsageEntry = z.object({ name: z.string(), bytes: z.number() });
 export type DiskUsageEntry = z.infer<typeof DiskUsageEntry>;

@@ -16,5 +16,11 @@ const vi: Catalog = {
 	"\"{rel}\" was deleted since you opened it": "\"{rel}\" đã bị xóa kể từ khi bạn mở",
 	"\"{rel}\" already exists": "\"{rel}\" đã tồn tại",
 	"A folder cannot be moved into itself": "Không thể chuyển thư mục vào chính nó",
+	"Re-enter the owner password to quit apps through the domain": "Nhập lại mật khẩu chủ sở hữu để thoát ứng dụng qua tên miền",
+	"Apps can only be quit on macOS and Linux": "Chỉ có thể thoát ứng dụng trên macOS và Linux",
+	"Could not read the list of running apps": "Không đọc được danh sách ứng dụng đang chạy",
+	"No app named {name} is running": "Không có ứng dụng nào tên {name} đang chạy",
+	"{name} runs CL Agent Mesh itself and is not quit from here": "{name} đang chạy chính CL Agent Mesh nên không thể thoát từ đây",
+	"{name} belongs to the system or another user and is not quit from here": "{name} thuộc hệ thống hoặc người dùng khác nên không thể thoát từ đây",
 };
 export default vi;

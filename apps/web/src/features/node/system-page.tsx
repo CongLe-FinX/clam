@@ -1,11 +1,15 @@
-import { type AppUsage, type DiskUsageReport, type SystemAlert, type SystemDisk, type SystemStatus, routes } from "@clam/contracts";
+import { type AppUsage, type DiskUsageReport, type QuitAppResult, type SystemAlert, type SystemDisk, type SystemStatus, routes } from "@clam/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, FolderSearch, RefreshCw } from "lucide-react";
+import { AlertTriangle, FolderSearch, Power, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useOmpProviders, useNode, useSystemProcesses, useSystemStatus, qk } from "@/lib/queries";
 import { BatteryGauge, batteryState } from "@/components/battery";
+import { ConfirmDialog } from "@/components/confirm-dialog";
+import { PasswordDialog } from "@/features/auth/password-dialog";
+import { useStepUp } from "@/features/terminal/api";
 import { renderServerText, t } from "@/i18n";
-import { api, errorMessage } from "@/lib/api";
+import { ApiError, api, errorMessage, errorText } from "@/lib/api";
 import { cn, formatBytes, formatDuration, relativeTime, shortFingerprint } from "@/lib/utils";
 import { Badge } from "@/ui/badge";
 import { Button } from "@/ui/button";
@@ -14,6 +18,7 @@ import { EmptyState } from "@/ui/empty-state";
 import { FillBar, type FillTone, toneOfLevel, useFillValue } from "@/ui/fill-bar";
 import { PageContainer, PageHeader, SectionTitle } from "@/ui/page";
 import { Skeleton } from "@/ui/skeleton";
+import { Tip } from "@/ui/tooltip";
 
 const PLATFORM: Record<string, string> = { darwin: "macOS", linux: "Linux", win32: "Windows" };
 const STROKE: Record<FillTone, string> = { accent: "stroke-accent", warning: "stroke-warning", danger: "stroke-danger" };
@@ -233,7 +238,21 @@ function VolumeRow({ d }: { d: SystemDisk }) {
 
 // ───────────────────────────── top apps ─────────────────────────────
 
-function AppList({ title, hint, apps, value, format }: { title: string; hint?: string; apps: AppUsage[] | undefined; value: (a: AppUsage) => number; format: (a: AppUsage) => string }) {
+function AppList({
+	title,
+	hint,
+	apps,
+	value,
+	format,
+	onQuit,
+}: {
+	title: string;
+	hint?: string;
+	apps: AppUsage[] | undefined;
+	value: (a: AppUsage) => number;
+	format: (a: AppUsage) => string;
+	onQuit: (a: AppUsage) => void;
+}) {
 	const max = Math.max(1, ...(apps ?? []).map(value));
 	return (
 		<section className="flex flex-col gap-2.5">
@@ -250,7 +269,7 @@ function AppList({ title, hint, apps, value, format }: { title: string; hint?: s
 				) : (
 					<ol className="flex flex-col">
 						{apps.map((a, i) => (
-							<li key={a.name} className="grid grid-cols-[1.25rem_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-surface-2">
+							<li key={a.name} className="group/app grid grid-cols-[1.25rem_minmax(0,1fr)_auto_1.75rem] items-center gap-x-2.5 gap-y-1 rounded-lg px-2 py-1.5 transition-colors hover:bg-surface-2 coarse:grid-cols-[1.25rem_minmax(0,1fr)_auto_2.75rem]">
 								<span className="text-right font-mono text-2xs text-subtle tabular-nums">{i + 1}</span>
 								<div className="flex min-w-0 items-baseline gap-2">
 									<span className="min-w-0 truncate text-[13px] font-medium" title={a.name}>
@@ -259,6 +278,20 @@ function AppList({ title, hint, apps, value, format }: { title: string; hint?: s
 									<span className="shrink-0 text-2xs text-subtle">{t("{count, plural, one {# process} other {# processes}}", { count: a.processes })}</span>
 								</div>
 								<span className="font-mono text-xs tabular-nums">{format(a)}</span>
+								<span className="row-span-2 grid place-items-center coarse:min-h-10">
+									{a.quittable ? (
+										<Tip label={t("Quit {name}", { name: a.name })}>
+											<button
+												type="button"
+												aria-label={t("Quit {name}", { name: a.name })}
+												onClick={() => onQuit(a)}
+												className="grid size-7 place-items-center rounded-md text-subtle opacity-0 outline-none transition-[opacity,color,background-color] hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover/app:opacity-100 coarse:size-10 coarse:opacity-100"
+											>
+												<Power className="size-3.5" aria-hidden />
+											</button>
+										</Tip>
+									) : null}
+								</span>
 								<span />
 								<FillBar className="col-span-2" value={(value(a) / max) * 100} />
 							</li>
@@ -271,15 +304,99 @@ function AppList({ title, hint, apps, value, format }: { title: string; hint?: s
 	);
 }
 
+/**
+ * Quitting an app of the lists: a confirmation, then SIGTERM to its processes; one that does not go within a few seconds can be
+ * force quit. Through the domain the server asks for the owner password again first (step-up), like the Terminal.
+ */
+function useQuitApp() {
+	const qc = useQueryClient();
+	const stepUp = useStepUp();
+	const [confirming, setConfirming] = useState<AppUsage | null>(null);
+	const [locked, setLocked] = useState<{ name: string; force: boolean } | null>(null);
+	const quit = useMutation({
+		mutationFn: (v: { name: string; force: boolean }) => api.post<QuitAppResult>(routes.systemQuitApp, v),
+		onSuccess: (r, v) => {
+			setConfirming(null);
+			void qc.invalidateQueries({ queryKey: qk.systemProcesses });
+			const leftAlone = r.denied + r.guarded;
+			const note = leftAlone > 0 ? t("{count, plural, one {# process was} other {# processes were}} left alone: they belong to the system, another user or CL Agent Mesh itself.", { count: leftAlone }) : undefined;
+			if (r.running > 0) {
+				toast.warning(t("{name} is still running", { name: r.name }), {
+					description: t("{count, plural, one {# process did} other {# processes did}} not stop within a few seconds. Force quit stops them at once; unsaved work is lost.", { count: r.running }),
+					action: { label: t("Force quit"), onClick: () => quit.mutate({ name: r.name, force: true }) },
+					duration: 15_000,
+				});
+			} else {
+				toast.success(v.force ? t("Force quit {name}", { name: r.name }) : t("Quit {name}", { name: r.name }), {
+					description: [t("{count, plural, one {# process stopped} other {# processes stopped}}", { count: r.stopped }), note].filter(Boolean).join(" "),
+				});
+			}
+		},
+		onError: (e, v) => {
+			if (e instanceof ApiError && e.code === "step_up_required") {
+				setConfirming(null);
+				setLocked(v);
+				return;
+			}
+			void qc.invalidateQueries({ queryKey: qk.systemProcesses });
+			toast.error(t("Could not quit {name}", { name: v.name }), { description: errorText(e) });
+		},
+	});
+	const target = confirming;
+	const dialogs = (
+		<>
+			<ConfirmDialog
+				open={target !== null}
+				onOpenChange={(open) => {
+					if (!open && !quit.isPending) setConfirming(null);
+				}}
+				title={t("Quit {name}?", { name: target?.name ?? "" })}
+				description={
+					<>
+						{t("Its {count, plural, one {process is} other {# processes are}} asked to stop. Anything unsaved in it may be lost.", { count: target?.processes ?? 0 })}
+						{target && target.clamProcesses > 0 ? (
+							<span className="mt-2 block text-warning">
+								{t("{count, plural, one {# of them was} other {# of them were}} started by CL Agent Mesh (agent runtimes, terminals or its Browser): that work stops too.", { count: target.clamProcesses })}
+							</span>
+						) : null}
+					</>
+				}
+				confirmLabel={t("Quit")}
+				danger
+				loading={quit.isPending}
+				onConfirm={() => target && quit.mutate({ name: target.name, force: false })}
+			/>
+			<PasswordDialog
+				open={locked !== null}
+				onOpenChange={(open) => {
+					if (!open) setLocked(null);
+				}}
+				title={t("Confirm it's you")}
+				description={t("Quitting apps through the domain needs your owner password again. It stays unlocked for 10 minutes.")}
+				confirmLabel={t("Unlock and quit")}
+				onSubmit={async (password) => {
+					await stepUp.mutateAsync(password);
+					const pending = locked;
+					setLocked(null);
+					if (pending) quit.mutate(pending);
+				}}
+			/>
+		</>
+	);
+	return { ask: setConfirming, dialogs };
+}
+
 function TopApps() {
 	const procs = useSystemProcesses(5000);
+	const quit = useQuitApp();
 	if (procs.data && !procs.data.supported) {
 		return <EmptyState icon={AlertTriangle} title={t("Per-app usage is not available on this system")} description={t("The list of running apps can only be read on macOS and Linux.")} className="rounded-xl bg-surface-1 shadow-[inset_0_0_0_1px_var(--border)]" />;
 	}
 	return (
 		<div className="grid gap-5 lg:grid-cols-2">
-			<AppList title={t("Top apps by CPU")} hint={t("100% is one full core; an app using several cores can go above it.")} apps={procs.data?.byCpu} value={(a) => a.cpu} format={(a) => `${Math.round(a.cpu)}%`} />
-			<AppList title={t("Top apps by memory")} apps={procs.data?.byMemory} value={(a) => a.memBytes} format={(a) => formatBytes(a.memBytes)} />
+			<AppList title={t("Top apps by CPU")} hint={t("100% is one full core; an app using several cores can go above it.")} apps={procs.data?.byCpu} value={(a) => a.cpu} format={(a) => `${Math.round(a.cpu)}%`} onQuit={quit.ask} />
+			<AppList title={t("Top apps by memory")} apps={procs.data?.byMemory} value={(a) => a.memBytes} format={(a) => formatBytes(a.memBytes)} onQuit={quit.ask} />
+			{quit.dialogs}
 		</div>
 	);
 }

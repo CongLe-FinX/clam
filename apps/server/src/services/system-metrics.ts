@@ -169,46 +169,118 @@ export function appNameOf(args: string): string {
 
 export interface PsRow {
 	pid: number;
+	ppid: number;
+	uid: number;
 	cpu: number;
 	/** KiB. */
 	rss: number;
 	args: string;
 }
 
-const PS_LINE = /^\s*(\d+)\s+([\d.,]+)\s+(\d+)\s+(.*)$/;
+/** The `ps -Ao` columns every sample reads. */
+export const PS_FORMAT = "pid=,ppid=,uid=,pcpu=,rss=,args=";
+const PS_LINE = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+([\d.,]+)\s+(\d+)\s+(.*)$/;
 
-/** One line of `ps -Ao pid=,pcpu=,rss=,args=`. */
+/** One line of `ps -Ao pid=,ppid=,uid=,pcpu=,rss=,args=`. */
 export function parsePsLine(line: string): PsRow | null {
 	const m = PS_LINE.exec(line);
 	if (!m) return null;
-	const cpu = Number(m[2]!.replace(",", "."));
-	return Number.isFinite(cpu) ? { pid: Number(m[1]), cpu, rss: Number(m[3]), args: m[4]!.trim() } : null;
+	const cpu = Number(m[4]!.replace(",", "."));
+	return Number.isFinite(cpu) ? { pid: Number(m[1]), ppid: Number(m[2]), uid: Number(m[3]), cpu, rss: Number(m[5]), args: m[6]!.trim() } : null;
 }
 
 /** The sampling `ps` itself is not an app the user runs. */
-export const isSamplingPs = (args: string): boolean => /^(?:\S*\/)?ps\s/.test(args) && args.includes("pid=,pcpu=,rss=,args=");
+export const isSamplingPs = (args: string): boolean => /^(?:\S*\/)?ps\s/.test(args) && args.includes(PS_FORMAT);
+
+/** Every process of a `ps` sample but the sampling `ps`. */
+export function parsePs(output: string): PsRow[] {
+	return output
+		.split("\n")
+		.map(parsePsLine)
+		.filter((r): r is PsRow => r !== null && !isSamplingPs(r.args));
+}
 
 export const TOP_APPS = 12;
 const MAX_PIDS = 5;
 
-/** Group `ps` output by app name: cpu and memory summed, the heaviest processes' ids kept. */
-export function groupProcesses(output: string): AppUsage[] {
-	const rows = output
-		.split("\n")
-		.map(parsePsLine)
-		.filter((r): r is PsRow => r !== null && !isSamplingPs(r.args))
-		.sort((a, b) => b.rss - a.rss);
-	const groups = new Map<string, { processes: number; cpu: number; rss: number; pids: number[] }>();
+/**
+ * Apps that are never quit from here, whoever runs them: stopping them logs the user out, takes the screen down or the machine
+ * with it (most run as root anyway, which the user cannot signal).
+ */
+const SYSTEM_APPS: Record<string, true> = { launchd: true, kernel_task: true, WindowServer: true, loginwindow: true, systemd: true, init: true, kthreadd: true, kernel: true, Xorg: true, Xwayland: true };
+
+/** Who may signal what: the server's user (null where unknown; root may signal anything) and its own pid. */
+export interface ProcessOwner {
+	uid: number | null;
+	pid: number;
+}
+
+/** Processes never signalled: this server and the chain of processes that started it (a shell, a terminal, a supervisor). */
+function guardedPids(rows: PsRow[], self: number): Set<number> {
+	const parent = new Map(rows.map((r) => [r.pid, r.ppid]));
+	const guarded = new Set<number>([0, 1]);
+	for (let pid: number | undefined = self; pid !== undefined && pid > 1 && !guarded.has(pid); pid = parent.get(pid)) guarded.add(pid);
+	return guarded;
+}
+
+/** Processes this server started, directly or not: agent runtimes, terminals, the machine Browser. */
+function descendantPids(rows: PsRow[], self: number): Set<number> {
+	const children = new Map<number, number[]>();
+	for (const r of rows) {
+		const list = children.get(r.ppid);
+		if (list) list.push(r.pid);
+		else children.set(r.ppid, [r.pid]);
+	}
+	const out = new Set<number>();
+	const queue = [...(children.get(self) ?? [])];
+	for (let pid = queue.pop(); pid !== undefined; pid = queue.pop()) {
+		if (out.has(pid)) continue;
+		out.add(pid);
+		queue.push(...(children.get(pid) ?? []));
+	}
+	return out;
+}
+
+function signallable(r: PsRow, name: string, owner: ProcessOwner, guarded: Set<number>): "yes" | "guarded" | "denied" {
+	if (guarded.has(r.pid)) return "guarded";
+	if (Object.hasOwn(SYSTEM_APPS, name) || (owner.uid !== null && owner.uid !== 0 && r.uid !== owner.uid)) return "denied";
+	return "yes";
+}
+
+/** Group `ps` output by app name: cpu and memory summed, the heaviest processes' ids kept, and whether the app can be quit from here. */
+export function groupProcesses(output: string, owner: ProcessOwner): AppUsage[] {
+	const rows = parsePs(output).sort((a, b) => b.rss - a.rss);
+	const guarded = guardedPids(rows, owner.pid);
+	const ours = descendantPids(rows, owner.pid);
+	const groups = new Map<string, { processes: number; cpu: number; rss: number; pids: number[]; quittable: boolean; clam: number }>();
 	for (const r of rows) {
 		const name = appNameOf(r.args);
-		const g = groups.get(name) ?? { processes: 0, cpu: 0, rss: 0, pids: [] };
+		const g = groups.get(name) ?? { processes: 0, cpu: 0, rss: 0, pids: [], quittable: false, clam: 0 };
 		g.processes++;
 		g.cpu += r.cpu;
 		g.rss += r.rss;
 		if (g.pids.length < MAX_PIDS) g.pids.push(r.pid);
+		if (signallable(r, name, owner, guarded) === "yes") g.quittable = true;
+		if (ours.has(r.pid)) g.clam++;
 		groups.set(name, g);
 	}
-	return [...groups].map(([name, g]) => ({ name, processes: g.processes, cpu: Math.round(g.cpu * 10) / 10, memBytes: g.rss * 1024, pids: g.pids }));
+	return [...groups].map(([name, g]) => ({ name, processes: g.processes, cpu: Math.round(g.cpu * 10) / 10, memBytes: g.rss * 1024, pids: g.pids, quittable: g.quittable, clamProcesses: g.clam }));
+}
+
+/** What quitting the app `name` does with a `ps` sample: the processes to signal, and the ones left alone (and why). */
+export function quitPlan(output: string, name: string, owner: ProcessOwner): { found: number; targets: number[]; denied: number; guarded: number } {
+	const rows = parsePs(output);
+	const guarded = guardedPids(rows, owner.pid);
+	const plan = { found: 0, targets: [] as number[], denied: 0, guarded: 0 };
+	for (const r of rows) {
+		if (appNameOf(r.args) !== name) continue;
+		plan.found++;
+		const verdict = signallable(r, name, owner, guarded);
+		if (verdict === "yes") plan.targets.push(r.pid);
+		else if (verdict === "guarded") plan.guarded++;
+		else plan.denied++;
+	}
+	return plan;
 }
 
 export function topApps(apps: AppUsage[]): { byCpu: AppUsage[]; byMemory: AppUsage[] } {

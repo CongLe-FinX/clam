@@ -236,6 +236,16 @@ Preview (`apps/server/src/preview/`, `api/preview.ts`, `auth/preview-token.ts`) 
 
 Not implemented, by design: per-port allow-lists, sharing a preview with non-owners, rewriting app content (the app runs at the root of its own host).
 
+## 5g. Quitting apps from the System page
+
+The System page lists the apps using the most CPU and memory (`GET /system/processes`, from `ps`; app names only, never arguments) and lets the owner quit one: `POST /system/processes/quit { name, force? }` (`apps/server/src/api/system.ts`, `services/system-monitor.ts`, `quitPlan` in `services/system-metrics.ts`). Not part of the mesh: no `/api/v1` route, capabilities do not cover it.
+
+* **By name, from a fresh sample.** The client sends the display name of a row, never process ids; the server runs `ps` again at quit time and signals the processes grouped under that name, so a pid reused since the list was drawn is never hit.
+* **Only what the user could kill anyway, minus what keeps the machine up.** Processes of another user are skipped (unless the node runs as root), and so are the system apps (`launchd`, `kernel_task`, `WindowServer`, `loginwindow`, `systemd`, `init`, `kthreadd`, `Xorg`, `Xwayland`, …), pids 0 and 1, **this server and the whole chain of processes that started it** (its shell, terminal or supervisor). An app made only of such processes has no quit button (`AppUsage.quittable`) and answers `403 not_quittable`.
+* **Gentle first.** `SIGTERM`, then up to 3 s of waiting; processes still alive are reported (`QuitAppResult.running`) and the UI offers *Force quit* (`force: true` → `SIGKILL`). The confirmation warns when processes of the app were started by this server (`AppUsage.clamProcesses`: agent runtimes, terminals, the machine Browser), because their work stops too.
+* **Through the domain it needs a step-up**, like opening a terminal: `403 step_up_required` until the owner re-enters the password (`POST /access/step-up`, 10 min). Loopback needs nothing more than the rest of the loopback UI.
+* **Audit:** `system.quit_app` with `via`, the app name, `force`, the counts and the session id prefix.
+
 ## 6. What may enter Git and handoff artifacts
 
 **Allowed in `.clmesh/` and handoff manifests** (shareable): source, docs, architecture notes, *approved* workspace memory, agent plans, task snapshots, handoff manifests, context indexes (hashes/paths), environment requirements (names of env vars, tool versions).
